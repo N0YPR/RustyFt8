@@ -161,7 +161,7 @@ to_str_mixed_radix_impl!(u32 u64 u128);
 
 #[cfg(test)]
 mod tests {
-    use crate::message_packing::constants::*;
+    use crate::message::constants::*;
 
     use super::*;
 
