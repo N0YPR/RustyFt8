@@ -1,6 +1,6 @@
 use crc::{Algorithm, Crc};
 
-use super::constants::CRC_POLYNOMIAL;
+use crate::constants::CRC_POLYNOMIAL;
 
 const CRC_FT8: Algorithm<u16> = Algorithm {
     width: 14,

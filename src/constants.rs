@@ -14,3 +14,8 @@ pub const FT8_CHAR_TABLE_NUMERIC:&str = "0123456789";
 // 10011101010111
 // 0x2757
 pub const CRC_POLYNOMIAL:u16 = 0x2757;
+
+pub const TONE_COUNT: usize = 8;
+pub const SYMBOL_RATE: f32 = 6.25;
+pub const SAMPLE_RATE: f32 = 12_000.0;
+pub const TONE_SPACING: f32 = 6.25;

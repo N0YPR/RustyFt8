@@ -161,11 +161,12 @@ to_str_mixed_radix_impl!(u32 u64 u128);
 
 #[cfg(test)]
 mod tests {
-    use crate::message::constants::*;
+    use crate::constants::*;
 
     use super::*;
 
     mod from_str_custom_radix {
+
         use super::*;
 
         #[test]

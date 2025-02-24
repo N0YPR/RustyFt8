@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use snafu::prelude::*;
-use super::constants::{FT8_CHAR_TABLE_ALPHANUM, FT8_CHAR_TABLE_ALPHANUM_SPACE, FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH, FT8_CHAR_TABLE_ALPHA_SPACE, FT8_CHAR_TABLE_NUMERIC};
+use crate::constants::*;
+
 use super::radix::ToStrMixedRadix;
 use super::radix::FromMixedRadixStr;
 

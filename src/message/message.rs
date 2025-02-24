@@ -3,9 +3,10 @@ use std::fmt::Display;
 
 use snafu::Snafu;
 
+use crate::constants::FT8_CHAR_TABLE_FULL;
+
 use super::arrl_section::ArrlSection;
 use super::callsign::Callsign;
-use super::constants::*;
 use super::checksum::checksum;
 use super::radix:: {FromStrCustomRadix, ParseRadixStringError};
 use super::report::Report;
