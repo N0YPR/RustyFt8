@@ -2,7 +2,7 @@ use std::{env, vec};
 
 use bitvec::prelude::*;
 use constants::SAMPLE_RATE;
-use encode::{gray::{GrayCode, FT8_GRAY_CODE}, ldpc::{Ldpc, FT8_GENERATOR_HEX_STRINGS}};
+use encode::{gray::{GrayCode, FT8_GRAY_CODE}, ldpc::Ldpc};
 use hound::{WavSpec, WavWriter};
 use message::message::Message;
 use modulation::Modulator;
@@ -13,6 +13,7 @@ mod message;
 mod encode;
 mod modulation;
 mod simulation;
+mod util;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -36,7 +37,7 @@ fn main() {
     let message_plus_checksum = (message.bits() << 14) | message.checksum() as u128;
     println!("Message & Checksum: {:091b}", message_plus_checksum);
 
-    let ldpc = Ldpc::new(&FT8_GENERATOR_HEX_STRINGS);
+    let ldpc = Ldpc::new();
     let parity = ldpc.generate_parity(&message_plus_checksum);
 
     println!("Parity: {:083b}", parity);

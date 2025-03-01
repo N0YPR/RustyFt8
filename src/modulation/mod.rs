@@ -65,6 +65,6 @@ mod tests {
             writer.write_sample(int_sample).unwrap();
         }
 
-        assert!(false);
+        //assert!(false);
     }
 }

@@ -1,9 +1,11 @@
 use std::collections::VecDeque;
 use std::fmt::Display;
-
+use bitvec::prelude::*;
 use snafu::Snafu;
 
 use crate::constants::FT8_CHAR_TABLE_FULL;
+use crate::message::checksum::FT8CRC;
+use crate::util::bitvec_utils::*;
 
 use super::arrl_section::ArrlSection;
 use super::callsign::Callsign;
@@ -14,6 +16,7 @@ use super::serial_number_or_state_or_province::SerialNumberOrStateOrProvince;
 
 #[derive(Debug)]
 pub struct Message {
+    message_bitvec: BitVec<u8, Msb0>,
     packed_bits: u128,
     checksum: u16,
     display_string: String,
@@ -112,6 +115,10 @@ impl Message {
         self.packed_bits
     }
 
+    pub fn message_bits(&self) -> &[u8] {
+        return self.message_bitvec.as_raw_slice();
+    }
+
     pub fn checksum(&self) -> u16 {
         self.checksum
     }
@@ -179,6 +186,7 @@ impl Message {
 
         // pack all the bits together
         let packed_bits:u128;
+        let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
         let message_type:u8;
         if callsign1.is_portable || callsign2.is_portable {
             // EU VHF
@@ -192,6 +200,16 @@ impl Message {
                 (report.packed_bits.into(), 15),
                 (2_u128, 3),
             ]);
+
+            callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+            callsign1.is_portable.pack_into_bitvec(&mut message_bitvec, 1);
+            callsign2.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+            callsign2.is_portable.pack_into_bitvec(&mut message_bitvec, 1);
+            report.is_ack.pack_into_bitvec(&mut message_bitvec, 1);
+            report.packed_bits.pack_into_bitvec(&mut message_bitvec, 15);
+            message_type.pack_into_bitvec(&mut message_bitvec, 3);
+            message_bitvec.align_right();
+
         }
         else {
             // Standard
@@ -205,6 +223,15 @@ impl Message {
                 (report.packed_bits.into(), 15),
                 (1u128, 3),
             ]);
+
+            callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+            callsign1.is_rover.pack_into_bitvec(&mut message_bitvec, 1);
+            callsign2.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+            callsign2.is_rover.pack_into_bitvec(&mut message_bitvec, 1);
+            report.is_ack.pack_into_bitvec(&mut message_bitvec, 1);
+            report.packed_bits.pack_into_bitvec(&mut message_bitvec, 15);
+            message_type.pack_into_bitvec(&mut message_bitvec, 3);
+            message_bitvec.align_right();
         }        
 
         // pack the string
@@ -223,6 +250,7 @@ impl Message {
         let packed_string = format!("{} {} {}", packed_callsign1, packed_callsign2, report.report);
 
         Ok(Message {
+            message_bitvec,
             packed_bits,
             checksum: checksum(packed_bits),
             display_string: packed_string.trim().to_string(),
@@ -337,6 +365,15 @@ impl Message {
             (4u128, 3),
         ]);
 
+        let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
+        h12.pack_into_bitvec(&mut message_bitvec, 12);
+        c58.pack_into_bitvec(&mut message_bitvec, 58);
+        h1.pack_into_bitvec(&mut message_bitvec, 1);
+        r2.pack_into_bitvec(&mut message_bitvec, 2);
+        c1.pack_into_bitvec(&mut message_bitvec, 1);
+        4u8.pack_into_bitvec(&mut message_bitvec, 3);
+        message_bitvec.align_right();
+
         let packed_string:String;
         if message_words[0] == "CQ" {
             packed_string = format!("CQ {}", callsign2.callsign);
@@ -349,6 +386,7 @@ impl Message {
         }
 
         Ok(Message {
+            message_bitvec,
             packed_bits,
             checksum: checksum(packed_bits),
             display_string: packed_string,
@@ -436,12 +474,24 @@ impl Message {
             (serial_or_province.packed_bits.into(), 13),
             (3u128, 3),
         ]);
+        let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
+        thank_you.pack_into_bitvec(&mut message_bitvec, 1);
+        callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+        callsign2.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+        ack.pack_into_bitvec(&mut message_bitvec, 1);
+        report.pack_into_bitvec(&mut message_bitvec, 3);
+        serial_or_province.packed_bits.pack_into_bitvec(&mut message_bitvec, 13);
+        3u8.pack_into_bitvec(&mut message_bitvec, 3);
+        message_bitvec.align_right();
+
+        
 
         let thank_you_message = if thank_you {"TU; "} else {""};
         let ack_message = if ack {"R "} else {""};
         let packed_string = format!("{}{} {} {}{} {}", thank_you_message, callsign1, callsign2, ack_message, report_str, serial_or_province);
 
         Ok(Message {
+            message_bitvec,
             packed_bits,
             checksum: checksum(packed_bits),
             display_string: packed_string,
@@ -504,10 +554,20 @@ impl Message {
             (0u128, 3),
         ]);
 
+        let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
+        callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+        callsign2.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+        callsign3.hashed_10bits.pack_into_bitvec(&mut message_bitvec, 10);
+        report.pack_into_bitvec(&mut message_bitvec, 5);
+        1u8.pack_into_bitvec(&mut message_bitvec, 3);
+        0u8.pack_into_bitvec(&mut message_bitvec, 3);
+        message_bitvec.align_right();
+
         // DXpedition K1ABC RR73; W9XYZ <KH1/KH7Z> -08 
         let packed_string = format!("{} RR73; {} <{}> {}", callsign1, callsign2, callsign3, report_str);
 
         Ok(Message {
+            message_bitvec,
             packed_bits,
             checksum: checksum(packed_bits),
             display_string: packed_string,
@@ -633,12 +693,23 @@ impl Message {
             (sub_type.into(), 3),
             (0u128, 3),
         ]);
+        let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
+        callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+        callsign2.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
+        ack.pack_into_bitvec(&mut message_bitvec, 1);
+        number_transmitters.pack_into_bitvec(&mut message_bitvec, 4);
+        field_day_class.pack_into_bitvec(&mut message_bitvec, 7);
+        sub_type.pack_into_bitvec(&mut message_bitvec, 3);
+        0u8.pack_into_bitvec(&mut message_bitvec, 3);
+        message_bitvec.align_right();
+        
 
         // Field Day    W9XYZ K1ABC R 17B EMA   c28 c28 R1 n4 k3 S7
         let ack_string = if ack {"R "} else {""};
         let packed_string = format!("{callsign1} {callsign2} {ack_string}{number_transmitters_string}{field_day_class_string} {section}");
 
         Ok(Message {
+            message_bitvec,
             packed_bits,
             checksum: checksum(packed_bits),
             display_string: packed_string,
@@ -662,8 +733,14 @@ impl Message {
             (5_u128, 3),
             (0_u128, 3),
         ]);
+        let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
+        value.pack_into_bitvec(&mut message_bitvec, 71);
+        5u8.pack_into_bitvec(&mut message_bitvec, 3);
+        0u8.pack_into_bitvec(&mut message_bitvec, 3);
+        message_bitvec.align_right();
 
         Ok(Message {
+            message_bitvec,
             packed_bits,
             checksum: checksum(packed_bits),
             display_string: message_string.to_owned(),
@@ -696,8 +773,14 @@ impl Message {
             (0u128, 3),
             (0u128, 3)
         ]);
+        let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
+        f71.pack_into_bitvec(&mut message_bitvec, 71);
+        0u8.pack_into_bitvec(&mut message_bitvec, 3);
+        0u8.pack_into_bitvec(&mut message_bitvec, 3);
+        message_bitvec.align_right();
 
         Ok(Message { 
+            message_bitvec,
             display_string: packed_string,
             checksum: checksum(packed_bits),
             packed_bits,
@@ -717,6 +800,8 @@ impl Message {
 
 #[cfg(test)]
 mod tests {
+    use crate::util::bitvec_utils::PackBitvecFieldType;
+
     use super::*;
 
     macro_rules! assert_parse_successfully {
@@ -881,4 +966,5 @@ mod tests {
         assert_parse_successfully!(wsjtx_48, "<KA1ABC> YW18FIFA RR73", "<KA1ABC> YW18FIFA RR73", "3140652123200000264707174620326107553140652730410160050034134266602045713140652");
     }
 
+    
 }
