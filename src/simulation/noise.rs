@@ -5,10 +5,89 @@ use rand_distr::{Distribution, Normal, Uniform};
 
 use biquad::*;
 
+use crate::constants::SAMPLE_RATE;
+
 pub const LOW_CUTOFF_HZ: f32 = 300.0; // SSB low-end
 pub const HIGH_CUTOFF_HZ: f32 = 2700.0; // SSB high-end
 pub const QSB_FREQ_HZ: f32 = 0.2; // Slow fading rate (0.2 Hz = ~5-second cycles)
 pub const FLUTTER_FREQ_HZ: f32 = 20.0; 
+const SSB_BANDWIDTH: f32 = 2500.0; // Typical SSB bandwidth (Hz)
+const S9_DBM: f32 = -73.0;         // S9 level in dBm (50Ω system)
+const IMPEDANCE: f32 = 50.0;       // 50Ω impedance
+
+/// Convert dBm to linear RMS voltage
+pub fn dbm_to_voltage_rms(dbm: f32) -> f32 {
+    let power_watts = 10.0_f32.powf(dbm / 10.0) / 1000.0; // Convert dBm to watts
+    (power_watts * IMPEDANCE).sqrt() // Convert to RMS voltage
+}
+
+/// Compute RMS (Root Mean Square) Power of a signal
+pub fn rms_power(signal: &[f32]) -> f32 {
+    let sum_squares: f32 = signal.iter().map(|&x| x * x).sum();
+    (sum_squares / signal.len() as f32).sqrt()
+}
+
+pub fn mix_waveform(
+    samples: &mut Vec<f32>, 
+    noise_rms: f32,
+    waveform: &Vec<f32>, 
+    start_index: usize, 
+    snr_db: f32
+) {
+    assert!(waveform.len() <= samples.len(), "Waveform must not be longer than samples");
+
+    // Convert FT8-style SNR (dB) to linear scale
+    let snr_linear = 10.0_f32.powf(snr_db / 10.0); // FT8 uses 10 instead of 20
+
+    // Compute desired signal RMS power based on FT8 noise power estimate
+    let desired_signal_rms = (noise_rms / (2500.0 / SAMPLE_RATE as f32)) * snr_linear;
+
+    // Compute current signal RMS power
+    let signal_rms = rms_power(&waveform);
+
+    // Scale the signal to match desired power level
+    let scaling_factor = desired_signal_rms / signal_rms;
+    println!("{}", scaling_factor);
+
+    for (i, &wave_sample) in waveform.iter().enumerate() {
+        let target_index = start_index + i;
+        if target_index < samples.len() {
+            samples[target_index] += wave_sample * scaling_factor;
+        } else {
+            break; // Stop if waveform exceeds the samples length
+        }
+    }
+}
+
+// pub fn generate_white_noise_s9(num_samples: usize) -> Vec<f32> {
+//     // Create a normal distribution with mean 0 and standard deviation 1
+//     let normal = Normal::new(0.0, 1.0).unwrap();
+//     let mut rng = rand::rng();
+
+//     // Create a vector to hold the white noise samples
+//     let mut noise_samples = Vec::with_capacity(num_samples);
+
+//     // Calculate the scaling factor based on the desired S9 power (40 dBm)
+//     let scaling_factor = 10.0_f32.powf(S9_DBM / 20.0); // 40 dBm -> linear scale
+//     println!("generate_white_noise_s9 scaling_factor: {}", scaling_factor);
+
+//     // Generate the white noise samples and scale them
+//     for _ in 0..num_samples {
+//         let noise = normal.sample(&mut rng);
+//         noise_samples.push(noise * scaling_factor); // Scale the noise to the desired amplitude
+//     }
+
+//     noise_samples
+// }
+
+/// Generate Gaussian white noise at S9 level
+pub fn generate_white_noise_s9(samples: usize) -> Vec<f32> {
+    let normal = Normal::new(0.0, 1.0).unwrap();
+    let s3_gain = 0.125; // Adjust gain for S3 level
+    let mut rng = rand::rng();
+
+    (0..samples).map(|_| normal.sample(&mut rng) * s3_gain).collect()
+}
 
 pub fn generate_white_noise(num_samples: usize, sigma: f32) -> Vec<f32> {
     let mut rng = rand::rng();
@@ -103,4 +182,26 @@ pub fn apply_bandpass_filter(samples: &[f32], sample_rate: u32, low_cutoff: f32,
     let mut high_filter = DirectForm2Transposed::<f32>::new(high_pass);
 
     samples.iter().map(|&x| high_filter.run(low_filter.run(x))).collect()
+}
+
+pub fn normalize_signal(signal: &mut [f32]) {
+    // Find the min and max values in the signal
+    let (min_value, max_value) = signal.iter().fold(
+        (f32::INFINITY, f32::NEG_INFINITY),
+        |(min, max), &x| (min.min(x), max.max(x)),
+    );
+
+    // Calculate the scale factor to normalize the signal
+    let scale_factor = if max_value == min_value {
+        1.0 // Avoid division by zero, return signal as is if all values are the same
+    } else {
+        2.0 / (max_value - min_value)
+    };
+
+    let offset = -(max_value + min_value) / (max_value - min_value);
+
+    // Normalize each sample
+    for sample in signal.iter_mut() {
+        *sample = scale_factor * (*sample) + offset;
+    }
 }

@@ -11,6 +11,25 @@ impl AlignBitvec for BitVec<u8, Msb0> {
     }
 }
 
+pub fn bitvec_to_u128(bv: &BitVec<u8, Msb0>, num_bits: usize) -> u128 {
+    assert!(num_bits <= 128, "num_bits must be <= 128");
+    let mut value = 0u128;
+    for bit in &bv[0..num_bits] {
+        value = (value << 1) | (*bit as u128);
+    }
+    value
+}
+
+
+pub trait BitvecToString {
+    fn to_string(&mut self) -> String;
+}
+impl BitvecToString for BitVec<u8, Msb0> {
+    fn to_string(&mut self) -> String {
+        self.iter().map(|b| if *b { '1' } else { '0' }).collect()
+    }
+}
+
 pub trait PackBitvecFieldType {
     fn pack_into_bitvec(&self, bits: &mut BitVec<u8, Msb0>, width: usize);
 }

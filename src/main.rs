@@ -2,7 +2,7 @@ use std::{env, vec};
 
 use bitvec::prelude::*;
 use constants::SAMPLE_RATE;
-use encode::{gray::{GrayCode, FT8_GRAY_CODE}, ldpc::Ldpc};
+//use encode::{gray::{GrayCode, FT8_GRAY_CODE}, ldpc::Ldpc};
 use hound::{WavSpec, WavWriter};
 use message::message::Message;
 use modulation::Modulator;
@@ -10,10 +10,25 @@ use simulation::noise::*;
 
 mod constants;
 mod message;
-mod encode;
 mod modulation;
 mod simulation;
 mod util;
+
+// fn mix_waveform(
+//     samples: &mut Vec<f32>, 
+//     waveform: &Vec<f32>, 
+//     start_index: usize, 
+//     amplitude: f32
+// ) {
+//     for (i, &wave_sample) in waveform.iter().enumerate() {
+//         let target_index = start_index + i;
+//         if target_index < samples.len() {
+//             samples[target_index] += wave_sample * amplitude;
+//         } else {
+//             break; // Stop if waveform exceeds the samples length
+//         }
+//     }
+// }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -25,105 +40,91 @@ fn main() {
     let message_str: &str = &args[1];
 
     let delta_time = 0.0;
+    let carrier_frequency: f32 = 2000.0;
 
     let message = Message::try_from(message_str).unwrap();
 
-    println!("Message: {}", message);
-
-    println!("Message bits: {:077b}", message.bits());
-
-    println!("Checksum: {:014b}", message.checksum());
-
-    let message_plus_checksum = (message.bits() << 14) | message.checksum() as u128;
-    println!("Message & Checksum: {:091b}", message_plus_checksum);
-
-    let ldpc = Ldpc::new();
-    let parity = ldpc.generate_parity(&message_plus_checksum);
-
-    println!("Parity: {:083b}", parity);
-
-    let mut bits = BitVec::<u64, Msb0>::new();
-
-    // push the 77 bits of message msb first
-    for i in (0..77).rev() {
-        bits.push((message.bits() >> i) & 1 != 0);
-    }
-
-    // push th 14 bits of crc
-    for i in (0..14).rev() {
-        bits.push((message.checksum() >> i) & 1 != 0);
-    }
-
-    // push 83 bits of parity
-    for i in (0..83).rev() {
-        bits.push((parity >> i) & 1 != 0);
-    }
-
-    // convert the bits into 3 bit symbols
-    let mut symbols:Vec<u8> = vec![];
-    for chunk in bits.chunks_exact(3) {
-        let value = chunk.load_be::<u8>() & 0b0000_0111;
-        symbols.push(value);
-    }
-    
-    // gray encode
-    let gray = GrayCode::new(&FT8_GRAY_CODE);
-    let gray_encoded_symbols = gray.encode(&symbols);
-
-    // insert costas
-    let costas:Vec<u8> = vec![3,1,4,0,6,5,2];
-    let mut channel_symbols:Vec<u8> = vec![];
-    channel_symbols.extend_from_slice(&costas);
-    channel_symbols.extend_from_slice(&gray_encoded_symbols[0..29]);
-    channel_symbols.extend_from_slice(&costas);
-    channel_symbols.extend_from_slice(&gray_encoded_symbols[29..]);
-    channel_symbols.extend_from_slice(&costas);
-
-    print!("Channel symbols: ");
-    for symbol in channel_symbols.iter() {
-        print!("{}", symbol);
-    }
-    println!();
+    println!("Message: {}", message.display_string);
+    println!("Message Bits: {:077b}", message.message);
+    println!("Crc: {:014b}", message.checksum);
+    println!("Parity: {:083b}", message.parity);
+    let channel_symbols_string:String = message.channel_symbols.iter().map(|b| (b + b'0') as char).collect();
+    println!("Channel Symbols: {}", channel_symbols_string);
 
     let modulator = Modulator::new();
-    let waveform = modulator.modulate(&channel_symbols, 1040.0);
+    let waveform = modulator.modulate(&message.channel_symbols, carrier_frequency);
 
-    // Apply QSB to our signal (Slow Fading)
-    //let waveform = apply_qsb(&waveform, SAMPLE_RATE as u32, QSB_FREQ_HZ);
-
-    // Introduce weak carrier-like fluttering to our signal
-    //let waveform = apply_fluttering(&waveform, SAMPLE_RATE as u32, FLUTTER_FREQ_HZ);
-
+    let mut samples:Vec<f32> = vec![0.0; (SAMPLE_RATE * 15.0) as usize];
+    
     // Calculate noise standard deviation and power
-    let noise_db = 30.0;
-    let noise_sigma = (10.0_f32).powf(noise_db / 20.0);
-    let noise_power = 2500_f32 / SAMPLE_RATE * 2_f32 * noise_sigma * noise_sigma;  // Noise power in 2.5kHz
+    // let noise_db = 30.0;
+    // let noise_sigma = (10.0_f32).powf(noise_db / 20.0);
+    // let noise_power = 2500_f32 / SAMPLE_RATE * 2_f32 * noise_sigma * noise_sigma;  // Noise power in 2.5kHz
+    // println!("noise_sigma: {}", noise_sigma);
 
     // generate white noise
-    let mut signal = generate_white_noise(15 * SAMPLE_RATE as usize, noise_sigma);
-
-    // Calculate signal amplitude
-    let snr = -10_f32;
-    let tx_power = noise_power * 10_f32.powf(snr / 10_f32);
-    let amplitude = (2.0_f32 * tx_power).sqrt();
-
-    // add our waveform
-    //let amplitude = 0.25;
-    let starting_sample = ((0.5 + delta_time) * SAMPLE_RATE) as usize;
-    for i in 0..signal.len() {
-        if i < starting_sample {
-            continue;
-        }
-
-        if i >= waveform.len() {
-            break;
-        }
-
-        signal[i] = signal[i] + waveform[i] * amplitude;
-    }
+    let mut samples = generate_white_noise_s9(15 * SAMPLE_RATE as usize);
 
     // Apply Band-Pass Filter (300 Hz – 2700 Hz)
-    let signal = apply_bandpass_filter(&signal, SAMPLE_RATE as u32, LOW_CUTOFF_HZ, HIGH_CUTOFF_HZ);
+    let mut samples = apply_bandpass_filter(&samples, SAMPLE_RATE as u32, LOW_CUTOFF_HZ, HIGH_CUTOFF_HZ);
+
+    let noise_rms = rms_power(&samples);
+
+    // Calculate signal amplitude
+    // let snr = 0.0_f32;
+    // let tx_power = noise_power * 10_f32.powf(snr / 10_f32);
+    // let amplitude = (2.0_f32 * tx_power).sqrt();
+
+    let starting_sample = ((0.5 + delta_time) * SAMPLE_RATE) as usize;
+
+    mix_waveform(&mut samples, noise_rms, &waveform, starting_sample, -10.0);
+
+    // let mut carrier_frequency = 500.0;
+    // while carrier_frequency < 2800.0 {
+    //     let msg_str = format!("HZ{}", carrier_frequency);
+    //     println!("{}", msg_str);
+    //     let message = Message::try_from(msg_str).unwrap();
+    //     let waveform = modulator.modulate(&message.channel_symbols, carrier_frequency);
+    //     mix_waveform(&mut samples, noise_rms, &waveform, starting_sample, -10.0);
+    //     carrier_frequency += 100.0;
+    // }
+    // normalize_signal(&mut samples);
+
+    // // Apply QSB to our signal (Slow Fading)
+    // //let waveform = apply_qsb(&waveform, SAMPLE_RATE as u32, QSB_FREQ_HZ);
+
+    // // Introduce weak carrier-like fluttering to our signal
+    // //let waveform = apply_fluttering(&waveform, SAMPLE_RATE as u32, FLUTTER_FREQ_HZ);
+
+    // // Calculate noise standard deviation and power
+    // let noise_db = 30.0;
+    // let noise_sigma = (10.0_f32).powf(noise_db / 20.0);
+    // let noise_power = 2500_f32 / SAMPLE_RATE * 2_f32 * noise_sigma * noise_sigma;  // Noise power in 2.5kHz
+
+    // // generate white noise
+    // let mut signal = generate_white_noise(15 * SAMPLE_RATE as usize, noise_sigma);
+
+    // // Calculate signal amplitude
+    // let snr = -10_f32;
+    // let tx_power = noise_power * 10_f32.powf(snr / 10_f32);
+    // let amplitude = (2.0_f32 * tx_power).sqrt();
+
+    // // add our waveform
+    // //let amplitude = 0.25;
+    // let starting_sample = ((0.5 + delta_time) * SAMPLE_RATE) as usize;
+    // for i in 0..signal.len() {
+    //     if i < starting_sample {
+    //         continue;
+    //     }
+
+    //     if i >= waveform.len() {
+    //         break;
+    //     }
+
+    //     signal[i] = signal[i] + waveform[i] * amplitude;
+    // }
+
+    
 
     
     let wavspec = WavSpec {
@@ -134,7 +135,7 @@ fn main() {
     };
     let mut writer = WavWriter::create("output.wav", wavspec).unwrap();
 
-    for &sample in &signal {
+    for &sample in &samples {
         let int_sample = (sample * i16::MAX as f32) as i16;
         writer.write_sample(int_sample).unwrap();
     }

@@ -4,24 +4,26 @@ use bitvec::prelude::*;
 use snafu::Snafu;
 
 use crate::constants::FT8_CHAR_TABLE_FULL;
-use crate::message::checksum::FT8CRC;
 use crate::util::bitvec_utils::*;
 
 use super::arrl_section::ArrlSection;
 use super::callsign::Callsign;
 use super::checksum::checksum;
+use super::gray::{GrayCode, FT8_GRAY_CODE};
+use super::ldpc::generate_parity;
 use super::radix:: {FromStrCustomRadix, ParseRadixStringError};
 use super::report::Report;
 use super::serial_number_or_state_or_province::SerialNumberOrStateOrProvince;
 
 #[derive(Debug)]
 pub struct Message {
-    message_bitvec: BitVec<u8, Msb0>,
-    packed_bits: u128,
-    checksum: u16,
-    display_string: String,
-    message_type: u8,
-    message_subtype: u8,
+    pub message: u128,
+    pub checksum: u16,
+    pub parity: u128,
+    pub channel_symbols: Vec<u8>,
+    pub display_string: String,
+    pub message_type: u8,
+    pub message_subtype: u8,
 }
 
 impl Display for Message {
@@ -104,23 +106,9 @@ impl TryFrom<String> for Message {
     }
 }
 
-impl From<Message> for u128 {
-    fn from(value: Message) -> Self {
-        return value.packed_bits;
-    }
-}
-
 impl Message {
-    pub fn bits(&self) -> u128 {
-        self.packed_bits
-    }
-
-    pub fn message_bits(&self) -> &[u8] {
-        return self.message_bitvec.as_raw_slice();
-    }
-
-    pub fn checksum(&self) -> u16 {
-        self.checksum
+    pub fn message_type(&self) -> u8 {
+        self.message_type
     }
 
     fn try_parse_standard_report(deq:&mut VecDeque<&str>) -> Result<Report, MessageParseError> {
@@ -185,21 +173,12 @@ impl Message {
         }
 
         // pack all the bits together
-        let packed_bits:u128;
+        let message:u128;
         let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
         let message_type:u8;
         if callsign1.is_portable || callsign2.is_portable {
             // EU VHF
             message_type = 2;
-            packed_bits = Self::pack_bits(&[
-                (callsign1.packed_28bits.into(), 28),
-                (callsign1.is_portable.into(), 1),
-                (callsign2.packed_28bits.into(), 28),
-                (callsign2.is_portable.into(), 1),
-                (report.is_ack.into(), 1),
-                (report.packed_bits.into(), 15),
-                (2_u128, 3),
-            ]);
 
             callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
             callsign1.is_portable.pack_into_bitvec(&mut message_bitvec, 1);
@@ -208,21 +187,10 @@ impl Message {
             report.is_ack.pack_into_bitvec(&mut message_bitvec, 1);
             report.packed_bits.pack_into_bitvec(&mut message_bitvec, 15);
             message_type.pack_into_bitvec(&mut message_bitvec, 3);
-            message_bitvec.align_right();
-
         }
         else {
             // Standard
             message_type = 1;
-            packed_bits = Self::pack_bits(&[
-                (callsign1.packed_28bits.into(), 28),
-                (callsign1.is_rover.into(), 1),
-                (callsign2.packed_28bits.into(), 28),
-                (callsign2.is_rover.into(), 1),
-                (report.is_ack.into(), 1),
-                (report.packed_bits.into(), 15),
-                (1u128, 3),
-            ]);
 
             callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
             callsign1.is_rover.pack_into_bitvec(&mut message_bitvec, 1);
@@ -231,8 +199,8 @@ impl Message {
             report.is_ack.pack_into_bitvec(&mut message_bitvec, 1);
             report.packed_bits.pack_into_bitvec(&mut message_bitvec, 15);
             message_type.pack_into_bitvec(&mut message_bitvec, 3);
-            message_bitvec.align_right();
-        }        
+        }
+        let message = bitvec_to_u128(&message_bitvec, 77);    
 
         // pack the string
         let packed_callsign1:String;
@@ -249,10 +217,15 @@ impl Message {
         }
         let packed_string = format!("{} {} {}", packed_callsign1, packed_callsign2, report.report);
 
+        let checksum = checksum(message);
+        let parity = generate_parity(message, checksum);
+        let channel_symbols = channel_symbols(message, checksum, parity);
+
         Ok(Message {
-            message_bitvec,
-            packed_bits,
-            checksum: checksum(packed_bits),
+            message,
+            checksum,
+            parity,
+            channel_symbols,
             display_string: packed_string.trim().to_string(),
             message_type: message_type,
             message_subtype: 0
@@ -356,15 +329,6 @@ impl Message {
         }
 
         // pack all the bits together
-        let packed_bits = Self::pack_bits(&[
-            (h12.into(), 12),
-            (c58.into(), 58),
-            (h1.into(), 1),
-            (r2.into(), 2),
-            (c1.into(), 1),
-            (4u128, 3),
-        ]);
-
         let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
         h12.pack_into_bitvec(&mut message_bitvec, 12);
         c58.pack_into_bitvec(&mut message_bitvec, 58);
@@ -372,7 +336,7 @@ impl Message {
         r2.pack_into_bitvec(&mut message_bitvec, 2);
         c1.pack_into_bitvec(&mut message_bitvec, 1);
         4u8.pack_into_bitvec(&mut message_bitvec, 3);
-        message_bitvec.align_right();
+        let message = bitvec_to_u128(&message_bitvec, 77);
 
         let packed_string:String;
         if message_words[0] == "CQ" {
@@ -385,10 +349,15 @@ impl Message {
             }
         }
 
+        let checksum = checksum(message);
+        let parity = generate_parity(message, checksum);
+        let channel_symbols = channel_symbols(message, checksum, parity);
+
         Ok(Message {
-            message_bitvec,
-            packed_bits,
-            checksum: checksum(packed_bits),
+            message,
+            parity,
+            checksum,
+            channel_symbols,
             display_string: packed_string,
             message_type: 4,
             message_subtype: 0
@@ -465,15 +434,6 @@ impl Message {
         };
 
         // pack all the bits together
-        let packed_bits = Self::pack_bits(&[
-            (thank_you.into(), 1),
-            (callsign1.packed_28bits.into(), 28),
-            (callsign2.packed_28bits.into(), 28),
-            (ack.into(), 1),
-            (report.into(), 3),
-            (serial_or_province.packed_bits.into(), 13),
-            (3u128, 3),
-        ]);
         let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
         thank_you.pack_into_bitvec(&mut message_bitvec, 1);
         callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
@@ -482,18 +442,21 @@ impl Message {
         report.pack_into_bitvec(&mut message_bitvec, 3);
         serial_or_province.packed_bits.pack_into_bitvec(&mut message_bitvec, 13);
         3u8.pack_into_bitvec(&mut message_bitvec, 3);
-        message_bitvec.align_right();
-
-        
+        let message = bitvec_to_u128(&message_bitvec, 77);    
 
         let thank_you_message = if thank_you {"TU; "} else {""};
         let ack_message = if ack {"R "} else {""};
         let packed_string = format!("{}{} {} {}{} {}", thank_you_message, callsign1, callsign2, ack_message, report_str, serial_or_province);
 
+        let checksum = checksum(message);
+        let parity = generate_parity(message, checksum);
+        let channel_symbols = channel_symbols(message, checksum, parity);
+
         Ok(Message {
-            message_bitvec,
-            packed_bits,
-            checksum: checksum(packed_bits),
+            message,
+            checksum,
+            parity,
+            channel_symbols,
             display_string: packed_string,
             message_type: 3,
             message_subtype: 0
@@ -545,15 +508,6 @@ impl Message {
             Err(_) => { return Err(MessageParseError::InvalidMessage); }
         };
 
-        let packed_bits = Self::pack_bits(&[
-            (callsign1.packed_28bits.into(), 28),
-            (callsign2.packed_28bits.into(), 28),
-            (callsign3.hashed_10bits.into(), 10),
-            (report.into(), 5),
-            (1u128, 3),
-            (0u128, 3),
-        ]);
-
         let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
         callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
         callsign2.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
@@ -561,15 +515,20 @@ impl Message {
         report.pack_into_bitvec(&mut message_bitvec, 5);
         1u8.pack_into_bitvec(&mut message_bitvec, 3);
         0u8.pack_into_bitvec(&mut message_bitvec, 3);
-        message_bitvec.align_right();
+        let message = bitvec_to_u128(&message_bitvec, 77);    
 
         // DXpedition K1ABC RR73; W9XYZ <KH1/KH7Z> -08 
         let packed_string = format!("{} RR73; {} <{}> {}", callsign1, callsign2, callsign3, report_str);
 
+        let checksum = checksum(message);
+        let parity = generate_parity(message, checksum);
+        let channel_symbols = channel_symbols(message, checksum, parity);
+
         Ok(Message {
-            message_bitvec,
-            packed_bits,
-            checksum: checksum(packed_bits),
+            message,
+            checksum,
+            parity,
+            channel_symbols,
             display_string: packed_string,
             message_type: 0,
             message_subtype: 1
@@ -683,35 +642,36 @@ impl Message {
             Err(_) => { return Err(MessageParseError::InvalidMessage); }
         };
 
-        let packed_bits = Self::pack_bits(&[
-            (callsign1.packed_28bits.into(), 28),
-            (callsign2.packed_28bits.into(), 28),
-            (ack.into(), 1),
-            (number_transmitters.into(), 4),
-            (field_day_class.into(), 3),
-            (section.packed_bits.into(), 7),
-            (sub_type.into(), 3),
-            (0u128, 3),
-        ]);
+        // c28 c28 R1 n4 k3 S7
+        // c28 Standard callsign, CQ, DE, QRZ, or 22-bit hash
+        // R1 R
+        // n4 Number of transmitters: 1-16, 17-32
+        // k3 Field Day Class: A, B, ... F
+        // S7 ARRL/RAC Section
         let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
         callsign1.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
         callsign2.packed_28bits.pack_into_bitvec(&mut message_bitvec, 28);
         ack.pack_into_bitvec(&mut message_bitvec, 1);
         number_transmitters.pack_into_bitvec(&mut message_bitvec, 4);
-        field_day_class.pack_into_bitvec(&mut message_bitvec, 7);
+        field_day_class.pack_into_bitvec(&mut message_bitvec, 3);
+        section.packed_bits.pack_into_bitvec(&mut message_bitvec, 7);
         sub_type.pack_into_bitvec(&mut message_bitvec, 3);
         0u8.pack_into_bitvec(&mut message_bitvec, 3);
-        message_bitvec.align_right();
-        
+        let message = bitvec_to_u128(&message_bitvec, 77);    
 
         // Field Day    W9XYZ K1ABC R 17B EMA   c28 c28 R1 n4 k3 S7
         let ack_string = if ack {"R "} else {""};
         let packed_string = format!("{callsign1} {callsign2} {ack_string}{number_transmitters_string}{field_day_class_string} {section}");
 
+        let checksum = checksum(message);
+        let parity = generate_parity(message, checksum);
+        let channel_symbols = channel_symbols(message, checksum, parity);
+
         Ok(Message {
-            message_bitvec,
-            packed_bits,
-            checksum: checksum(packed_bits),
+            message,
+            checksum,
+            parity,
+            channel_symbols,
             display_string: packed_string,
             message_type: 0,
             message_subtype: sub_type
@@ -728,21 +688,21 @@ impl Message {
             Err(_) => { return Err(MessageParseError::InvalidMessage); }
         };
 
-        let packed_bits = Self::pack_bits(&[
-            (value.into(), 71),
-            (5_u128, 3),
-            (0_u128, 3),
-        ]);
         let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
         value.pack_into_bitvec(&mut message_bitvec, 71);
         5u8.pack_into_bitvec(&mut message_bitvec, 3);
         0u8.pack_into_bitvec(&mut message_bitvec, 3);
-        message_bitvec.align_right();
+        let message = bitvec_to_u128(&message_bitvec, 77);    
+
+        let checksum = checksum(message);
+        let parity = generate_parity(message, checksum);
+        let channel_symbols = channel_symbols(message, checksum, parity);
 
         Ok(Message {
-            message_bitvec,
-            packed_bits,
-            checksum: checksum(packed_bits),
+            message,
+            checksum,
+            parity,
+            channel_symbols,
             display_string: message_string.to_owned(),
             message_type: 0,
             message_subtype: 5,
@@ -768,34 +728,50 @@ impl Message {
         };
 
         // pack all the bits together
-        let packed_bits = Self::pack_bits(&[
-            (f71, 71),
-            (0u128, 3),
-            (0u128, 3)
-        ]);
         let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
         f71.pack_into_bitvec(&mut message_bitvec, 71);
         0u8.pack_into_bitvec(&mut message_bitvec, 3);
         0u8.pack_into_bitvec(&mut message_bitvec, 3);
-        message_bitvec.align_right();
+        let message = bitvec_to_u128(&message_bitvec, 77);
+
+        let checksum = checksum(message);
+        let parity = generate_parity(message, checksum);
+        let channel_symbols = channel_symbols(message, checksum, parity);
 
         Ok(Message { 
-            message_bitvec,
+            message,
             display_string: packed_string,
-            checksum: checksum(packed_bits),
-            packed_bits,
+            checksum,
+            parity,
+            channel_symbols,
             message_type: 0,
             message_subtype: 0,
         })
     }
+}
 
-    fn pack_bits(fields_and_widths: &[(u128, u32)]) -> u128 {
-        let mut bits:u128 = 0;
-        for (field, width) in fields_and_widths {
-            bits = (bits << width) | *field;
-        }
-        bits
+fn channel_symbols(message:u128, crc:u16, parity:u128) -> Vec<u8> {
+    let mut bv:BitVec<u8, Msb0> = BitVec::new();
+    message.pack_into_bitvec(&mut bv, 77);
+    crc.pack_into_bitvec(&mut bv, 14);
+    parity.pack_into_bitvec(&mut bv, 83);
+    // convert the bits into 3 bit symbols
+    let mut symbols:Vec<u8> = vec![];
+    for chunk in bv.chunks_exact(3) {
+        let value = chunk.load_be::<u8>() & 0b0000_0111;
+        symbols.push(value);
     }
+    let gray = GrayCode::new(&FT8_GRAY_CODE);
+    let gray_coded_symbols = gray.encode(&symbols);
+    let costas:Vec<u8> = vec![3,1,4,0,6,5,2];
+    let mut channel_symbols:Vec<u8> = Vec::new();
+    channel_symbols.extend(costas.iter());
+    channel_symbols.extend_from_slice(&gray_coded_symbols[..29]);
+    channel_symbols.extend(costas.iter());
+    channel_symbols.extend_from_slice(&gray_coded_symbols[29..]);
+    channel_symbols.extend(costas.iter());
+
+    channel_symbols
 }
 
 #[cfg(test)]
@@ -818,39 +794,38 @@ mod tests {
 
                     #[test]
                     fn packed_bits_are_correct() {
-                        let bits:u128 = Message::try_from($message).unwrap().into();
-                        assert_eq!(bits, extract_message_bits_from_symbols_str($channel_symbols_str));
+                        let message = Message::try_from($message).unwrap().message;
+                        assert_eq!(message, extract_message_from_symbols_str($channel_symbols_str));
                     }
 
                     #[test]
-                    fn message_type_is_correct() {
-                        let bits:u128 = Message::try_from($message).unwrap().into();
-                        assert_eq!(bits & 0b111u128, extract_message_bits_from_symbols_str($channel_symbols_str) & 0b111u128);   
+                    fn crc_is_correct() {
+                        let message = Message::try_from($message).unwrap();
+                        let crc = message.checksum;
+
+                        assert_eq!(crc, extract_crc_bits_from_symbols_str($channel_symbols_str));
                     }
 
                     #[test]
-                    fn message_subtype_is_correct_if_applicable() {
-                        let expected_bits = extract_message_bits_from_symbols_str($channel_symbols_str);
-                        let expected_type = expected_bits & 0b111u128;
-
-                        if expected_type == 0b000 {
-                            let expected_subtype = (expected_bits >> 3) & 0b111u128;
-
-                            let bits:u128 = Message::try_from($message).unwrap().into();
-                            let actual_subtype = (bits >> 3) & 0b111u128;
-
-                            assert_eq!(expected_subtype, actual_subtype);
-                        }
-
+                    fn parity_is_correct() {
+                        let message = Message::try_from($message).unwrap();
+                        assert_eq!(message.parity, extract_parity_from_symbols_str($channel_symbols_str));
                     }
 
+                    #[test]
+                    fn channel_symbols_are_correct() {
+                        let message = Message::try_from($message).unwrap();
+                        let channel_symbols:String = message.channel_symbols.iter().map(|b| (b + b'0') as char).collect();
+                        assert_eq!(channel_symbols, $channel_symbols_str);
+                    }
                 }
             }
         }
     }
 
     mod wsjtx_tests {
-        use crate::encode::gray::{GrayCode, FT8_GRAY_CODE};
+
+        use crate::message::gray::{GrayCode, FT8_GRAY_CODE};
 
         use super::*;
 
@@ -872,19 +847,22 @@ mod tests {
             gray_decoded_symbols
         }
 
-        fn extract_message_bits_from_symbols_str(symbols_str: &str) -> u128 {
+        fn extract_message_from_symbols_str(symbols_str: &str) -> u128 {
             let symbols = extract_gray_decoded_message_symbols_from_symbols_str(symbols_str);
-            
-            // want the 0..77 bits
-            let mut bits: u128 = 0;
+
+            let mut bitvec: BitVec<u8, Msb0> = BitVec::new();
             for &symbol in symbols.iter().take(26) {
-                let lowest_three_bits = symbol & 0b111;
-                bits = bits << 3;
-                bits |= lowest_three_bits as u128;
+                for i in (0..3).rev() { // Extract bits from most significant to least
+                    let bit = (symbol >> i) & 1 != 0; // Convert to boolean
+                    bitvec.push(bit);
+                }
             }
-            bits = (bits >> 1) & ((1_u128 << 77) - 1);
-            
-            bits
+            // remove the very last bit since it was extra... 3*26=78.. only needed 77
+            bitvec.remove(bitvec.len()-1);
+
+            let message = bitvec_to_u128(&bitvec, 77);
+
+            message
         }
 
         fn extract_crc_bits_from_symbols_str(symbols_str: &str) -> u16 {
@@ -899,6 +877,25 @@ mod tests {
             crc_bits = (crc_bits >> 2) & 0b11111111111111;
             
             crc_bits
+        }
+
+        fn extract_parity_from_symbols_str(symbols_str: &str) -> u128 {
+            let symbols = extract_gray_decoded_message_symbols_from_symbols_str(symbols_str);
+    
+            // crc_bits
+            // codeword is 174 bits long, need the last 83bits
+            let mut bitvec:BitVec<u8, Msb0> = BitVec::new();
+            for &symbol in symbols.iter() {
+                symbol.pack_into_bitvec(&mut bitvec, 3);
+            }
+            let parity_bits = &bitvec[91..];
+    
+            let mut parity = 0u128;
+            for bit in parity_bits {
+                parity = (parity << 1) | (*bit as u128);
+            }
+    
+            parity
         }
 
         // all of these tests are from wsjtx source code
