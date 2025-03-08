@@ -46,6 +46,7 @@ impl GrayCode {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use crate::message::gray::GrayCode;
 
