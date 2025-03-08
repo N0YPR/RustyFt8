@@ -19,6 +19,7 @@ pub fn amplitude_shaping(samples: &[f32], sample_rate: f32, symbol_rate:f32) -> 
     return samples;
 }
 
+#[cfg(test)]
 mod tests {
     use plotpy::{Curve, Plot, StrError};
     use super::*;
