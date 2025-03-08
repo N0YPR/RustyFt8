@@ -1,10 +1,9 @@
 use std::fmt::Display;
 use snafu::prelude::*;
+use crate::constants::{FT8_CHAR_TABLE_GRIDSQUARE_ALPHA, FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER, FT8_CHAR_TABLE_NUMERIC};
+
 use super::radix::{FromMixedRadixStr, ToStrMixedRadix};
 
-const CHAR_TABLE_ALPHA_UPPER:&str = "ABCDEFGHIJKLMNOPQR";
-const CHAR_TABLE_ALPHA_LOWER:&str = "abcdefghijklmnopqrstuvwx";
-const CHAR_TABLE_NUMERIC:&str = "0123456789";
 const MAX_GRID_4:u32 = 32400;
 const OTHER_REPORTS: [&str; 4] = ["", "RRR", "RR73", "73"];
 
@@ -37,10 +36,10 @@ impl Report {
         // 4-char reports
         if value <= MAX_GRID_4 {
             let radix_tables = [
-                CHAR_TABLE_ALPHA_UPPER,
-                CHAR_TABLE_ALPHA_UPPER,
-                CHAR_TABLE_NUMERIC,
-                CHAR_TABLE_NUMERIC
+                FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+                FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+                FT8_CHAR_TABLE_NUMERIC,
+                FT8_CHAR_TABLE_NUMERIC
             ];
             grid = match value.to_str_mixed_radix(&radix_tables) {
                 Ok(v) => v,
@@ -104,12 +103,12 @@ impl Report {
         let other_bits = 0;
 
         let radix_tables = [
-            CHAR_TABLE_ALPHA_UPPER,
-            CHAR_TABLE_ALPHA_UPPER,
-            CHAR_TABLE_NUMERIC,
-            CHAR_TABLE_NUMERIC,
-            CHAR_TABLE_ALPHA_LOWER,
-            CHAR_TABLE_ALPHA_LOWER
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+            FT8_CHAR_TABLE_NUMERIC,
+            FT8_CHAR_TABLE_NUMERIC,
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER,
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER
         ];
         grid = match value.to_str_mixed_radix(&radix_tables) {
             Ok(v) => v,
@@ -213,10 +212,10 @@ fn try_from_location(location:&str) -> Result<Report, InvalidStringError> {
     let packed_bits:u32;
     if is_g15 {
         let radix_tables = [
-            CHAR_TABLE_ALPHA_UPPER,
-            CHAR_TABLE_ALPHA_UPPER,
-            CHAR_TABLE_NUMERIC,
-            CHAR_TABLE_NUMERIC
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+            FT8_CHAR_TABLE_NUMERIC,
+            FT8_CHAR_TABLE_NUMERIC
         ];
         packed_bits = match u32::from_mixed_radix_str(location_to_parse, &radix_tables) {
             Ok(value) => value,
@@ -226,12 +225,12 @@ fn try_from_location(location:&str) -> Result<Report, InvalidStringError> {
         };
     } else if is_g25 {
         let radix_tables = [
-            CHAR_TABLE_ALPHA_UPPER,
-            CHAR_TABLE_ALPHA_UPPER,
-            CHAR_TABLE_NUMERIC,
-            CHAR_TABLE_NUMERIC,
-            CHAR_TABLE_ALPHA_LOWER,
-            CHAR_TABLE_ALPHA_LOWER
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+            FT8_CHAR_TABLE_NUMERIC,
+            FT8_CHAR_TABLE_NUMERIC,
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER,
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER
         ];
         packed_bits = match u32::from_mixed_radix_str(location_to_parse, &radix_tables) {
             Ok(value) => value,
