@@ -366,9 +366,7 @@ impl Ft8_Ldpc {
 
 #[cfg(test)]
 mod tests {
-
-
-    use crate::{constants::FT8_GRAY_CODE, message::{checksum::checksum, gray::GrayCode}};
+    use crate::message::{checksum::checksum, gray::GrayCode};
 
     use super::*;
 
