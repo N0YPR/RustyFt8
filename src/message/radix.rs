@@ -73,8 +73,8 @@ macro_rules! from_mixed_radix_str_impl {
                     return Err(ParseRadixStringError::EmptyString);
                 }
         
-                if input.len() > radix_tables.len() {
-                    return Err(ParseRadixStringError::InvalidRadixTable);
+                if input.len() != radix_tables.len() {
+                    return Err(ParseRadixStringError::LengthMismatch);
                 }
         
                 // measure the length of each of the radix tables
@@ -233,7 +233,13 @@ mod tests {
         #[test]
         fn input_longer_than_radix_tables_returns_error() {
             let radix_tables = ["01", "ABC"];
-            assert!(matches!(u32::from_mixed_radix_str("123", &radix_tables), Err(ParseRadixStringError::InvalidRadixTable)));
+            assert!(matches!(u32::from_mixed_radix_str("123", &radix_tables), Err(ParseRadixStringError::LengthMismatch)));
+        }
+
+        #[test]
+        fn input_shorter_than_radix_tables_returns_error() {
+            let radix_tables = ["01", "A"];
+            assert!(matches!(u32::from_mixed_radix_str("123", &radix_tables), Err(ParseRadixStringError::LengthMismatch)));
         }
 
         #[test]
