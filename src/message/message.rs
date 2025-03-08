@@ -21,9 +21,7 @@ pub struct Message {
     pub checksum: u16,
     pub parity: u128,
     pub channel_symbols: Vec<u8>,
-    pub display_string: String,
-    pub message_type: u8,
-    pub message_subtype: u8,
+    pub display_string: String
 }
 
 impl Display for Message {
@@ -107,10 +105,6 @@ impl TryFrom<String> for Message {
 }
 
 impl Message {
-    pub fn message_type(&self) -> u8 {
-        self.message_type
-    }
-
     fn try_parse_standard_report(deq:&mut VecDeque<&str>) -> Result<Report, MessageParseError> {
         if let Some(word) = deq.pop_front() {
             let word_to_parse:String;
@@ -173,7 +167,6 @@ impl Message {
         }
 
         // pack all the bits together
-        let message:u128;
         let mut message_bitvec:BitVec<u8, Msb0> = BitVec::new();
         let message_type:u8;
         if callsign1.is_portable || callsign2.is_portable {
@@ -226,9 +219,7 @@ impl Message {
             checksum,
             parity,
             channel_symbols,
-            display_string: packed_string.trim().to_string(),
-            message_type: message_type,
-            message_subtype: 0
+            display_string: packed_string.trim().to_string()
         })
     }
 
@@ -358,9 +349,7 @@ impl Message {
             parity,
             checksum,
             channel_symbols,
-            display_string: packed_string,
-            message_type: 4,
-            message_subtype: 0
+            display_string: packed_string
         })
     }
     
@@ -457,9 +446,7 @@ impl Message {
             checksum,
             parity,
             channel_symbols,
-            display_string: packed_string,
-            message_type: 3,
-            message_subtype: 0
+            display_string: packed_string
         })
     }
 
@@ -529,9 +516,7 @@ impl Message {
             checksum,
             parity,
             channel_symbols,
-            display_string: packed_string,
-            message_type: 0,
-            message_subtype: 1
+            display_string: packed_string
         })
     }
 
@@ -672,9 +657,7 @@ impl Message {
             checksum,
             parity,
             channel_symbols,
-            display_string: packed_string,
-            message_type: 0,
-            message_subtype: sub_type
+            display_string: packed_string
         })
     }
 
@@ -703,9 +686,7 @@ impl Message {
             checksum,
             parity,
             channel_symbols,
-            display_string: message_string.to_owned(),
-            message_type: 0,
-            message_subtype: 5,
+            display_string: message_string.to_owned()
         })
     }
 
@@ -743,9 +724,7 @@ impl Message {
             display_string: packed_string,
             checksum,
             parity,
-            channel_symbols,
-            message_type: 0,
-            message_subtype: 0,
+            channel_symbols
         })
     }
 }
@@ -825,7 +804,7 @@ mod tests {
 
     mod wsjtx_tests {
 
-        use crate::message::gray::{GrayCode};
+        use crate::message::gray::GrayCode;
 
         use super::*;
 
