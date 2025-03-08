@@ -368,7 +368,7 @@ impl Ft8_Ldpc {
 mod tests {
 
 
-    use crate::message::{checksum::checksum, gray::{GrayCode, FT8_GRAY_CODE}};
+    use crate::{constants::FT8_GRAY_CODE, message::{checksum::checksum, gray::GrayCode}};
 
     use super::*;
 
@@ -384,7 +384,7 @@ mod tests {
                 .expect("Input contains invalid characters") as u8)
             .collect();
 
-        let gray = GrayCode::new(&FT8_GRAY_CODE);
+        let gray = GrayCode::new();
         let gray_decoded_symbols = gray.decode(&symbols);
 
         gray_decoded_symbols

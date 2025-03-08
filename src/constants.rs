@@ -17,6 +17,8 @@ pub const FT8_CHAR_TABLE_NUMERIC:&str = "0123456789";
 // 0x2757
 pub const CRC_POLYNOMIAL:u16 = 0x2757;
 
+pub const FT8_GRAY_CODE: [u8; 8] = [0, 1, 3, 2, 5, 6, 4, 7];
+
 pub const TONE_COUNT: usize = 8;
 pub const SYMBOL_RATE: f32 = 6.25;
 pub const SAMPLE_RATE: f32 = 12_000.0;

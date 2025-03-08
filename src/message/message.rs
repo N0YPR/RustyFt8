@@ -9,7 +9,7 @@ use crate::util::bitvec_utils::*;
 use super::arrl_section::ArrlSection;
 use super::callsign::Callsign;
 use super::checksum::checksum;
-use super::gray::{GrayCode, FT8_GRAY_CODE};
+use super::gray::GrayCode;
 use super::ldpc::generate_parity;
 use super::radix:: {FromStrCustomRadix, ParseRadixStringError};
 use super::report::Report;
@@ -761,7 +761,7 @@ fn channel_symbols(message:u128, crc:u16, parity:u128) -> Vec<u8> {
         let value = chunk.load_be::<u8>() & 0b0000_0111;
         symbols.push(value);
     }
-    let gray = GrayCode::new(&FT8_GRAY_CODE);
+    let gray = GrayCode::new();
     let gray_coded_symbols = gray.encode(&symbols);
     let costas:Vec<u8> = vec![3,1,4,0,6,5,2];
     let mut channel_symbols:Vec<u8> = Vec::new();
@@ -825,7 +825,7 @@ mod tests {
 
     mod wsjtx_tests {
 
-        use crate::message::gray::{GrayCode, FT8_GRAY_CODE};
+        use crate::message::gray::{GrayCode};
 
         use super::*;
 
@@ -841,7 +841,7 @@ mod tests {
                     .expect("Input contains invalid characters") as u8)
                 .collect();
 
-            let gray = GrayCode::new(&FT8_GRAY_CODE);
+            let gray = GrayCode::new();
             let gray_decoded_symbols = gray.decode(&symbols);
 
             gray_decoded_symbols
