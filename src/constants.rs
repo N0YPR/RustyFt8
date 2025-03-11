@@ -23,3 +23,5 @@ pub const TONE_COUNT: usize = 8;
 pub const SYMBOL_RATE: f32 = 6.25;
 pub const SAMPLE_RATE: f32 = 12_000.0;
 pub const TONE_SPACING: f32 = 6.25;
+pub const CHANNEL_SYMBOLS_COUNT: usize = 79;
+pub const FT8_COSTAS: [u8; 7] = [3,1,4,0,6,5,2];

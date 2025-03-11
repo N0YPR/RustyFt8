@@ -4,7 +4,7 @@ use bitvec::prelude::*;
 use constants::SAMPLE_RATE;
 //use encode::{gray::{GrayCode, FT8_GRAY_CODE}, ldpc::Ldpc};
 use hound::{WavSpec, WavWriter};
-use message::message::Message;
+use message::Message;
 use modulation::Modulator;
 use simulation::noise::*;
 

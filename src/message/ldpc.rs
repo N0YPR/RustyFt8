@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use bitvec::prelude::*;
 
-use crate::{message::message::Message, util::bitvec_utils::{bitvec_to_u128, BitvecToString, PackBitvecFieldType}};
+use crate::{util::bitvec_utils::{bitvec_to_u128, BitvecToString, PackBitvecFieldType}};
 
 pub fn generate_parity(message: u128, crc: u16) -> u128 {
     let mut bv:BitVec<u8, Msb0> = BitVec::new();
@@ -366,7 +366,7 @@ impl Ft8_Ldpc {
 
 #[cfg(test)]
 mod tests {
-    use crate::message::{checksum::checksum, gray::GrayCode};
+    use crate::message::{checksum::checksum, gray::GrayCode, Message};
 
     use super::*;
 
