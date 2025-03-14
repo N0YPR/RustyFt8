@@ -40,7 +40,29 @@ impl ArrlSection {
             });
         }
 
-        todo!()
+        Err(ParseArrlSectionError {
+            value: string_value.to_string(),
+        })
+    }
+
+    pub fn from_packed_bits(packed_bits: u16) -> Result<Self, ParseArrlSectionError> {
+        if packed_bits == 0 {
+            return Err(ParseArrlSectionError {
+                value: "0".to_string(),
+            });
+        }
+
+        let index = packed_bits - 1;
+        if index as usize >= VALUE_TABLE.len() {
+            return Err(ParseArrlSectionError {
+                value: packed_bits.to_string(),
+            });
+        }
+
+        Ok(ArrlSection {
+            display_string: VALUE_TABLE[index as usize].to_string(),
+            packed_bits,
+        })
     }
 }
 

@@ -5,8 +5,9 @@ use crate::constants::{FT8_CHAR_TABLE_GRIDSQUARE_ALPHA, FT8_CHAR_TABLE_GRIDSQUAR
 use super::radix::{FromMixedRadixStr, ToStrMixedRadix};
 
 const MAX_GRID_4:u32 = 32400;
-const OTHER_REPORTS: [&str; 4] = ["", "RRR", "RR73", "73"];
+pub const OTHER_REPORTS: [&str; 4] = ["", "RRR", "RR73", "73"];
 
+#[derive(Debug)]
 pub struct Report {
     pub report: String,
     pub is_ack: bool,
@@ -24,6 +25,63 @@ impl Display for Report {
 }
 
 impl Report {
+    pub fn try_from_packed_2(value: u32) -> Result<Self, InvalidValueError> {
+        let grid:String;
+        let is_ack = false;
+        let is_g15 = false;
+        let is_g25 = false;
+        let packed_bits:u32 = value;
+        let is_other = true;
+        let other_bits:u32;
+        match OTHER_REPORTS.iter().nth(value as usize) {
+            Some(v) => {
+                grid = (*v).to_owned();
+                other_bits = value;
+            },
+            None => {
+                return Err(InvalidValueError { value: value });
+            }
+        };
+        Ok(Report {
+            report: grid,
+            is_ack,
+            is_g15,
+            is_g25,
+            is_other,
+            packed_bits,
+            other_bits
+        })
+    }
+
+    pub fn try_from_packed_3(value: u32) -> Result<Self, InvalidValueError> {
+        let grid:String;
+        let is_ack = false;
+        let is_g15 = false;
+        let is_g25 = false;
+        let packed_bits:u32 = value;
+        let is_other = true;
+        let other_bits:u32;
+
+        match OTHER_REPORTS.iter().nth(value as usize) {
+            Some(v) => {
+                grid = (*v).to_owned();
+                other_bits = value;
+            },
+            None => {
+                return Err(InvalidValueError { value: value });
+            }
+        };
+        Ok(Report {
+            report: grid,
+            is_ack,
+            is_g15,
+            is_g25,
+            is_other,
+            packed_bits,
+            other_bits
+        })
+    }
+
     pub fn try_from_packed_15(value:u32) -> Result<Self, InvalidValueError> {
         let grid:String;
         let is_ack = false;

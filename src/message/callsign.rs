@@ -1,10 +1,18 @@
 use std::fmt::Display;
+use std::sync::Mutex;
+use lru::LruCache;
+use lazy_static::lazy_static;
 use snafu::prelude::*;
 use crate::constants::*;
 
 use super::radix::ToStrMixedRadix;
 use super::radix::FromMixedRadixStr;
 
+lazy_static! {
+    static ref CALLSIGN_CACHE: Mutex<LruCache<u32, String>> = Mutex::new(LruCache::new(10000));
+}
+
+#[derive(Debug)]
 pub struct Callsign {
     pub callsign: String,
     pub is_rover: bool,
@@ -20,7 +28,7 @@ pub struct Callsign {
 
 impl Display for Callsign {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.callsign)
+        write!(f, "{}{}", self.callsign, if self.is_rover {"/R"} else if self.is_portable {"/P"} else {""})
     }
 }
 
@@ -139,6 +147,30 @@ impl TryFrom <u64> for Callsign {
 }
 
 impl Callsign {
+    pub fn to_string(&self) -> String {
+        format!("{}{}", self.callsign, if self.is_rover {"/R"} else if self.is_portable {"/P"} else {""})
+    }
+
+    pub fn try_from_callsign_hash(hash:u32) -> Result<Self, ParseCallsignError> {
+        if let Some(callsign) = get_hashed_callsign_string(hash) {
+            return Callsign::from_callsign_str(&callsign);
+        }
+
+        let callsign = Callsign{
+            callsign : "<...>".to_string(),
+            is_rover: false,
+            is_portable: false,
+            is_hashed: true,
+            was_hashed: false,
+            packed_58bits : 0,
+            packed_28bits : 0, 
+            hashed_22bits : 0, 
+            hashed_12bits : 0, 
+            hashed_10bits : 0};
+
+        return Ok(callsign);
+    }
+
     pub fn from_callsign_str(s: &str) -> Result<Self, ParseCallsignError> {
         let is_rover = s.ends_with("/R");
         let is_portable = s.ends_with("/P");
@@ -172,7 +204,12 @@ impl Callsign {
         let hashed12 = hash_callsign(string_to_pack, 12) as u32;
         let hashed10 = hash_callsign(string_to_pack, 10) as u32;
 
-        let packed_callsign = format!("{}{}", string_to_pack, if is_rover {"/R"} else if is_portable {"/P"} else {""});
+        store_hashed_callsign_string(hashed10, string_to_pack.to_string());
+        store_hashed_callsign_string(hashed12, string_to_pack.to_string());
+        store_hashed_callsign_string(hashed22, string_to_pack.to_string());
+
+        //let packed_callsign = format!("{}{}", string_to_pack, if is_rover {"/R"} else if is_portable {"/P"} else {""});
+        let packed_callsign = format!("{}", string_to_pack);
 
         let c = Callsign{
             callsign: packed_callsign,
@@ -394,6 +431,19 @@ fn hash_callsign(callsign:&str, m:u32) -> u64 {
     return value;
 }
 
+fn store_hashed_callsign_string(hash:u32, callsign:String) {
+    let mut cache = CALLSIGN_CACHE.lock().unwrap();
+    cache.put(hash, callsign);
+}
+
+fn get_hashed_callsign_string(hash:u32) -> Option<String> {
+    let mut cache = CALLSIGN_CACHE.lock().unwrap();
+    if let Some(callsign) = cache.get(&hash) {
+        return Some(callsign.clone());
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -405,8 +455,8 @@ mod tests {
             paste::item! {
                 #[test]
                 fn callsign_should_be_expected() {
-                    let callsign = Callsign::from_callsign_str($callsign).unwrap();
-                    assert_eq!(callsign.callsign, $expected_callsign);
+                    let callsign = format!("{}", Callsign::from_callsign_str($callsign).unwrap());
+                    assert_eq!(callsign, $expected_callsign);
                 }
 
                 #[test]
@@ -617,6 +667,19 @@ mod tests {
         fn with_268435456_returns_out_of_range() {
             let result = Callsign::try_from(268435456u32);
             assert!(matches!(result, Err(ParseCallsignError::OutOfRange)));
+        }
+    }
+
+    mod cache {
+        use crate::message::callsign::Callsign;
+
+        #[test]
+        fn can_cahce() {
+            let callsign1 = Callsign::from_callsign_str("PJ4/K1ABC").expect("callsign should have been cached");
+
+            assert_eq!(callsign1.callsign, Callsign::try_from_callsign_hash(callsign1.hashed_10bits).expect("callsign should have been cached").callsign);
+            assert_eq!(callsign1.callsign, Callsign::try_from_callsign_hash(callsign1.hashed_12bits).expect("callsign should have been cached").callsign);
+            assert_eq!(callsign1.callsign, Callsign::try_from_callsign_hash(callsign1.hashed_22bits).expect("callsign should have been cached").callsign);
         }
     }
 }

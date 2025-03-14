@@ -20,6 +20,91 @@ pub fn bitvec_to_u128(bv: &BitVec<u8, Msb0>, num_bits: usize) -> u128 {
     value
 }
 
+pub fn bitslice_to_u128(bs: &BitSlice<u8, Msb0>) -> u128 {
+    assert!(bs.len() <= 128, "BitSlice length must be <= 128");
+    let mut value = 0u128;
+    for bit in bs {
+        value = (value << 1) | (*bit as u128);
+    }
+    value
+}
+
+pub fn bitslice_to_u32(bs: &BitSlice<u8, Msb0>) -> u32 {
+    assert!(bs.len() <= 32, "BitSlice length must be <= 32");
+    let mut value = 0u32;
+    for bit in bs {
+        value = (value << 1) | (*bit as u32);
+    }
+    value
+}
+
+pub fn bitslice_to_u8(bs: &BitSlice<u8, Msb0>) -> u8 {
+    assert!(bs.len() <= 8, "BitSlice length must be <= 8");
+    let mut value = 0u8;
+    for bit in bs {
+        value = (value << 1) | (*bit as u8);
+    }
+    value
+}
+
+pub trait FromBitSlice {
+    fn from_bitslice(bitslice: &BitSlice<u8, Msb0>) -> Self;
+}
+
+impl FromBitSlice for u128 {
+    fn from_bitslice(bitslice: &BitSlice<u8, Msb0>) -> Self {
+        assert!(bitslice.len() <= 128, "BitSlice length must be <= 128");
+        let mut value = 0u128;
+        for bit in bitslice {
+            value = (value << 1) | (*bit as u128);
+        }
+        value
+    }
+}
+
+impl FromBitSlice for u64 {
+    fn from_bitslice(bitslice: &BitSlice<u8, Msb0>) -> Self {
+        assert!(bitslice.len() <= 64, "BitSlice length must be <= 64");
+        let mut value = 0u64;
+        for bit in bitslice {
+            value = (value << 1) | (*bit as u64);
+        }
+        value
+    }
+}
+
+impl FromBitSlice for u32 {
+    fn from_bitslice(bitslice: &BitSlice<u8, Msb0>) -> Self {
+        assert!(bitslice.len() <= 32, "BitSlice length must be <= 32");
+        let mut value = 0u32;
+        for bit in bitslice {
+            value = (value << 1) | (*bit as u32);
+        }
+        value
+    }
+}
+
+impl FromBitSlice for u16 {
+    fn from_bitslice(bitslice: &BitSlice<u8, Msb0>) -> Self {
+        assert!(bitslice.len() <= 16, "BitSlice length must be <= 16");
+        let mut value = 0u16;
+        for bit in bitslice {
+            value = (value << 1) | (*bit as u16);
+        }
+        value
+    }
+}
+
+impl FromBitSlice for u8 {
+    fn from_bitslice(bitslice: &BitSlice<u8, Msb0>) -> Self {
+        assert!(bitslice.len() <= 8, "BitSlice length must be <= 8");
+        let mut value = 0u8;
+        for bit in bitslice {
+            value = (value << 1) | (*bit as u8);
+        }
+        value
+    }
+}
 
 pub trait BitvecToString {
     fn to_string(&mut self) -> String;

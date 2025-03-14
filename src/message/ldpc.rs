@@ -291,7 +291,7 @@ const FT8_TANNER_GRAPH_EDGES: [[usize; 3]; 174] = [
 
 
 #[derive(Debug)]
-struct Ft8_Ldpc {
+pub struct Ft8_Ldpc {
     codeword: BitVec<u8, Msb0>,
     log_liklyhood_ratios: Vec<f64>,
     value_to_check: HashMap<usize, Vec<usize>>,
@@ -303,6 +303,7 @@ impl Ft8_Ldpc {
 
     pub fn from_codeword(data: &[u8]) -> Result<Self, &'static str> {
         let mut codeword = BitVec::<u8, Msb0>::from_slice(data);
+        println!("codeword len: {}", codeword.len());
         if codeword.len() < 174 {
             return Err("Expected exactly 174 bits.");
         }
@@ -333,6 +334,30 @@ impl Ft8_Ldpc {
             value_to_check,
             check_to_value
         })
+    }
+
+    pub fn get_message(&self) -> u128 {
+        let mut message: u128 = 0;
+        for i in 0..77 {
+            message = (message << 1) | self.get_codeword_bit(i) as u128;
+        }
+        message
+    }
+
+    pub fn get_crc(&self) -> u16 {
+        let mut crc: u16 = 0;
+        for i in 77..91 {
+            crc = (crc << 1) | self.get_codeword_bit(i) as u16;
+        }
+        crc
+    }
+
+    pub fn get_parity(&self) -> u128 {
+        let mut parity: u128 = 0;
+        for i in 91..174 {
+            parity = (parity << 1) | self.get_codeword_bit(i) as u128;
+        }
+        parity
     }
 
     fn get_codeword_bit(&self, index: usize) -> u8 {

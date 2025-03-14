@@ -58,6 +58,51 @@ macro_rules! from_str_custom_radix_impl {
 }
 from_str_custom_radix_impl!(u32 u64 u128);
 
+pub trait ToStrCustomRadix {
+    type Item;
+
+    fn to_str_custom_radix(&self, radix_table: &str) -> Result<String, ParseRadixStringError>;
+}
+
+macro_rules! to_str_custom_radix_impl {
+    ($($t:ty)*) => {$(
+        impl ToStrCustomRadix for $t {
+            type Item = $t;
+
+            fn to_str_custom_radix(&self, radix_table: &str) -> Result<String, ParseRadixStringError> {
+                if radix_table.is_empty() {
+                    return Err(ParseRadixStringError::InvalidRadixTable);
+                }
+
+                let mut value = *self;
+                let radix_length = radix_table.len() as Self::Item;
+                let mut result = String::new();
+
+                while value > 0 {
+                    let remainder = (value % radix_length) as usize;
+                    value /= radix_length;
+                    if let Some(c) = radix_table.chars().nth(remainder) {
+                        result.insert(0, c);
+                    } else {
+                        return Err(ParseRadixStringError::InvalidChar);
+                    }
+                }
+
+                if result.is_empty() {
+                    if let Some(c) = radix_table.chars().nth(0) {
+                        result.push(c);
+                    } else {
+                        return Err(ParseRadixStringError::InvalidChar);
+                    }
+                }
+
+                Ok(result)
+            }
+        }
+    )*}
+}
+to_str_custom_radix_impl!(u32 u64 u128);
+
 pub trait FromMixedRadixStr {
     type Item;
     fn from_mixed_radix_str(input:&str, radix_tables:&[&str]) -> Result<Self::Item, ParseRadixStringError>;
