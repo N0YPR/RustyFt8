@@ -168,7 +168,7 @@ fn try_parse_rtty_report(deq: &mut VecDeque<&str>) -> Result<(u32, String), Mess
 }
 
 fn try_parse_r3_to_string(r3: u32) -> Result<String, MessageParseError> {
-    if (r3 >= 0 && r3 <= 7) {
+    if r3 <= 7 {
         let report = format!("5{}9", r3 + 2);
         return Ok(report.to_string());
     }
