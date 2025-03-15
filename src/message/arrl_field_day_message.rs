@@ -58,13 +58,11 @@ pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
         }
     };
 
-    let number_transmitters = match n4 {
-        0..=15 => n4 + 1,
-        16..=31 => n4 + 16 + 1,
-        _ => {
-            return Err(MessageParseError::InvalidMessage);
-        }
-    };
+    let mut number_transmitters:u8 = n4 + 1;
+    if message_subtype == 4 {
+        // 4 is 16-32
+        number_transmitters += 16;
+    }
     let number_transmitters_string = format!("{}", number_transmitters);
 
     let field_day_class_string = match k3 {
@@ -233,6 +231,8 @@ fn try_parse_arrl_section(deq: &mut VecDeque<&str>) -> Result<ArrlSection, Messa
 #[cfg(test)]
 mod tests {
 
+    use crate::message;
+
     use super::*;
 
     #[test]
@@ -250,4 +250,36 @@ mod tests {
         assert_eq!(message.display_string, "K1ABC W9XYZ 6A WI");
         assert_eq!(message.message, 0b00001001101111011110001101010000110000101001001110111000001010001001100011000);
     }
+
+    #[test]
+    fn test_try_from_string2() {
+        let message_str = "W9XYZ K1ABC R 17B EMA";
+        let message = try_from_string(message_str).expect("Should have been able to parse");
+        assert_eq!(message.display_string, "W9XYZ K1ABC R 17B EMA");
+        assert_eq!(message.message, 0b00001100001010010011101110000000100110111101111000110101100000010001011100000);
+    }
+
+    #[test]
+    fn test_try_from_u128_2() {
+        let message_bits = 0b00001100001010010011101110000000100110111101111000110101100000010001011100000;
+        let message = try_from_u128(message_bits).expect("should have been able to parse");
+        assert_eq!(message.display_string, "W9XYZ K1ABC R 17B EMA");
+        assert_eq!(message.message, message_bits);
+    }
+
+    // c28 c28 R1 n4 k3 S7
+    // 000011000010100100111011100000001001101111011110001101011_0000_001_0001011_011_000 01
+    // 000011000010100100111011100000001001101111011110001101011_0001_001_0001011_011_000 02
+    // 000011000010100100111011100000001001101111011110001101011_0010_001_0001011_011_000 03
+    // 000011000010100100111011100000001001101111011110001101011_0011_001_0001011_011_000 04
+    // 000011000010100100111011100000001001101111011110001101011_0100_001_0001011_011_000 05
+    // 000011000010100100111011100000001001101111011110001101011_0101_001_0001011_011_000 06
+    // 000011000010100100111011100000001001101111011110001101011_0110_001_0001011_011_000 07
+    // 000011000010100100111011100000001001101111011110001101011_0111_001_0001011_011_000 08
+    // 000011000010100100111011100000001001101111011110001101011_1000_001_0001011_011_000 09
+    // 000011000010100100111011100000001001101111011110001101011_1001_001_0001011_011_000 10
+    // 000011000010100100111011100000001001101111011110001101011_1111_001_0001011_011_000 16
+    // 000011000010100100111011100000001001101111011110001101011_0011_001_0001011_100_000 20
+    // 000011000010100100111011100000001001101111011110001101011_1111_001_0001011_100_000 32
+
 }

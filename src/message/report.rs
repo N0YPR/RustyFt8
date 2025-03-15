@@ -1,6 +1,6 @@
 use std::fmt::Display;
 use snafu::prelude::*;
-use crate::constants::{FT8_CHAR_TABLE_GRIDSQUARE_ALPHA, FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER, FT8_CHAR_TABLE_NUMERIC};
+use crate::constants::{FT8_CHAR_TABLE_GRIDSQUARE_ALPHA, FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_SIX, FT8_CHAR_TABLE_NUMERIC};
 
 use super::radix::{FromMixedRadixStr, ToStrMixedRadix};
 
@@ -11,195 +11,171 @@ pub const OTHER_REPORTS: [&str; 4] = ["", "RRR", "RR73", "73"];
 pub struct Report {
     pub report: String,
     pub is_ack: bool,
-    pub is_g15: bool,
-    pub is_g25: bool,
     pub is_other: bool,
     pub packed_bits: u32,
-    pub other_bits: u32,
 }
 
 impl Display for Report {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.report)
+        if self.is_ack {
+            //write!(f, "R{}", self.report)
+            if self.report.len() == 4 || self.report.len() == 6 {
+                write!(f, "R {}", self.report)
+            } else {
+                write!(f, "R{}", self.report)
+            }
+        } else {
+            write!(f, "{}", self.report)
+        }
     }
 }
 
 impl Report {
-    pub fn try_from_packed_2(value: u32) -> Result<Self, InvalidValueError> {
-        let grid:String;
-        let is_ack = false;
-        let is_g15 = false;
-        let is_g25 = false;
-        let packed_bits:u32 = value;
-        let is_other = true;
-        let other_bits:u32;
-        match OTHER_REPORTS.iter().nth(value as usize) {
-            Some(v) => {
-                grid = (*v).to_owned();
-                other_bits = value;
-            },
-            None => {
-                return Err(InvalidValueError { value: value });
-            }
-        };
-        Ok(Report {
-            report: grid,
-            is_ack,
-            is_g15,
-            is_g25,
-            is_other,
-            packed_bits,
-            other_bits
-        })
-    }
-
-    pub fn try_from_packed_3(value: u32) -> Result<Self, InvalidValueError> {
-        let grid:String;
-        let is_ack = false;
-        let is_g15 = false;
-        let is_g25 = false;
-        let packed_bits:u32 = value;
-        let is_other = true;
-        let other_bits:u32;
-
-        match OTHER_REPORTS.iter().nth(value as usize) {
-            Some(v) => {
-                grid = (*v).to_owned();
-                other_bits = value;
-            },
-            None => {
-                return Err(InvalidValueError { value: value });
-            }
-        };
-        Ok(Report {
-            report: grid,
-            is_ack,
-            is_g15,
-            is_g25,
-            is_other,
-            packed_bits,
-            other_bits
-        })
-    }
-
-    pub fn try_from_packed_15(value:u32) -> Result<Self, InvalidValueError> {
-        let grid:String;
-        let is_ack = false;
-        let is_g15 = true;
-        let is_g25 = false;
-        let packed_bits:u32 = value;
-        let is_other:bool;
-        let other_bits:u32;
-
-        // 4-char reports
-        if value <= MAX_GRID_4 {
-            let radix_tables = [
-                FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
-                FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
-                FT8_CHAR_TABLE_NUMERIC,
-                FT8_CHAR_TABLE_NUMERIC
-            ];
-            grid = match value.to_str_mixed_radix(&radix_tables) {
-                Ok(v) => v,
-                Err(_) => {
-                    return Err(InvalidValueError { value: value });
-                }
-            };
-            is_other = false;
-            other_bits = 0;
-        }
-
-        // special reports
-        else if value > MAX_GRID_4 && value < MAX_GRID_4 + OTHER_REPORTS.len() as u32 + 1 {
-            let other_index = value - MAX_GRID_4 - 1u32;
-            match OTHER_REPORTS.iter().nth(other_index as usize) {
+    pub fn try_from_packed_bits(value: u32, num_bits:usize) -> Result<Self, InvalidValueError> {
+        if num_bits == 2 {
+            // RRR, RR73, 73, or blank
+            let report = match OTHER_REPORTS.iter().nth(value as usize) {
                 Some(v) => {
-                    grid = (*v).to_owned();
-                    other_bits = other_index;
+                    (*v).to_owned()
                 },
                 None => {
                     return Err(InvalidValueError { value: value });
                 }
             };
-            is_other = true;
-        } 
-        
-        // signal reports
-        else if value >= MAX_GRID_4 + 35u32 && value <= MAX_GRID_4 + 65u32 {
-            //let packed_bits = (MAX_GRID_4 as i32 + 35i32 + report) as u32;
-            let report = value as i32 - MAX_GRID_4 as i32 - 35i32;
-            grid = format!("{:>+0width$.prec$}", report, width=3, prec=0);
-            is_other = false;
-            other_bits = 0;
-        } 
-        
-        // error
-        else {
-            return Err(InvalidValueError { value });
+            let packed_bits = value;
+            return Ok(Report {
+                report,
+                is_ack: false,
+                is_other: true,
+                packed_bits
+            })
         }
 
-        let g = Report {
-            report: grid,
-            is_ack,
-            is_g15,
-            is_g25,
-            is_other,
-            packed_bits,
-            other_bits
-        };
+        if num_bits == 15 {
+            let report:String;
+            let is_ack = false;
+            let is_other:bool;
+            let packed_bits:u32 = value;
+            
+            // 4-char reports
+            if value <= MAX_GRID_4 {
+                println!("4-char reports");
+                let radix_tables = [
+                    FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+                    FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+                    FT8_CHAR_TABLE_NUMERIC,
+                    FT8_CHAR_TABLE_NUMERIC
+                ];
+                report = match value.to_str_mixed_radix(&radix_tables) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return Err(InvalidValueError { value: value });
+                    }
+                };
+                is_other = false;
+            }
 
-        return Ok(g);
-    }
+            // special reports
+            else if value > MAX_GRID_4 && value < MAX_GRID_4 + OTHER_REPORTS.len() as u32 + 1 {
+                let other_index = value - MAX_GRID_4 - 1u32;
+                report = match OTHER_REPORTS.iter().nth(other_index as usize) {
+                    Some(v) => {
+                        (*v).to_owned()
+                    },
+                    None => {
+                        return Err(InvalidValueError { value: value });
+                    }
+                };
+                is_other = true;
+            }
 
-    pub fn try_from_packed_25(value:u32) -> Result<Self, InvalidValueError> {
-        let grid:String;
-        let is_ack = false;
-        let is_g15 = false;
-        let is_g25 = true;
-        let is_other = false;
-        let packed_bits:u32 = value;
-        let other_bits = 0;
+            // signal reports low
+            else if value >= 32405 && value <= 32485 {
+                let r = value as i32 - 32405i32 - 30i32;
+                report = format!("{:>+0width$.prec$}", r, width=3, prec=0);
+                is_other = false;
+            }
 
-        let radix_tables = [
-            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
-            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
-            FT8_CHAR_TABLE_NUMERIC,
-            FT8_CHAR_TABLE_NUMERIC,
-            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER,
-            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER
-        ];
-        grid = match value.to_str_mixed_radix(&radix_tables) {
-            Ok(v) => v,
-            Err(_) => {
+            // signal reports high
+            else if value >= 32486 && value <= 32505 {
+                let r = value as i32 - 32486i32 - 50i32;
+                report = format!("{:>+0width$.prec$}", r, width=3, prec=0);
+                is_other = false;
+            }
+
+            else {
                 return Err(InvalidValueError { value });
             }
-        };
 
-        let g = Report {
-            report: grid,
-            is_ack,
-            is_g15,
-            is_g25,
-            is_other,
-            packed_bits,
-            other_bits
-        };
+            return Ok(Report {
+                report,
+                is_ack,
+                is_other,
+                packed_bits
+            })
+        }
 
-        return Ok(g);
+        if num_bits == 25 {
+            let radix_tables = [
+                FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+                FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
+                FT8_CHAR_TABLE_NUMERIC,
+                FT8_CHAR_TABLE_NUMERIC,
+                FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_SIX,
+                FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_SIX
+            ];
+            let report = match value.to_str_mixed_radix(&radix_tables) {
+                Ok(v) => v,
+                Err(_) => {
+                    return Err(InvalidValueError { value });
+                }
+            };
+            return Ok(Report {
+                report,
+                is_ack: false,
+                is_other: false,
+                packed_bits: value
+            })
+        }
+        
+
+
+        Err(InvalidValueError { value })
+
     }
 
-    pub fn try_from_report_str(report_str:&str) -> Result<Self, InvalidStringError> {
+    pub fn try_from_report_str(report_str:&str, num_bits:usize) -> Result<Self, InvalidStringError> {
 
-        if let Ok(report) = try_from_location(report_str) {
-            return Ok(report);
+        if num_bits == 2 {
+            if let Ok(report) = try_from_special_2(report_str) {
+                return Ok(report);
+            }
+            return Err(InvalidStringError { value: report_str.to_owned() });
         }
 
-        if let Ok(report) = try_from_special(report_str) {
-            return Ok(report);
+        if num_bits == 15 {
+            if let Ok(report) = try_from_location(report_str, 15) {
+                return Ok(report);
+            }
+
+            if let Ok(report) = try_from_special(report_str) {
+                return Ok(report);
+            }
+
+            if let Ok(report) = try_from_signal_report(report_str) {
+                return Ok(report);
+            }
+
+            return Err(InvalidStringError { value: report_str.to_owned() });
         }
 
-        if let Ok(report) = try_from_signal_report(report_str) {
-            return Ok(report);
+        if num_bits == 25 {
+            if let Ok(report) = try_from_location(report_str, 25) {
+                return Ok(report);
+            }
+
+            return Err(InvalidStringError { value: report_str.to_owned() });
+            
         }
 
         return Err(InvalidStringError { value: report_str.to_owned() });
@@ -224,32 +200,31 @@ fn try_from_signal_report(report_str:&str) -> Result<Report, InvalidStringError>
         }
     };
 
-    if report_int < -30 || report_int > 30 {
+    if report_int < -50 || report_int > 50 {
         return Err(InvalidStringError { value: report_str.to_owned() });
     }
 
-    //let r = format!("{:>+0width$.prec$}", report_int, width=3, prec=0);
-    let is_g15 = true;
-    let is_g25 = false;
     let is_other = false;
-    let packed_bits = (MAX_GRID_4 as i32 + 35i32 + report_int) as u32;
-    let other_bits = 0;
+
+    let packed_bits:u32;
+    if report_int >= -30 && report_int <= 50 {
+        packed_bits = (MAX_GRID_4 as i32 + 35i32 + report_int) as u32
+    } else if report_int >= -50 && report_int <= -31 {
+        packed_bits = (32486i32 + 50i32 + report_int) as u32
+    } else {
+        return Err(InvalidStringError { value: report_str.to_owned() });
+    }
 
     return Ok(Report {
-        report: report_str.to_owned(),
+        report: format!("{:+03}", report_int),
         is_ack,
-        is_g15,
-        is_g25,
         is_other,
         packed_bits,
-        other_bits
     });
 }
 
-fn try_from_location(location:&str) -> Result<Report, InvalidStringError> {
+fn try_from_location(location:&str, num_bits:usize) -> Result<Report, InvalidStringError> {
     let is_other = location == "RR73";
-    let other_bits = if is_other {2} else {0};
-
     let is_ack:bool;
     let location_to_parse:&str;
     if location.starts_with("R ") {
@@ -260,8 +235,8 @@ fn try_from_location(location:&str) -> Result<Report, InvalidStringError> {
         location_to_parse = location;
     }
 
-    let is_g15 = location_to_parse.len() == 4;
-    let is_g25 = location_to_parse.len() == 6;
+    let is_g15 = location_to_parse.len() == 4 && num_bits == 15;
+    let is_g25 = location_to_parse.len() == 6 && num_bits == 25;
 
     if !is_g15 && !is_g25 {
         return Err(InvalidStringError { value: location_to_parse.to_owned() });
@@ -287,8 +262,8 @@ fn try_from_location(location:&str) -> Result<Report, InvalidStringError> {
             FT8_CHAR_TABLE_GRIDSQUARE_ALPHA,
             FT8_CHAR_TABLE_NUMERIC,
             FT8_CHAR_TABLE_NUMERIC,
-            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER,
-            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_LOWER
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_SIX,
+            FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_SIX
         ];
         packed_bits = match u32::from_mixed_radix_str(location_to_parse, &radix_tables) {
             Ok(value) => value,
@@ -301,13 +276,10 @@ fn try_from_location(location:&str) -> Result<Report, InvalidStringError> {
     }
 
     let r = Report {
-        report: location.to_owned(),
+        report: location_to_parse.to_owned(),
         is_ack,
-        is_g15,
-        is_g25,
         is_other,
         packed_bits,
-        other_bits
     };
     return Ok(r);
 }
@@ -321,19 +293,33 @@ fn try_from_special(special:&str) -> Result<Report, InvalidStringError> {
 
     let packed_bits = MAX_GRID_4 + other_index as u32 + 1;
     let is_ack = false;
-    let is_g15 = true;
-    let is_g25 = false;
     let is_other = true;
-    let other_bits = other_index as u32;
 
     let r = Report {
         report: special.to_owned(),
         is_ack,
-        is_g15,
-        is_g25,
         is_other,
         packed_bits,
-        other_bits
+    };
+    return Ok(r);
+}
+
+fn try_from_special_2(special:&str) -> Result<Report, InvalidStringError> {
+    if !OTHER_REPORTS.contains(&special) {
+        return Err(InvalidStringError { value: special.to_owned() });
+    }
+    
+    let other_index = OTHER_REPORTS.iter().position(|&r| r == special).unwrap();
+
+    let packed_bits = other_index as u32;
+    let is_ack = false;
+    let is_other = true;
+
+    let r = Report {
+        report: special.to_owned(),
+        is_ack,
+        is_other,
+        packed_bits,
     };
     return Ok(r);
 }
@@ -354,420 +340,72 @@ pub struct InvalidStringError {
 mod tests {
     use super::*;
 
-    mod try_from_packed_15 {
-        use super::*;
-
-        mod with_32402 {
+    macro_rules! generate_tests { ($name:ident, $report:expr, $packed_bits:expr, $num_bits:expr) => {
+        mod $name {
             use super::*;
 
-            #[test]
-            fn grid_is_rrr() {
-                let g = Report::try_from_packed_15(32402).unwrap();
-                assert_eq!(g.report, "RRR");
+            mod from_string {
+                use std::sync::LazyLock;
+                use super::*;
+    
+                static REPORT:LazyLock<Report> = LazyLock::new(|| Report::try_from_report_str($report, $num_bits).unwrap());
+    
+                #[test]
+                fn report_is_correct() {
+                    assert_eq!(REPORT.report, $report);
+                }
+    
+                #[test]
+                fn packed_bits_is_correct() {
+                    assert_eq!(REPORT.packed_bits, $packed_bits);
+                }
             }
 
-            #[test]
-            fn is_g15_true() {
-                let g = Report::try_from_packed_15(32402).unwrap();
-                assert!(g.is_g15);
+            mod from_packed_bits {
+                use std::sync::LazyLock;
+                use super::*;
+    
+                static REPORT:LazyLock<Report> = LazyLock::new(|| Report::try_from_packed_bits($packed_bits, $num_bits).unwrap());
+    
+                #[test]
+                fn report_is_correct() {
+                    assert_eq!(REPORT.report, $report);
+                }
+    
+                #[test]
+                fn packed_bits_is_correct() {
+                    assert_eq!(REPORT.packed_bits, $packed_bits);
+                }
             }
-
-            #[test]
-            fn is_g25_false() {
-                let g = Report::try_from_packed_15(32402).unwrap();
-                assert!(!g.is_g25);
-            }
-
-            #[test]
-            fn packed_bits_is_32402() {
-                let g = Report::try_from_packed_15(32402).unwrap();
-                assert_eq!(g.packed_bits, 32402);
-            }
+    
         }
+    };}
 
-        mod with_32435 {
-            use super::*;
+    generate_tests!(signal_report_neg_30, "-30", 0b111111010010101, 15);
+    generate_tests!(signal_report_pos_00, "+00", 0b111111010110011, 15);
+    generate_tests!(signal_report_pos_50, "+50", 0b111111011100101, 15);
+    generate_tests!(signal_report_neg_50, "-50", 0b111111011100110, 15);
+    generate_tests!(signal_report_neg_31, "-31", 0b111111011111001, 15);
+    generate_tests!(special_rrr, "RRR", 0b111111010010010, 15);
+    generate_tests!(special_rr73, "RR73", 0b111111001110101, 15);
+    generate_tests!(special_73, "73", 0b111111010010100, 15);
+    generate_tests!(grid_aa00, "AA00", 0b000000000000000, 15);
+    generate_tests!(grid_cn87, "CN87", 0b001001101111011, 15);
+    generate_tests!(grid_rr99, "RR99", 0b111111010001111, 15);
+    generate_tests!(grid_aa00aa, "AA00AA", 0b0000000000000000000000000, 25);
+    generate_tests!(grid_aa00ab, "AA00AB", 0b0000000000000000000000001, 25);
+    generate_tests!(grid_rr99rr, "RR99XX", 0b1000111001100001111111111, 25);
 
-            #[test]
-            fn grid_is_plus00() {
-                let g = Report::try_from_packed_15(32435).unwrap();
-                assert_eq!(g.report, "+00");
-            }
+    //11110011000100000000000110100011101000110001000111001010101000000000010_01_0_100
+    generate_tests!(special_rrr_2, "RRR", 0b01, 2);
 
-            #[test]
-            fn is_g15_true() {
-                let g = Report::try_from_packed_15(32435).unwrap();
-                assert!(g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_false() {
-                let g = Report::try_from_packed_15(32435).unwrap();
-                assert!(!g.is_g25);
-            }
-
-            #[test]
-            fn packed_bits_is_32402() {
-                let g = Report::try_from_packed_15(32435).unwrap();
-                assert_eq!(g.packed_bits, 32435);
-            }
-        }
-
-        mod with_4987 {
-            use super::*;
-
-            #[test]
-            fn grid_is_cn87() {
-                let g = Report::try_from_packed_15(4987).unwrap();
-                assert_eq!(g.report, "CN87");
-            }
-
-            #[test]
-            fn is_g15_true() {
-                let g = Report::try_from_packed_15(4987).unwrap();
-                assert!(g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_false() {
-                let g = Report::try_from_packed_15(4987).unwrap();
-                assert!(!g.is_g25);
-            }
-
-            #[test]
-            fn packed_bits_is_4987() {
-                let g = Report::try_from_packed_15(4987).unwrap();
-                assert_eq!(g.packed_bits, 4987);
-            }
-        }
-
-        #[test]
-        fn with_2873078_returns_invalid_value() {
-            let result = Report::try_from_packed_15(2873078);
-            assert!(matches!(result, Err(InvalidValueError { value: 2873078})));
-        }
+    #[test]
+    fn test_is_ack() {
+        let r = Report::try_from_report_str("R+00", 15).unwrap();
+        let r_str = format!("{}", r);
+        assert_eq!(r_str, "R+00");
+        assert_eq!(r.is_ack, true);
+        assert_eq!(r.report, "+00");
     }
 
-    mod try_from_packed_25 {
-        use super::*;
-
-        mod with_2873078 {
-            use super::*;
-
-            #[test]
-            fn grid_is_cn87xo() {
-                let g = Report::try_from_packed_25(2873078).unwrap();
-                assert_eq!(g.report, "CN87xo");
-            }
-
-            #[test]
-            fn is_g15_false() {
-                let g = Report::try_from_packed_25(2873078).unwrap();
-                assert!(!g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_true() {
-                let g = Report::try_from_packed_25(2873078).unwrap();
-                assert!(g.is_g25);
-            }
-
-            #[test]
-            fn packed_bits_is_2873078() {
-                let g = Report::try_from_packed_25(2873078).unwrap();
-                assert_eq!(g.packed_bits, 2873078);
-            }
-
-        }
-    }
-
-    mod try_from_special {
-        use super::*;
-
-        mod with_rrr {
-            use super::*;
-
-            #[test]
-            fn grid_is_rrr() {
-                let g = Report::try_from_report_str("RRR").unwrap();
-                assert_eq!(g.report, "RRR");
-            }
-
-            #[test]
-            fn packed_bits_is_32402() {
-                let g = Report::try_from_report_str("RRR").unwrap();
-                assert_eq!(g.packed_bits, 32402);
-            }
-
-            #[test]
-            fn is_g15_true() {
-                let g = Report::try_from_report_str("RRR").unwrap();
-                assert!(g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_false() {
-                let g = Report::try_from_report_str("RRR").unwrap();
-                assert!(!g.is_g25);
-            }
-        }
-
-        mod with_rr73_actually_not_special_but_grid {
-            use super::*;
-
-            #[test]
-            fn grid_is_rr73() {
-                let g = Report::try_from_report_str("RR73").unwrap();
-                assert_eq!(g.report, "RR73");
-            }
-
-            #[test]
-            fn packed_bits_is_32373() {
-                let g = Report::try_from_report_str("RR73").unwrap();
-                assert_eq!(g.packed_bits, 32373);
-                // 0b111111010010011
-                // 0b111111001110101
-                // 32373
-            }
-
-            #[test]
-            fn is_g15_true() {
-                let g = Report::try_from_report_str("RR73").unwrap();
-                assert!(g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_false() {
-                let g = Report::try_from_report_str("RR73").unwrap();
-                assert!(!g.is_g25);
-            }
-        }
-
-        mod with_73 {
-            use super::*;
-
-            #[test]
-            fn grid_is_73() {
-                let g = Report::try_from_report_str("73").unwrap();
-                assert_eq!(g.report, "73");
-            }
-
-            #[test]
-            fn packed_bits_is_32403() {
-                let g = Report::try_from_report_str("73").unwrap();
-                assert_eq!(g.packed_bits, 32404);
-            }
-
-            #[test]
-            fn is_g15_true() {
-                let g = Report::try_from_report_str("73").unwrap();
-                assert!(g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_false() {
-                let g = Report::try_from_report_str("73").unwrap();
-                assert!(!g.is_g25);
-            }
-        }
-
-        mod with_empty {
-            use super::*;
-
-            #[test]
-            fn grid_is_empty() {
-                let g = Report::try_from_report_str("").unwrap();
-                assert_eq!(g.report, "");
-            }
-
-            #[test]
-            fn packed_bits_is_32403() {
-                let g = Report::try_from_report_str("").unwrap();
-                assert_eq!(g.packed_bits, 32401);
-            }
-
-            #[test]
-            fn is_g15_true() {
-                let g = Report::try_from_report_str("").unwrap();
-                assert!(g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_false() {
-                let g = Report::try_from_report_str("").unwrap();
-                assert!(!g.is_g25);
-            }
-        }
-    }
-
-
-    mod try_from_location {
-        use super::*;
-        
-        mod with_cn87 {
-            use super::*;
-
-            #[test]
-            fn grid_is_cn87() {
-                let g = Report::try_from_report_str("CN87").unwrap();
-                assert_eq!(g.report, "CN87");
-            }
-
-            #[test]
-            fn is_g15_true() {
-                let g = Report::try_from_report_str("CN87").unwrap();
-                assert!(g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_false() {
-                let g = Report::try_from_report_str("CN87").unwrap();
-                assert!(!g.is_g25);
-            }
-
-            #[test]
-            fn packed_bits_is_4987() {
-                let g = Report::try_from_report_str("CN87").unwrap();
-                assert_eq!(g.packed_bits, 4987);
-            }
-        }
-
-        #[test]
-        fn with_zz99_returns_invalid_char() {
-            let g = Report::try_from_report_str("ZZ99");
-            assert!(g.is_err());
-        }
-
-        #[test]
-        fn with_cn8_returns_invalid_length() {
-            let g = Report::try_from_report_str("CN8");
-            assert!(g.is_err());
-        }
-
-        mod with_cn87xo {
-            use super::*;
-
-            #[test]
-            fn grid_is_cn87xo() {
-                let g = Report::try_from_report_str("CN87xo").unwrap();
-                assert_eq!(g.report, "CN87xo");
-            }
-
-            #[test]
-            fn is_g15_false() {
-                let g = Report::try_from_report_str("CN87xo").unwrap();
-                assert!(!g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_true() {
-                let g = Report::try_from_report_str("CN87xo").unwrap();
-                assert!(g.is_g25);
-            }
-
-            #[test]
-            fn packed_bits_is_4987() {
-                let g = Report::try_from_report_str("CN87xo").unwrap();
-                assert_eq!(g.packed_bits, 2873078);
-            }
-
-        }
-    }
-
-    mod try_from_report {
-        use super::*;
-
-        mod with_zero {
-            use super::*;
-            
-            #[test]
-            fn report_is_plus00() {
-                let g = Report::try_from_report_str("+00").unwrap();
-                assert_eq!(g.report, "+00");
-            }
-
-            #[test]
-            fn is_g15_true() {
-                let g = Report::try_from_report_str("+00").unwrap();
-                assert!(g.is_g15);
-            }
-
-            #[test]
-            fn is_g25_false() {
-                let g = Report::try_from_report_str("+00").unwrap();
-                assert!(!g.is_g25);
-            }
-
-            #[test]
-            fn packed_bits_is_32435() {
-                let g = Report::try_from_report_str("+00").unwrap();
-                assert_eq!(g.packed_bits, 32435);
-            }
-        }
-
-        mod with_neg_10 {
-            use super::*;
-
-            #[test]
-            fn report_is_neg10() {
-                let g = Report::try_from_report_str("-10").unwrap();
-                assert_eq!(g.report, "-10");
-            }
-
-            #[test]
-            fn packed_bits_is_32425() {
-                let g = Report::try_from_report_str("-10").unwrap();
-                assert_eq!(g.packed_bits, 32425);
-            }
-        }
-
-        mod with_r_neg_20 {
-            use super::*;
-
-            #[test]
-            fn report_is_r_neg20() {
-                let g = Report::try_from_report_str("R-20").unwrap();
-                assert_eq!(g.report, "R-20");
-            }
-
-            #[test]
-            fn packed_bits_is_32415() {
-                let g = Report::try_from_report_str("R-20").unwrap();
-                //0b111111010011111
-                //0000101001001101100111001101_1_1001011111000101011100011111_0_1_111111010011111_001
-                assert_eq!(g.packed_bits, 32415);
-            }
-
-            #[test]
-            fn is_ack_is_true() {
-                let g = Report::try_from_report_str("R-20").unwrap();
-                assert!(g.is_ack);
-            }
-        }
-
-        mod with_r_fn42 {
-            use super::*;
-
-            #[test]
-            fn report_is_r_fn42() {
-                let g = Report::try_from_report_str("R FN42").unwrap();
-                assert_eq!(g.report, "R FN42");
-            }
-
-            #[test]
-            fn packed_bits_is_10342() {
-                let g = Report::try_from_report_str("R FN42").unwrap();
-                //0b010100001100110
-                //0000110000101001001110111000000001001101111011110001101011_1_010100001100110_001
-                assert_eq!(g.packed_bits, 10342);
-            }
-
-            #[test]
-            fn is_ack_is_true() {
-                let g = Report::try_from_report_str("R FN42").unwrap();
-                assert!(g.is_ack);
-            }
-        }
-        
-    }
 }

@@ -69,8 +69,11 @@ impl TryFrom<u32> for Callsign {
         }
 
         if value >= 2063592 && value <= 6257895 {
+            if let Some(c) = get_hashed_callsign_string(value) {
+                return Callsign::from_callsign_str(&c);
+            }
             let c = Callsign{
-                callsign : "<...>".to_string(),
+                callsign : "...".to_string(),
                 is_rover: false,
                 is_portable: false,
                 is_hashed: true,
@@ -204,6 +207,7 @@ impl Callsign {
         let hashed12 = hash_callsign(string_to_pack, 12) as u32;
         let hashed10 = hash_callsign(string_to_pack, 10) as u32;
 
+        store_hashed_callsign_string(packed28, string_to_pack.to_string());
         store_hashed_callsign_string(hashed10, string_to_pack.to_string());
         store_hashed_callsign_string(hashed12, string_to_pack.to_string());
         store_hashed_callsign_string(hashed22, string_to_pack.to_string());
@@ -625,12 +629,6 @@ mod tests {
             use super::*;
 
             #[test]
-            fn callsign_is_dot_sot_dot() {
-                let callsign = Callsign::try_from(2386265u32).unwrap();
-                assert_eq!(callsign.callsign, "<...>");
-            }
-
-            #[test]
             fn is_hashed_is_true() {
                 let callsign = Callsign::try_from(2386265u32).unwrap();
                 assert_eq!(callsign.is_hashed, true);
@@ -674,12 +672,30 @@ mod tests {
         use crate::message::callsign::Callsign;
 
         #[test]
-        fn can_cahce() {
+        fn can_cache() {
             let callsign1 = Callsign::from_callsign_str("PJ4/K1ABC").expect("callsign should have been cached");
 
-            assert_eq!(callsign1.callsign, Callsign::try_from_callsign_hash(callsign1.hashed_10bits).expect("callsign should have been cached").callsign);
-            assert_eq!(callsign1.callsign, Callsign::try_from_callsign_hash(callsign1.hashed_12bits).expect("callsign should have been cached").callsign);
-            assert_eq!(callsign1.callsign, Callsign::try_from_callsign_hash(callsign1.hashed_22bits).expect("callsign should have been cached").callsign);
+            let h10 = callsign1.hashed_10bits;
+            let h12 = callsign1.hashed_12bits;
+            let h22 = callsign1.hashed_22bits;
+
+            assert_eq!("PJ4/K1ABC", Callsign::try_from_callsign_hash(h10).expect("callsign should have been cached").callsign);
+            assert_eq!("PJ4/K1ABC", Callsign::try_from_callsign_hash(h12).expect("callsign should have been cached").callsign);
+            assert_eq!("PJ4/K1ABC", Callsign::try_from_callsign_hash(h22).expect("callsign should have been cached").callsign);
+        }
+    }
+
+    mod cached_c28 {
+        use super::*;
+
+        #[test]
+        fn can_deal_with_hashed() {
+            let callsign1 = Callsign::from_callsign_str("PJ4/K1ABC").expect("callsign should have parsed");
+            let callsign2 = Callsign::try_from(callsign1.packed_28bits) .expect("callsign should have parsed");
+            println!("callsign1: {:?}", callsign1);
+            println!("callsign2: {:?}", callsign2);
+            assert_eq!(callsign1.packed_28bits, callsign2.packed_28bits);
+            assert_eq!(callsign1.callsign, callsign2.callsign);
         }
     }
 }

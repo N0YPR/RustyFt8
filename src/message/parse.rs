@@ -14,14 +14,14 @@ pub fn try_parse_standard_report(deq: &mut VecDeque<&str>) -> Result<Report, Mes
         } else {
             word_to_parse = word.to_string();
         }
-        match Report::try_from_report_str(&word_to_parse) {
+        match Report::try_from_report_str(&word_to_parse, 15) {
             Ok(c) => return Ok(c),
             Err(_) => {
                 return Err(MessageParseError::InvalidMessage);
             }
         };
     } else {
-        match Report::try_from_report_str("") {
+        match Report::try_from_report_str("", 15) {
             Ok(r) => return Ok(r),
             Err(_) => {
                 return Err(MessageParseError::InvalidMessage);

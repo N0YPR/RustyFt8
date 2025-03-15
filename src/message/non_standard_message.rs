@@ -73,7 +73,7 @@ pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
         // First callsign is CQ; h12 is ignored
         packed_string = format!("CQ {}", callsign2.callsign);
     } else {
-        report = match Report::try_from_packed_2(r2.into()) {
+        report = match Report::try_from_packed_bits(r2.into(), 2) {
             Ok(r) => r,
             Err(_) => {
                 return Err(MessageParseError::InvalidMessage);
@@ -126,7 +126,7 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
                 h1 = 0;
                 c58 = callsign2.packed_58bits as u128;
                 r2 = 0;
-                report = Report::try_from_report_str("").unwrap();
+                report = Report::try_from_report_str("", 2).unwrap();
             } else {
                 return Err(MessageParseError::InvalidMessage);
             }
@@ -143,7 +143,7 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
                 return Err(MessageParseError::InvalidMessage);
             }
 
-            report = Report::try_from_report_str("").unwrap();
+            report = Report::try_from_report_str("", 2).unwrap();
             r2 = 0;
 
             if callsign1.is_hashed {
@@ -183,10 +183,10 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
             return Err(MessageParseError::InvalidMessage);
         }
 
-        if let Ok(rpt) = Report::try_from_report_str(message_words[2]) {
+        if let Ok(rpt) = Report::try_from_report_str(message_words[2], 2) {
             if rpt.is_other {
                 report = rpt;
-                r2 = report.other_bits.into();
+                r2 = report.packed_bits.into();
             } else {
                 return Err(MessageParseError::InvalidMessage);
             }
@@ -256,4 +256,8 @@ mod tests {
         assert_eq!(message.display_string, "<W9XYZ> PJ4/K1ABC RRR");
         assert_eq!(message.message, 0b11110011000100000000000110100011101000110001000111001010101000000000010010100);
     }
+
+    
+
+
 }

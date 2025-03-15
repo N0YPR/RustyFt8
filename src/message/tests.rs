@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::message::Message;
+    use crate::message::{callsign::Callsign, Message};
 
     macro_rules! assert_parse_successfully {
         ($name:ident, $message:expr, $expected_message:expr, $message_bits:expr) => {
@@ -18,6 +18,20 @@ mod tests {
                     fn packed_bits_are_correct() {
                         let message = Message::try_from($message).unwrap().message;
                         assert_eq!(message, $message_bits);
+                    }
+
+                    #[test]
+                    fn from_u128_packed_string_is_correct() {
+                        // todo paramaterize this somehow
+                        // pre-cache all possible hashed callsigns
+                        let _callsign1 = Callsign::from_callsign_str("PJ4/K1ABC").expect("callsign should have been cached");
+                        let _callsign2 = Callsign::from_callsign_str("W9XYZ").expect("callsign should have been cached");
+                        let _callsign3 = Callsign::from_callsign_str("KH1/KH7Z").expect("callsign should have been cached");
+                        let _callsign4 = Callsign::from_callsign_str("YW18FIFA").expect("callsign should have been cached");
+                        
+                        
+                        let m = Message::try_from($message_bits).unwrap();
+                        assert_eq!(format!("{m}"), $expected_message);
                     }
 
                 }

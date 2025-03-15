@@ -26,7 +26,11 @@ pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
             return Err(MessageParseError::InvalidMessage);
         }
     };
-    callsign1.is_rover = is_rover1;
+    if message_type == 1 {
+        callsign1.is_rover = is_rover1
+    } else {} {
+        callsign1.is_portable = is_rover1;
+    }
 
     let mut callsign2 = match Callsign::try_from(callsign2_bits) {
         Ok(c) => c,
@@ -34,15 +38,21 @@ pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
             return Err(MessageParseError::InvalidMessage);
         }
     };
-    callsign2.is_rover = is_rover2;
+    if message_type == 1 {
+        callsign2.is_rover = is_rover2
+    } else {} {
+        callsign2.is_portable = is_rover2;
+    }
 
-    let mut report = match Report::try_from_packed_15(report_bits) {
+    let mut report = match Report::try_from_packed_bits(report_bits, 15) {
         Ok(r) => r,
         Err(_) => {
             return Err(MessageParseError::InvalidMessage);
         }
     };
     report.is_ack = is_ack;
+    println!("report: {:?}", report);
+    println!("report: {}", report);
 
     // pack the string
     let display_string = pack_string(callsign1, callsign2, report);
@@ -165,7 +175,7 @@ fn pack_string(callsign1: Callsign, callsign2: Callsign, report: Report) -> Stri
     
     let packed_string = format!(
         "{} {} {}",
-        packed_callsign1, packed_callsign2, report.report
+        packed_callsign1, packed_callsign2, report
     );
     let packed_string = packed_string.trim().to_string();
     packed_string
@@ -173,6 +183,8 @@ fn pack_string(callsign1: Callsign, callsign2: Callsign, report: Report) -> Stri
 
 #[cfg(test)]
 mod tests {
+    use crate::message;
+
     use super::*;
 
     #[test]
@@ -188,5 +200,38 @@ mod tests {
         let message = try_from_string(message_str).expect("Should have been able to parse");
         assert_eq!(message.display_string, "CQ SOTA N0YPR/R DM42");
         assert_eq!(message.message, 0b00000000010111100101100110000000010100100110110011100110110001100111110010001);
+    }
+
+    #[test]
+    fn test_try_from_u128_2() {
+        let message_bits = 0b00001100001010010011101110000000010011011110111100011010100111111010101000001;
+        let message = try_from_u128(message_bits).expect("should have been able to parse");
+        assert_eq!(message.display_string, "W9XYZ K1ABC -11");
+    }
+
+    #[test]
+    fn test_try_from_u128_eu() {
+        let message_bits = 0b10110111101110101100010101000000010010000110000010110011010111111001110101010;
+        let message = try_from_u128(message_bits).expect("should have been able to parse");
+        assert_eq!(message.display_string, "PA9XYZ G4ABC/P RR73");
+    }
+
+    #[test]
+    fn test_try_from_string_eu() {
+        let message_str = "PA9XYZ G4ABC/P RR73";
+        let message = try_from_string(message_str).expect("Should have been able to parse");
+        assert_eq!(message.display_string, "PA9XYZ G4ABC/P RR73");
+        assert_eq!(message.message, 0b10110111101110101100010101000000010010000110000010110011010111111001110101010);
+    }
+
+    #[test]
+    fn test_try_from_u128_3() {
+        // pre-cache all possible hashed callsigns
+        let callsign1 = Callsign::from_callsign_str("PJ4/K1ABC").expect("callsign should have been cached");
+        let callsign2 = Callsign::from_callsign_str("W9XYZ").expect("callsign should have been cached");
+
+        let message_bits = 0b00001100001010010011101110000000000110101001010110000101000111111010101000001;
+        let message = try_from_u128(message_bits).expect("should have been able to parse");
+        assert_eq!(message.display_string, "W9XYZ <PJ4/K1ABC> -11");
     }
 }
