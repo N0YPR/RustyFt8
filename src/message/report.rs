@@ -252,7 +252,7 @@ fn try_from_location(location:&str, num_bits:usize) -> Result<Report, InvalidStr
         ];
         packed_bits = match u32::from_mixed_radix_str(location_to_parse, &radix_tables) {
             Ok(value) => value,
-            Err(e) => {
+            Err(_e) => {
                 return Err(InvalidStringError { value: location_to_parse.to_owned() });
             }
         };
@@ -267,7 +267,7 @@ fn try_from_location(location:&str, num_bits:usize) -> Result<Report, InvalidStr
         ];
         packed_bits = match u32::from_mixed_radix_str(location_to_parse, &radix_tables) {
             Ok(value) => value,
-            Err(e) => {
+            Err(_e) => {
                 return Err(InvalidStringError { value: location_to_parse.to_owned() });
             }
         };

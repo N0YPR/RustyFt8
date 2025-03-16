@@ -13,12 +13,4 @@ pub enum MessageParseError {
     /// Empty String
     #[snafu(display("message_string empty"))]
     EmptyString,
-
-    /// Invalid Length
-    #[snafu(display("invalid channel symbols length"))]
-    InvalidSymbolsLength,
-
-    /// Invalid Symbols
-    #[snafu(display("invalid channel symbols"))]
-    InvalidSymbols,
 }

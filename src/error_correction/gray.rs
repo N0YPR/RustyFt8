@@ -48,7 +48,7 @@ impl GrayCode {
 
 #[cfg(test)]
 mod tests {
-    use crate::message::gray::GrayCode;
+    use crate::error_correction::gray::GrayCode;
 
     #[test]
     fn test_gray_encoding() {

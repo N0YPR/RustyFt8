@@ -1,5 +1,5 @@
 use bitvec::prelude::*;
-use crate::{message::gray::GrayCode, util::bitvec_utils::PackBitvecFieldType};
+use crate::{error_correction::gray::GrayCode, util::bitvec_utils::PackBitvecFieldType};
 
 pub fn channel_symbols(message: u128, crc: u16, parity: u128) -> Vec<u8> {
     let mut bv: BitVec<u8, Msb0> = BitVec::new();

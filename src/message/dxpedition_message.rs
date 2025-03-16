@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 
 use crate::util::bitvec_utils::{FromBitSlice, PackBitvecFieldType};
-use super::{callsign::Callsign, message_parse_error::MessageParseError, parse, serial_number_or_state_or_province::SerialNumberOrStateOrProvince, Message};
+use super::{callsign::Callsign, message_parse_error::MessageParseError, parse, Message};
 
 pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
     // https://wsjt.sourceforge.io/FT4_FT8_QEX.pdf

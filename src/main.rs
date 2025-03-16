@@ -3,6 +3,7 @@ use std::env;
 use message::Message;
 
 mod constants;
+mod error_correction;
 mod message;
 mod modulation;
 mod simulation;
