@@ -6,14 +6,14 @@ use super::{callsign::Callsign, message_parse_error::MessageParseError, report::
 
 pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
     // https://wsjt.sourceforge.io/FT4_FT8_QEX.pdf
-    // Type i3.n3 Purpose Example message Bit-fi eld tags
+    // Type i3.n3 Purpose Example message Bit-field tags
     // 4. NonStd Call <W9XYZ> PJ4/K1ABC RRR h12 c58 h1 r2 c1
     // h12 Hashed callsign, 12 bits
     // c58 Nonstandard callsign, up to 11 characters
     // h1 Hashed callsign is the second callsign
     // r2 RRR, RR73, 73, or blank
     // c1 First callsign is CQ; h12 is ignored
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     message.pack_into_bitvec(&mut message_bitvec, 77);
 
     let h12 = u32::from_bitslice(&message_bitvec[0..12]);
@@ -198,7 +198,7 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
     }
 
     // pack all the bits together
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     h12.pack_into_bitvec(&mut message_bitvec, 12);
     c58.pack_into_bitvec(&mut message_bitvec, 58);
     h1.pack_into_bitvec(&mut message_bitvec, 1);

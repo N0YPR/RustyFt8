@@ -17,7 +17,7 @@ pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
     // k3 Field Day Class: A, B, ... F
     // S7 ARRL/RAC Section
 
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     message.pack_into_bitvec(&mut message_bitvec, 77);
 
     let c28_1 = u32::from_bitslice(&message_bitvec[0..28]);
@@ -137,7 +137,7 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
     // n4 Number of transmitters: 1-16, 17-32
     // k3 Field Day Class: A, B, ... F
     // S7 ARRL/RAC Section
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     callsign1
         .packed_28bits
         .pack_into_bitvec(&mut message_bitvec, 28);

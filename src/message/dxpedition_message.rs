@@ -14,7 +14,7 @@ pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
     // c28 Standard callsign, CQ, DE, QRZ, or 22-bit hash
     // h10 Hashed callsign, 10 bits
     // r5 Report: -30 to +32, even numbers only
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     message.pack_into_bitvec(&mut message_bitvec, 77);
 
     let c28_1 = u32::from_bitslice(&message_bitvec[0..28]);
@@ -117,7 +117,7 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
         }
     };
 
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     callsign1
         .packed_28bits
         .pack_into_bitvec(&mut message_bitvec, 28);

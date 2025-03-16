@@ -12,7 +12,7 @@ pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
     // 0.5 Telemetry 123456789ABCDEF012 t71
     // t71 Telemetry data, up to 18 hexadecimal digits
 
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     message.pack_into_bitvec(&mut message_bitvec, 77);
     let t71 = u128::from_bitslice(&message_bitvec[0..71]);
     let message_subtype = u8::from_bitslice(&message_bitvec[71..74]);
@@ -41,7 +41,7 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
         }
     };
 
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     value.pack_into_bitvec(&mut message_bitvec, 71);
     5u8.pack_into_bitvec(&mut message_bitvec, 3);
     0u8.pack_into_bitvec(&mut message_bitvec, 3);

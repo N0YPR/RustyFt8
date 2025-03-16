@@ -11,7 +11,7 @@ pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
     // 0.0 Free Text TNX BOB 73 GL f71
     // f71 Free text, up to 13 characters
 
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec= BitVec::new();
     message.pack_into_bitvec(&mut message_bitvec, 77);
     let f71 = u128::from_bitslice(&message_bitvec[0..71]);
     let message_subtype = u8::from_bitslice(&message_bitvec[71..74]);
@@ -59,7 +59,7 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
     };
 
     // pack all the bits together
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     f71.pack_into_bitvec(&mut message_bitvec, 71);
     0u8.pack_into_bitvec(&mut message_bitvec, 3);
     0u8.pack_into_bitvec(&mut message_bitvec, 3);

@@ -5,7 +5,7 @@ use crate::util::bitvec_utils::{FromBitSlice, bitvec_to_u128, PackBitvecFieldTyp
 use super::{callsign::Callsign, message_parse_error::MessageParseError, parse, report::Report, Message};
 
 pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     message.pack_into_bitvec(&mut message_bitvec, 77);
 
     let callsign1_bits = u32::from_bitslice(&message_bitvec[0..28]);
@@ -110,7 +110,7 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
     }
 
     // pack all the bits together
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     let message_type: u8;
     if callsign1.is_portable || callsign2.is_portable {
         // EU VHF

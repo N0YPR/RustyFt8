@@ -16,7 +16,7 @@ pub fn try_from_u128(message: u128) -> Result<Message, MessageParseError> {
     // R1 R
     // r3 Report: 2-9, displayed as 529 – 599 or 52 - 59
     // s13 Serial Number (0-7999) or State/Province
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     message.pack_into_bitvec(&mut message_bitvec, 77);
 
     let t1 = message_bitvec[0];
@@ -124,7 +124,7 @@ pub fn try_from_string(value: &str) -> Result<Message, MessageParseError> {
     };
 
     // pack all the bits together
-    let mut message_bitvec: BitVec<u8, Msb0> = BitVec::new();
+    let mut message_bitvec: BitVec = BitVec::new();
     thank_you.pack_into_bitvec(&mut message_bitvec, 1);
     callsign1
         .packed_28bits
