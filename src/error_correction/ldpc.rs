@@ -94,7 +94,7 @@ impl Ft8_Ldpc {
 
     pub fn is_valid(&self) -> bool {        
         // Check if all value node sums are divisible by 2 (even) based on their corresponding check nodes.
-        // If any sum is not divisible by 2, return `false`. If all sums are divisible by 2, return `true`.
+        // If any sum is not divisible by 2, return `false`.
         for value_nodes in FT8_LDPC_CHECK_TO_VALUE.iter() {
             let sum: u8 = value_nodes.iter()
                 .map(|&i| self.get_codeword_bit(i))
@@ -103,9 +103,22 @@ impl Ft8_Ldpc {
                 return false;
             }
         }
-        return true;
+
+        // re-check the crc
+        let msg = self.get_message();
+        let recalculated_crc = checksum(msg);
+        return recalculated_crc == self.get_crc();
     }
 
+    pub fn solve(&mut self) {
+        // todo
+        // believe propagation algorithm
+        
+        // set the codeword from llr's
+        for (i, &llr) in self.log_liklyhood_ratios.iter().enumerate() {
+            self.codeword.set(i, llr > 0.0);
+        }
+    }
 
 }
 
@@ -293,5 +306,32 @@ mod tests {
             1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0
         ]).unwrap();
         assert!(!codeword.is_valid());
+    }
+
+    #[test]
+    fn when_crc_is_not_valid_codeword_is_valid_returns_false() {
+        let msg: u128 = 0b0000000001011110010110011000_0_0000101001001101100111001101_1_0_001100111110011_001;
+    
+        let mut codeword = BitVec::new();
+        msg.pack_into_bitvec(&mut codeword, 77);
+        
+        let crc = checksum(msg);
+        let invalid_crc = crc ^ 0b1;
+        invalid_crc.pack_into_bitvec(&mut codeword, 14);
+
+        let parity = generate_parity(msg, invalid_crc);
+        parity.pack_into_bitvec(&mut codeword, 83);
+
+        let log_liklyhood_ratios: Vec<f64> = codeword.iter()
+            .map(|bit| if *bit { 1.0 } else { -1.0 })
+            .collect();
+
+        let codeword = Ft8_Ldpc {
+            codeword,
+            log_liklyhood_ratios,
+        };
+
+        assert!(!codeword.is_valid())
+
     }
 }
