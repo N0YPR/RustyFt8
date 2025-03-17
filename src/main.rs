@@ -49,7 +49,7 @@ fn main() {
     println!("Crc: {:014b}", codeword.get_crc());
     println!("Parity: {:083b}", codeword.get_parity());
 
-    let channel_symbols = modulation::channel_symbols::channel_symbols(codeword);
+    let channel_symbols = modulation::channel_symbols::channel_symbols(codeword.get_codeword_bits());
 
 
     let channel_symbols_string:String = channel_symbols.iter().map(|b| (b + b'0') as char).collect();

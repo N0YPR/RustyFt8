@@ -1,9 +1,7 @@
 use bitvec::prelude::*;
-use crate::{constants::FT8_COSTAS, error_correction::{gray::GrayCode, ldpc::Ft8_Ldpc}, util::bitvec_utils::PackBitvecFieldType};
+use crate::{constants::FT8_COSTAS, error_correction::gray::GrayCode};
 
-pub fn channel_symbols(codeword: Ft8_Ldpc) -> Vec<u8> {
-    let bits = codeword.get_codeword_bits();
-
+pub fn channel_symbols(bits: &BitSlice) -> Vec<u8> {
     // convert the bits into 3 bit symbols
     let mut symbols: Vec<u8> = vec![];
     for chunk in bits.chunks_exact(3) {
