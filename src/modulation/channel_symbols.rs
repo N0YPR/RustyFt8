@@ -1,26 +1,27 @@
 use bitvec::prelude::*;
-use crate::{error_correction::gray::GrayCode, util::bitvec_utils::PackBitvecFieldType};
+use crate::{constants::FT8_COSTAS, error_correction::{gray::GrayCode, ldpc::Ft8_Ldpc}, util::bitvec_utils::PackBitvecFieldType};
 
-pub fn channel_symbols(message: u128, crc: u16, parity: u128) -> Vec<u8> {
-    let mut bv: BitVec = BitVec::new();
-    message.pack_into_bitvec(&mut bv, 77);
-    crc.pack_into_bitvec(&mut bv, 14);
-    parity.pack_into_bitvec(&mut bv, 83);
+pub fn channel_symbols(codeword: Ft8_Ldpc) -> Vec<u8> {
+    let bits = codeword.get_codeword_bits();
+
     // convert the bits into 3 bit symbols
     let mut symbols: Vec<u8> = vec![];
-    for chunk in bv.chunks_exact(3) {
+    for chunk in bits.chunks_exact(3) {
         let value = chunk.load_be::<u8>() & 0b0000_0111;
         symbols.push(value);
     }
+
+    // gray encode the symbols
     let gray = GrayCode::new();
     let gray_coded_symbols = gray.encode(&symbols);
-    let costas: Vec<u8> = vec![3, 1, 4, 0, 6, 5, 2];
+
+    // add the costas arrays
     let mut channel_symbols: Vec<u8> = Vec::new();
-    channel_symbols.extend(costas.iter());
+    channel_symbols.extend(FT8_COSTAS);
     channel_symbols.extend_from_slice(&gray_coded_symbols[..29]);
-    channel_symbols.extend(costas.iter());
+    channel_symbols.extend(FT8_COSTAS);
     channel_symbols.extend_from_slice(&gray_coded_symbols[29..]);
-    channel_symbols.extend(costas.iter());
+    channel_symbols.extend(FT8_COSTAS);
 
     channel_symbols
 }

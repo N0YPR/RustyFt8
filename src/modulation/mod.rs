@@ -5,7 +5,7 @@ use mgfsk::{gaussian_boxcar, modulate_mgfsk};
 use crate::constants::*;
 
 mod amplitude;
-mod channel_symbols;
+pub mod channel_symbols;
 mod cpfm;
 mod mfsk;
 mod mgfsk;

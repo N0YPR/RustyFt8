@@ -1,6 +1,8 @@
 use std::env;
 
+use error_correction::ldpc::Ft8_Ldpc;
 use message::Message;
+use modulation::Modulator;
 
 mod constants;
 mod error_correction;
@@ -41,13 +43,20 @@ fn main() {
 
     println!("Message: {}", message.display_string);
     println!("Message Bits: {:077b}", message.message);
-    // println!("Crc: {:014b}", message.checksum);
-    // println!("Parity: {:083b}", message.parity);
-    // let channel_symbols_string:String = message.channel_symbols.iter().map(|b| (b + b'0') as char).collect();
-    // println!("Channel Symbols: {}", channel_symbols_string);
 
-    // let modulator = Modulator::new();
-    // let waveform = modulator.modulate(&message.channel_symbols, carrier_frequency);
+    let codeword = Ft8_Ldpc::from_message(message.message);
+
+    println!("Crc: {:014b}", codeword.get_crc());
+    println!("Parity: {:083b}", codeword.get_parity());
+
+    let channel_symbols = modulation::channel_symbols::channel_symbols(codeword);
+
+
+    let channel_symbols_string:String = channel_symbols.iter().map(|b| (b + b'0') as char).collect();
+    println!("Channel Symbols: {}", channel_symbols_string);
+
+    let modulator = Modulator::new();
+    let waveform = modulator.modulate(&channel_symbols, carrier_frequency);
 
     // let mut samples:Vec<f32> = vec![0.0; (SAMPLE_RATE * 15.0) as usize];
     
