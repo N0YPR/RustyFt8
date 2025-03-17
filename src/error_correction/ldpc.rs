@@ -17,7 +17,6 @@ impl Ft8_Ldpc {
         message.pack_into_bitvec(&mut codeword, 77);
         
         let crc = checksum(message);
-        println!("crc: {:#018b}", crc);
         crc.pack_into_bitvec(&mut codeword, 14);
 
         let parity = generate_parity(message, crc);
@@ -111,10 +110,49 @@ impl Ft8_Ldpc {
     }
 
     pub fn solve(&mut self) {
-        // todo
-        // believe propagation algorithm
-        
-        // set the codeword from llr's
+        let max_iterations = 50;
+        let mut messages = vec![vec![0.0; FT8_LDPC_CHECK_TO_VALUE.len()]; self.codeword.len()];
+
+        for _ in 0..max_iterations {
+            // Variable nodes to check nodes
+            for (i, &llr) in self.log_liklyhood_ratios.iter().enumerate() {
+                for (j, check_nodes) in FT8_LDPC_CHECK_TO_VALUE.iter().enumerate() {
+                    let mut message = llr;
+                    for &k in *check_nodes {
+                        if k != i {
+                            message += messages[k][j];
+                        }
+                    }
+                    messages[i][j] = message;
+                }
+            }
+
+            // Check nodes to variable nodes
+            for (j, check_nodes) in FT8_LDPC_CHECK_TO_VALUE.iter().enumerate() {
+                for &i in *check_nodes {
+                    let mut product = 1.0;
+                    for &k in *check_nodes {
+                        if k != i {
+                            product *= (1.0 - 2.0 * messages[k][j].tanh());
+                        }
+                    }
+                    messages[i][j] = 0.5 * (1.0 + product).ln();
+                }
+            }
+
+            // Update beliefs
+            let original_llrs = self.log_liklyhood_ratios.clone();
+            for (i, llr) in self.log_liklyhood_ratios.iter_mut().enumerate() {
+                *llr = original_llrs[i];
+                for (j, check_nodes) in FT8_LDPC_CHECK_TO_VALUE.iter().enumerate() {
+                    if check_nodes.contains(&i) {
+                        *llr += messages[i][j];
+                    }
+                }
+            }
+        }
+
+        // Set the codeword from updated LLRs
         for (i, &llr) in self.log_liklyhood_ratios.iter().enumerate() {
             self.codeword.set(i, llr > 0.0);
         }
@@ -306,6 +344,16 @@ mod tests {
             1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0
         ]).unwrap();
         assert!(!codeword.is_valid());
+    }
+
+    #[test]
+    fn from_invalid_log_likelihood_ratios_solve() {
+        let mut codeword = Ft8_Ldpc::from_log_likelihood_ratios(&vec![
+            1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+        ]).unwrap();
+        assert!(!codeword.is_valid());
+        codeword.solve();
+        assert!(codeword.is_valid());
     }
 
     #[test]
