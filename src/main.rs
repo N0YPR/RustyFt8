@@ -1,8 +1,11 @@
 use std::env;
 
+use constants::SAMPLE_RATE;
 use error_correction::ldpc::Ft8_Ldpc;
+use hound::{WavSpec, WavWriter};
 use message::Message;
 use modulation::Modulator;
+use simulation::noise::{apply_bandpass_filter, generate_white_noise_s9, mix_waveform, rms_power, HIGH_CUTOFF_HZ, LOW_CUTOFF_HZ};
 
 mod constants;
 mod error_correction;
@@ -58,30 +61,30 @@ fn main() {
     let modulator = Modulator::new();
     let waveform = modulator.modulate(&channel_symbols, carrier_frequency);
 
-    // let mut samples:Vec<f32> = vec![0.0; (SAMPLE_RATE * 15.0) as usize];
+    let mut samples:Vec<f32> = vec![0.0; (SAMPLE_RATE * 15.0) as usize];
     
-    // // Calculate noise standard deviation and power
-    // // let noise_db = 30.0;
-    // // let noise_sigma = (10.0_f32).powf(noise_db / 20.0);
-    // // let noise_power = 2500_f32 / SAMPLE_RATE * 2_f32 * noise_sigma * noise_sigma;  // Noise power in 2.5kHz
-    // // println!("noise_sigma: {}", noise_sigma);
+    // Calculate noise standard deviation and power
+    // let noise_db = 30.0;
+    // let noise_sigma = (10.0_f32).powf(noise_db / 20.0);
+    // let noise_power = 2500_f32 / SAMPLE_RATE * 2_f32 * noise_sigma * noise_sigma;  // Noise power in 2.5kHz
+    // println!("noise_sigma: {}", noise_sigma);
 
     // // generate white noise
-    // let mut samples = generate_white_noise_s9(15 * SAMPLE_RATE as usize);
+    let mut samples = generate_white_noise_s9(15 * SAMPLE_RATE as usize);
 
     // // Apply Band-Pass Filter (300 Hz – 2700 Hz)
-    // let mut samples = apply_bandpass_filter(&samples, SAMPLE_RATE as u32, LOW_CUTOFF_HZ, HIGH_CUTOFF_HZ);
+    let mut samples = apply_bandpass_filter(&samples, SAMPLE_RATE as u32, LOW_CUTOFF_HZ, HIGH_CUTOFF_HZ);
 
-    // let noise_rms = rms_power(&samples);
+    let noise_rms = rms_power(&samples);
 
     // // Calculate signal amplitude
     // // let snr = 0.0_f32;
     // // let tx_power = noise_power * 10_f32.powf(snr / 10_f32);
     // // let amplitude = (2.0_f32 * tx_power).sqrt();
 
-    // let starting_sample = ((0.5 + delta_time) * SAMPLE_RATE) as usize;
+    let starting_sample = ((0.5 + delta_time) * SAMPLE_RATE) as usize;
 
-    // mix_waveform(&mut samples, noise_rms, &waveform, starting_sample, -10.0);
+    mix_waveform(&mut samples, noise_rms, &waveform, starting_sample, -10.0);
 
     // // let mut carrier_frequency = 500.0;
     // // while carrier_frequency < 2800.0 {
@@ -131,16 +134,16 @@ fn main() {
     
 
     
-    // let wavspec = WavSpec {
-    //     channels: 1,
-    //     sample_rate: 12000,
-    //     bits_per_sample: 16,
-    //     sample_format: hound::SampleFormat::Int
-    // };
-    // let mut writer = WavWriter::create("output.wav", wavspec).unwrap();
+    let wavspec = WavSpec {
+        channels: 1,
+        sample_rate: 12000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int
+    };
+    let mut writer = WavWriter::create("output.wav", wavspec).unwrap();
 
-    // for &sample in &samples {
-    //     let int_sample = (sample * i16::MAX as f32) as i16;
-    //     writer.write_sample(int_sample).unwrap();
-    // }
+    for &sample in &samples {
+        let int_sample = (sample * i16::MAX as f32) as i16;
+        writer.write_sample(int_sample).unwrap();
+    }
 }

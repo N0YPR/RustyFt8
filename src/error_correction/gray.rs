@@ -1,62 +1,35 @@
-use std::collections::HashMap;
+use crate::constants::{FT8_GRAY_DECODE, FT8_GRAY_ENCODE};
 
-use crate::constants::FT8_GRAY_CODE;
-
-pub struct GrayCode {
-    encoder: HashMap<u8, u8>,
-    decoder: HashMap<u8, u8>
+pub fn encode(symbols: &[u8]) -> Vec<u8> {
+    let mut encoded = vec![];
+    for symbol in symbols {
+        let encoded_symbol = FT8_GRAY_ENCODE[*symbol as usize];
+        encoded.push(encoded_symbol);
+    }
+    let encoded = encoded;
+    encoded
 }
 
-impl GrayCode {
-    pub fn new() -> Self {
-        let mut encoder: HashMap<u8,u8> = HashMap::new();
-        let mut decoder: HashMap<u8,u8> = HashMap::new();
-
-        for i in 0..FT8_GRAY_CODE.len() {
-            let symbol = i as u8;
-            let encoded_symbol = FT8_GRAY_CODE[i];
-            encoder.insert(symbol, encoded_symbol);
-            decoder.insert(encoded_symbol, symbol);
-        }
-
-        GrayCode {
-            encoder,
-            decoder
-        }
+pub fn decode(symbols: &[u8]) -> Vec<u8> {
+    let mut decoded = vec![];
+    for symbol in symbols {
+        let decoded_symbol = FT8_GRAY_DECODE[*symbol as usize];
+        decoded.push(decoded_symbol);
     }
-
-    pub fn encode(&self, symbols: &[u8]) -> Vec<u8> {
-        let mut encoded = vec![];
-        for symbol in symbols {
-            let encoded_symbol = *self.encoder.get(symbol).unwrap();
-            encoded.push(encoded_symbol);
-        }
-        let encoded = encoded;
-        encoded
-    }
-
-    pub fn decode(&self, symbols: &[u8]) -> Vec<u8> {
-        let mut decoded = vec![];
-        for symbol in symbols {
-            let decoded_symbol = *self.decoder.get(symbol).unwrap();
-            decoded.push(decoded_symbol);
-        }
-        let decoded = decoded;
-        decoded
-    }
+    let decoded = decoded;
+    decoded
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::error_correction::gray::GrayCode;
+    use super::*;
 
     #[test]
     fn test_gray_encoding() {
         let symbols:Vec<u8> = vec![0,1,2,3,4,5,6,7];
         let expected:Vec<u8> = vec![0,1,3,2,5,6,4,7];
 
-        let encoder = GrayCode::new();
-        let gray_encoded = encoder.encode(&symbols);
+        let gray_encoded = encode(&symbols);
 
         assert_eq!(expected, gray_encoded);
     }
@@ -64,9 +37,8 @@ mod tests {
     #[test]
     fn encode_and_decode() {
         let symbols:Vec<u8> = vec![7, 0, 2, 7, 4, 1, 3, 2, 3, 6, 4, 1, 0, 0, 7, 6, 0, 2, 4, 1, 4, 3, 5, 3, 5, 3, 2, 4, 2, 1, 1, 6, 3, 7, 4, 6, 4, 0, 2, 7, 7, 3, 5, 6, 4, 2, 2, 5, 4, 3, 0, 0, 0, 2, 5, 3, 0, 1];
-        let encoder = GrayCode::new();
-        let gray_encoded = encoder.encode(&symbols);
-        let gray_decoded = encoder.decode(&gray_encoded);
+        let gray_encoded = encode(&symbols);
+        let gray_decoded = decode(&gray_encoded);
         assert_eq!(gray_decoded, symbols);
     }    
 }

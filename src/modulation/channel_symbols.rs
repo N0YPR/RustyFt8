@@ -1,5 +1,5 @@
 use bitvec::prelude::*;
-use crate::{constants::FT8_COSTAS, error_correction::gray::GrayCode};
+use crate::{constants::FT8_COSTAS, error_correction::gray::{encode, decode}};
 
 pub fn channel_symbols(bits: &BitSlice) -> Vec<u8> {
     // convert the bits into 3 bit symbols
@@ -10,8 +10,7 @@ pub fn channel_symbols(bits: &BitSlice) -> Vec<u8> {
     }
 
     // gray encode the symbols
-    let gray = GrayCode::new();
-    let gray_coded_symbols = gray.encode(&symbols);
+    let gray_coded_symbols = encode(&symbols);
 
     // add the costas arrays
     let mut channel_symbols: Vec<u8> = Vec::new();
