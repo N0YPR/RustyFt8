@@ -5,7 +5,12 @@ use error_correction::ldpc::Ft8_Ldpc;
 use hound::{WavSpec, WavWriter};
 use message::Message;
 use modulation::Modulator;
+use rustfft::{num_complex::Complex, FftPlanner};
 use simulation::noise::{apply_bandpass_filter, generate_white_noise_s9, mix_waveform, rms_power, HIGH_CUTOFF_HZ, LOW_CUTOFF_HZ};
+use sonogram::{ColourGradient, FrequencyScale, SpecOptionsBuilder};
+use std::time::Instant;
+use plotly::common::Mode;
+use plotly::{Plot, Scatter};
 
 mod constants;
 mod error_correction;
@@ -40,12 +45,14 @@ fn main() {
     let message_str: &str = &args[1];
 
     let delta_time = 0.0;
-    let carrier_frequency: f32 = 2000.0;
+    let carrier_frequency: f32 = 1500.0;
 
     let message = Message::try_from(message_str).unwrap();
 
     println!("Message: {}", message.display_string);
-    println!("Message Bits: {:077b}", message.message);
+    let message_bits_string = format!("{:077b}", message.message);
+    println!("Message Bits: {}", message_bits_string);
+    println!("Message Bits Len: {}", message_bits_string.len());
 
     let codeword = Ft8_Ldpc::from_message(message.message);
 
@@ -84,7 +91,7 @@ fn main() {
 
     let starting_sample = ((0.5 + delta_time) * SAMPLE_RATE) as usize;
 
-    mix_waveform(&mut samples, noise_rms, &waveform, starting_sample, -10.0);
+    mix_waveform(&mut samples, noise_rms, &waveform, starting_sample, -15.0);
 
     // // let mut carrier_frequency = 500.0;
     // // while carrier_frequency < 2800.0 {
@@ -131,7 +138,8 @@ fn main() {
     // //     signal[i] = signal[i] + waveform[i] * amplitude;
     // // }
 
-    
+
+    let i16_samples: Vec<i16> = samples.iter().map(|&sample| (sample * i16::MAX as f32) as i16).collect();
 
     
     let wavspec = WavSpec {
@@ -142,8 +150,70 @@ fn main() {
     };
     let mut writer = WavWriter::create("output.wav", wavspec).unwrap();
 
-    for &sample in &samples {
-        let int_sample = (sample * i16::MAX as f32) as i16;
-        writer.write_sample(int_sample).unwrap();
+    // for &sample in &samples {
+    //     let int_sample = (sample * i16::MAX as f32) as i16;
+    //     writer.write_sample(int_sample).unwrap();
+    // }
+    for &sample in i16_samples.iter() {
+        writer.write_sample(sample).unwrap();
     }
+    
+    // Calculate the spectrogram
+    let start = Instant::now();
+    let spectrogram = calculate_spectrogram(&samples, 1920);
+    let duration = start.elapsed();
+
+    println!("Time taken to calculate spectrogram: {:?}", duration);
+
+    let start_plot = Instant::now();
+    plot_spectrogram(&spectrogram);
+    let duration_plot = start_plot.elapsed();
+    println!("Time taken to plot spectrogram: {:?}", duration_plot);
+}
+
+
+fn calculate_spectrogram(data: &[f32], samples_per_symbol: usize) -> Vec<Vec<f32>> {
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(samples_per_symbol * 2);
+
+    let mut spectrogram = Vec::new();
+    let step_size = samples_per_symbol / 4;
+
+    for start in (0..data.len() - samples_per_symbol).step_by(step_size) {
+        let mut window: Vec<Complex<f32>> = data[start..start + samples_per_symbol]
+            .iter()
+            .map(|&x| Complex::new(x, 0.0))
+            .collect();
+
+        // Zero padding
+        window.resize(samples_per_symbol * 2, Complex::new(0.0, 0.0));
+
+        // Perform FFT
+        fft.process(&mut window);
+
+        // Calculate power spectrum
+        let power_spectrum: Vec<f32> = window.iter().map(|c| c.norm_sqr()).collect();
+        spectrogram.push(power_spectrum);
+    }
+
+    spectrogram
+}
+
+fn plot_spectrogram(spectrogram: &[Vec<f32>]) {
+    let mut plot = Plot::new();
+    
+    let z: Vec<Vec<f64>> = spectrogram
+        .iter()
+        .map(|row| row.iter().map(|&val| val as f64).collect())
+        .collect();
+
+    let trace = plotly::HeatMap::new(
+        (0..spectrogram.len()).collect::<Vec<_>>(),
+        (0..spectrogram[0].len()).collect::<Vec<_>>(),
+        z,
+    );
+
+    plot.add_trace(trace);
+
+    plot.write_image("output.png", plotly::ImageFormat::PNG, 800, 600, 1.0);
 }
