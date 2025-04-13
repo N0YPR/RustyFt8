@@ -1,16 +1,18 @@
+use std::arch::x86_64;
 use std::env;
 
-use constants::SAMPLE_RATE;
+use constants::{SAMPLE_RATE, SYMBOL_RATE};
 use error_correction::ldpc::Ft8_Ldpc;
 use hound::{WavSpec, WavWriter};
 use message::Message;
 use modulation::Modulator;
+use plotters::prelude::*;
 use rustfft::{num_complex::Complex, FftPlanner};
 use simulation::noise::{apply_bandpass_filter, generate_white_noise_s9, mix_waveform, rms_power, HIGH_CUTOFF_HZ, LOW_CUTOFF_HZ};
-use sonogram::{ColourGradient, FrequencyScale, SpecOptionsBuilder};
+use sonogram::{ColourGradient, FrequencyScale, SpecOptionsBuilder, Spectrogram};
 use std::time::Instant;
-use plotly::common::Mode;
-use plotly::{Plot, Scatter};
+use plotly::common::{ColorScalePalette, Mode};
+use plotly::{HeatMap, Plot, Scatter};
 
 mod constants;
 mod error_correction;
@@ -93,55 +95,8 @@ fn main() {
 
     mix_waveform(&mut samples, noise_rms, &waveform, starting_sample, -15.0);
 
-    // // let mut carrier_frequency = 500.0;
-    // // while carrier_frequency < 2800.0 {
-    // //     let msg_str = format!("HZ{}", carrier_frequency);
-    // //     println!("{}", msg_str);
-    // //     let message = Message::try_from(msg_str).unwrap();
-    // //     let waveform = modulator.modulate(&message.channel_symbols, carrier_frequency);
-    // //     mix_waveform(&mut samples, noise_rms, &waveform, starting_sample, -10.0);
-    // //     carrier_frequency += 100.0;
-    // // }
-    // // normalize_signal(&mut samples);
-
-    // // // Apply QSB to our signal (Slow Fading)
-    // // //let waveform = apply_qsb(&waveform, SAMPLE_RATE as u32, QSB_FREQ_HZ);
-
-    // // // Introduce weak carrier-like fluttering to our signal
-    // // //let waveform = apply_fluttering(&waveform, SAMPLE_RATE as u32, FLUTTER_FREQ_HZ);
-
-    // // // Calculate noise standard deviation and power
-    // // let noise_db = 30.0;
-    // // let noise_sigma = (10.0_f32).powf(noise_db / 20.0);
-    // // let noise_power = 2500_f32 / SAMPLE_RATE * 2_f32 * noise_sigma * noise_sigma;  // Noise power in 2.5kHz
-
-    // // // generate white noise
-    // // let mut signal = generate_white_noise(15 * SAMPLE_RATE as usize, noise_sigma);
-
-    // // // Calculate signal amplitude
-    // // let snr = -10_f32;
-    // // let tx_power = noise_power * 10_f32.powf(snr / 10_f32);
-    // // let amplitude = (2.0_f32 * tx_power).sqrt();
-
-    // // // add our waveform
-    // // //let amplitude = 0.25;
-    // // let starting_sample = ((0.5 + delta_time) * SAMPLE_RATE) as usize;
-    // // for i in 0..signal.len() {
-    // //     if i < starting_sample {
-    // //         continue;
-    // //     }
-
-    // //     if i >= waveform.len() {
-    // //         break;
-    // //     }
-
-    // //     signal[i] = signal[i] + waveform[i] * amplitude;
-    // // }
-
-
     let i16_samples: Vec<i16> = samples.iter().map(|&sample| (sample * i16::MAX as f32) as i16).collect();
 
-    
     let wavspec = WavSpec {
         channels: 1,
         sample_rate: 12000,
@@ -150,70 +105,100 @@ fn main() {
     };
     let mut writer = WavWriter::create("output.wav", wavspec).unwrap();
 
-    // for &sample in &samples {
-    //     let int_sample = (sample * i16::MAX as f32) as i16;
-    //     writer.write_sample(int_sample).unwrap();
-    // }
     for &sample in i16_samples.iter() {
         writer.write_sample(sample).unwrap();
     }
-    
-    // Calculate the spectrogram
-    let start = Instant::now();
-    let spectrogram = calculate_spectrogram(&samples, 1920);
-    let duration = start.elapsed();
 
-    println!("Time taken to calculate spectrogram: {:?}", duration);
+    let spectrogram = generate_spectrogram(&samples);
+    save_spectrogram_image(&spectrogram, "spectrogram.png");
+    println!("Spectrogram image saved!");
 
-    let start_plot = Instant::now();
-    plot_spectrogram(&spectrogram);
-    let duration_plot = start_plot.elapsed();
-    println!("Time taken to plot spectrogram: {:?}", duration_plot);
 }
 
+fn generate_spectrogram(audio_data: &[f32]) -> Vec<Vec<f32>> {
+    let mut spectrogram =  Vec::new();
 
-fn calculate_spectrogram(data: &[f32], samples_per_symbol: usize) -> Vec<Vec<f32>> {
+    let dtf_real_samples: usize = (SAMPLE_RATE / SYMBOL_RATE) as usize;
+    let dft_window_size: usize = dtf_real_samples * 2;
+    let time_step: usize = (SAMPLE_RATE / SYMBOL_RATE / 4.0) as usize;
+
     let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_forward(samples_per_symbol * 2);
+    let fft = planner.plan_fft_forward(dft_window_size);
+    
+    for start in (0..audio_data.len() - dtf_real_samples).step_by(time_step) {
+        let window = &audio_data[start..start + dtf_real_samples];
 
-    let mut spectrogram = Vec::new();
-    let step_size = samples_per_symbol / 4;
-
-    for start in (0..data.len() - samples_per_symbol).step_by(step_size) {
-        let mut window: Vec<Complex<f32>> = data[start..start + samples_per_symbol]
+        let mut buffer: Vec<Complex<f32>> = window
             .iter()
             .map(|&x| Complex::new(x, 0.0))
             .collect();
+        buffer.resize(dft_window_size, Complex::new(0.0, 0.0));
 
-        // Zero padding
-        window.resize(samples_per_symbol * 2, Complex::new(0.0, 0.0));
+        fft.process(&mut buffer);
+        
+        // Take only the first half of the FFT output (positive frequencies)
+        let magnitudes: Vec<f32> = buffer
+            .iter()
+            .take(dft_window_size / 2)
+            .map(|c| c.norm())
+            .collect();
 
-        // Perform FFT
-        fft.process(&mut window);
-
-        // Calculate power spectrum
-        let power_spectrum: Vec<f32> = window.iter().map(|c| c.norm_sqr()).collect();
-        spectrogram.push(power_spectrum);
+        spectrogram.push(magnitudes);
     }
-
     spectrogram
 }
 
-fn plot_spectrogram(spectrogram: &[Vec<f32>]) {
-    let mut plot = Plot::new();
-    
+fn save_spectrogram_image(spectrogram: &[Vec<f32>], output_path: &str) {
+    use plotly::{HeatMap, Plot};
+    use plotly::common::{ColorScale, ColorScalePalette};
+
+    // Define the maximum frequency to plot
+    let max_frequency = 3000.0;
+    let frequency_resolution = SAMPLE_RATE as f64 / (2.0 * spectrogram[0].len() as f64); // Frequency resolution
+    let max_columns = (max_frequency / frequency_resolution).ceil() as usize;
+
+    println!("{}, {}, {}", max_frequency, frequency_resolution, max_columns);
+
+    // Convert spectrogram to a format suitable for plotting, truncating to max_columns
     let z: Vec<Vec<f64>> = spectrogram
-        .iter()
-        .map(|row| row.iter().map(|&val| val as f64).collect())
+        .iter().rev()
+        .map(|row| row.iter().take(max_columns).map(|&val| val as f64).collect())
         .collect();
 
-    let trace = plotly::HeatMap::new(
-        (0..spectrogram.len()).collect::<Vec<_>>(),
-        (0..spectrogram[0].len()).collect::<Vec<_>>(),
-        z,
-    );
+    // Generate x (frequency) and y (time) axes
+    let x: Vec<f64> = (0..max_columns)
+        .map(|i| i as f64 * frequency_resolution)
+        .collect(); // Frequency bins
 
-    plot.add_trace(trace);
+    let y: Vec<f64> = (0..spectrogram.len())
+        .map(|i| i as f64)
+        .collect(); // Time steps
 
-    plot.write_image("output.png", plotly::ImageFormat::PNG, 800, 600, 1.0);
+
+    // // Convert spectrogram to a format suitable for plotting
+    // let z: Vec<Vec<f64>> = spectrogram
+    //     .iter()
+    //     .map(|row| row.iter().map(|&val| val as f64).collect())
+    //     .collect();
+
+    // // Generate x (frequency) and y (time) axes
+    // let x: Vec<f64> = (0..spectrogram[0].len())
+    //     .map(|i| i as f64 * 3.125f64)
+    //     .collect(); // Frequency bins
+
+    // let y: Vec<f64> = (0..spectrogram.len())
+    //     .map(|i| i as f64)
+    //     .collect();
+
+    // Create the heatmap
+    let heatmap = HeatMap::new(x, y, z).color_scale(ColorScale::Palette(ColorScalePalette::Viridis));
+
+    // Create the plot
+    let mut plot = Plot::new();
+    plot.add_trace(heatmap);
+
+    // Save the plot as an image
+    
+    plot.write_image(output_path, plotly::ImageFormat::PNG, 1024, 768, 1.0);
+
 }
