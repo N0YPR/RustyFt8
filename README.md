@@ -11,6 +11,11 @@ To encode a 'typical' FT8 transmission, with white noise added, into a wav file,
 
 ```cargo run "CQ SOTA N0YPR/R DM43"```
 
+# Acknowledgements
+The following were used as inspiration and reference material for this project:
+- [FT8 QEX article](https://wsjt.sourceforge.io/FT4_FT8_QEX.pdf) The official 'documentation' of the FT8 protocol originally published in QEX.
+- [WSJT-X Source](https://sourceforge.net/p/wsjt/wsjtx/ci/master/tree/) WSJT-X Sourcecode, a mixture of Fortran and C++.
+- [ft8-notes](https://github.com/vk3jpk/ft8-notes) A great explanation on how FT8 works written by VK3JPK. Easier to understand than reading the original Fortran code.
 
 # Development Environment Setup with VS Code Dev Containers
 
