@@ -103,14 +103,14 @@ fn main() {
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int
     };
-    let mut writer = WavWriter::create("output.wav", wavspec).unwrap();
-
+    let mut writer = WavWriter::create("plots/output.wav", wavspec).unwrap();
     for &sample in i16_samples.iter() {
         writer.write_sample(sample).unwrap();
     }
+    println!("Wav file saved!");
 
     let spectrogram = generate_spectrogram(&samples);
-    save_spectrogram_image(&spectrogram, "spectrogram.png");
+    save_spectrogram_image(&spectrogram, "plots/spectrogram.png");
     println!("Spectrogram image saved!");
 
 }
