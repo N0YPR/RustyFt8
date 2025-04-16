@@ -11,8 +11,7 @@ To encode a 'typical' FT8 transmission, with white noise added, into a wav file,
 
 ```cargo run "CQ SOTA N0YPR/R DM43"```
 
-This will encode the transmission, add in some gaussian noise, and write it out as a wav file in plots folder. ▶️ [Click here to play the audio](./plots/output.wav)
-
+This will encode the transmission, add in some gaussian noise, and write it out as a [wav file in plots folder](./plots/output.wav).
 
 # Acknowledgements
 The following were used as inspiration and reference material for this project:
