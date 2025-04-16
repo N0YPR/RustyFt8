@@ -13,6 +13,12 @@ To encode a 'typical' FT8 transmission, with white noise added, into a wav file,
 
 This will encode the transmission, add in some gaussian noise, and write it out as a [wav file in plots folder](./plots/output.wav).
 
+This wav file should be decodable by the WSJT-X application as seen here:
+<img src="./plots/WSJTX_screenshot.png" alt="Spectrogram" width="600"/>
+
+This will also eventually decode the the transmission.
+<img src="./plots/spectrogram.png" alt="Spectrogram" width="600"/> 
+
 # Acknowledgements
 The following were used as inspiration and reference material for this project:
 - [FT8 QEX article](https://wsjt.sourceforge.io/FT4_FT8_QEX.pdf) The official 'documentation' of the FT8 protocol originally published in QEX.
