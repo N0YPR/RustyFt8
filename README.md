@@ -1,7 +1,7 @@
 # RustyFt8
 An implementation of FT8 using Rust.
 
-This project strives to eventually be a complete implementation of the FT8 protocol. Unlike the official WSJT-X project, however, this project will never implement a UI itself. The intent is to expoe a library that can be used by any number of UI implementations. One plamnned example would be a web based UI that can be run on a Raspberry PI or similar embedded compute device whose UI can be accessed via a tablet or phone. 
+This project strives to eventually be a complete implementation of the FT8 protocol. Unlike the official WSJT-X project, however, this project will never implement a UI itself. The intent is to expose a library that can be used by any number of UI implementations. One planned example would be a web based UI that can be run on a Raspberry PI or similar embedded compute device whose UI can be accessed via a tablet or phone. 
 
 The short term goal of this project, however, is simply being able to encode an FT8 transmission into a wav file, then decode said wav file.
 
