@@ -1,4 +1,3 @@
-use std::arch::x86_64;
 use std::env;
 
 use constants::{SAMPLE_RATE, SYMBOL_RATE};
@@ -6,14 +5,8 @@ use error_correction::ldpc::Ft8_Ldpc;
 use hound::{WavSpec, WavWriter};
 use message::Message;
 use modulation::Modulator;
-use plotters::prelude::*;
 use rustfft::{num_complex::Complex, FftPlanner};
 use simulation::noise::{apply_bandpass_filter, generate_white_noise_s9, mix_waveform, rms_power, HIGH_CUTOFF_HZ, LOW_CUTOFF_HZ};
-use sonogram::{ColourGradient, FrequencyScale, SpecOptionsBuilder, Spectrogram};
-use std::time::Instant;
-use plotly::common::{ColorScalePalette, Mode};
-use plotly::{HeatMap, Plot, Scatter};
-
 mod constants;
 mod error_correction;
 mod message;
