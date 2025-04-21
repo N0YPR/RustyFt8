@@ -11,7 +11,6 @@ use rustfft::{num_complex::Complex, FftPlanner};
 use simulation::noise::{
     apply_bandpass_filter, generate_white_noise_s9, mix_waveform, rms_power, HIGH_CUTOFF_HZ,
     LOW_CUTOFF_HZ,
-};
 mod constants;
 mod error_correction;
 mod message;
