@@ -1,11 +1,13 @@
-pub const FT8_CHAR_TABLE_FULL:&str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-./?";
-pub const FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH:&str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/";
-pub const FT8_CHAR_TABLE_ALPHANUM_SPACE:&str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-pub const FT8_CHAR_TABLE_ALPHA_SPACE:&str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-pub const FT8_CHAR_TABLE_GRIDSQUARE_ALPHA:&str = "ABCDEFGHIJKLMNOPQR";
-pub const FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_SIX:&str = "ABCDEFGHIJKLMNOPQRSTUVWX";
-pub const FT8_CHAR_TABLE_ALPHANUM:&str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-pub const FT8_CHAR_TABLE_NUMERIC:&str = "0123456789";
+#![allow(unused)]
+
+pub const FT8_CHAR_TABLE_FULL: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-./?";
+pub const FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/";
+pub const FT8_CHAR_TABLE_ALPHANUM_SPACE: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+pub const FT8_CHAR_TABLE_ALPHA_SPACE: &str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+pub const FT8_CHAR_TABLE_GRIDSQUARE_ALPHA: &str = "ABCDEFGHIJKLMNOPQR";
+pub const FT8_CHAR_TABLE_GRIDSQUARE_ALPHA_SIX: &str = "ABCDEFGHIJKLMNOPQRSTUVWX";
+pub const FT8_CHAR_TABLE_ALPHANUM: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+pub const FT8_CHAR_TABLE_NUMERIC: &str = "0123456789";
 
 // https://github.com/vk3jpk/ft8-notes/blob/master/ft8.py#L29
 // https://gist.github.com/NT7S/6e38d8a35d153f015d476bc49b40effb
@@ -15,7 +17,7 @@ pub const FT8_CHAR_TABLE_NUMERIC:&str = "0123456789";
 // drop msb
 // 10011101010111
 // 0x2757
-pub const CRC_POLYNOMIAL:u16 = 0x2757;
+pub const CRC_POLYNOMIAL: u16 = 0x2757;
 
 pub const FT8_GRAY_ENCODE: [u8; 8] = [0, 1, 3, 2, 5, 6, 4, 7];
 pub const FT8_GRAY_DECODE: [u8; 8] = [0, 1, 3, 2, 6, 4, 5, 7];
@@ -25,7 +27,7 @@ pub const SYMBOL_RATE: f32 = 6.25;
 pub const SAMPLE_RATE: f32 = 12_000.0;
 pub const TONE_SPACING: f32 = 6.25;
 pub const CHANNEL_SYMBOLS_COUNT: usize = 79;
-pub const FT8_COSTAS: [u8; 7] = [3,1,4,0,6,5,2];
+pub const FT8_COSTAS: [u8; 7] = [3, 1, 4, 0, 6, 5, 2];
 
 // reference: https://sourceforge.net/p/wsjt/wsjtx/ci/master/tree/lib/ft8/ldpc_174_91_c_generator.f90
 // rather than a bunch of strings as in the fortran code, provide
@@ -114,12 +116,13 @@ pub const FT8_LDPC_GENERATOR_MATRIX: [u128; 83] = [
     0xc989d9c7c3d3b8c55d75130 >> 1,
     0x7bb38b2f0186d46643ae962 >> 1,
     0x2644ebadeb44b9467d1f42c >> 1,
-    0x608cc857594bfbb55d69600 >> 1 ];
+    0x608cc857594bfbb55d69600 >> 1,
+];
 
 // https://sourceforge.net/p/wsjt/wsjtx/ci/master/tree/lib/ft8/ldpc_174_91_c_parity.f90
-// Because it was fortran, all the indicies were 1 based, so subtracted 1 from each. 
+// Because it was fortran, all the indicies were 1 based, so subtracted 1 from each.
 // Because it was a one dimmensional array, needed to nest them
-pub const FT8_LDPC_VALUE_TO_CHECK: &'static [&'static[usize]] = &[
+pub const FT8_LDPC_VALUE_TO_CHECK: &'static [&'static [usize]] = &[
     &[15, 44, 72],
     &[24, 50, 61],
     &[32, 57, 77],
@@ -293,13 +296,13 @@ pub const FT8_LDPC_VALUE_TO_CHECK: &'static [&'static[usize]] = &[
     &[40, 41, 62],
     &[48, 74, 82],
     &[19, 43, 47],
-    &[41, 48, 56]
+    &[41, 48, 56],
 ];
 
 // https://sourceforge.net/p/wsjt/wsjtx/ci/master/tree/lib/ft8/ldpc_174_91_c_parity.f90
-// Because it was fortran, all the indicies were 1 based, so subtracted 1 from each. 
+// Because it was fortran, all the indicies were 1 based, so subtracted 1 from each.
 // Because it was a one dimmensional array, needed to nest them
-pub const FT8_LDPC_CHECK_TO_VALUE: &'static [&'static[usize]] = &[
+pub const FT8_LDPC_CHECK_TO_VALUE: &'static [&'static [usize]] = &[
     &[3, 30, 58, 90, 91, 95, 152],
     &[4, 31, 59, 92, 114, 145],
     &[5, 23, 60, 93, 121, 150],
@@ -382,5 +385,5 @@ pub const FT8_LDPC_CHECK_TO_VALUE: &'static [&'static[usize]] = &[
     &[14, 57, 59, 73, 110, 149, 162],
     &[17, 41, 78, 143, 145, 151],
     &[24, 37, 64, 98, 121, 159],
-    &[16, 41, 74, 128, 169, 171]
+    &[16, 41, 74, 128, 169, 171],
 ];

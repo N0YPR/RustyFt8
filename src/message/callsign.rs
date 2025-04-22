@@ -1,12 +1,14 @@
+#![allow(unused)]
+
+use crate::constants::*;
+use lazy_static::lazy_static;
+use lru::LruCache;
+use snafu::prelude::*;
 use std::fmt::Display;
 use std::sync::Mutex;
-use lru::LruCache;
-use lazy_static::lazy_static;
-use snafu::prelude::*;
-use crate::constants::*;
 
-use super::radix::ToStrMixedRadix;
 use super::radix::FromMixedRadixStr;
+use super::radix::ToStrMixedRadix;
 
 lazy_static! {
     static ref CALLSIGN_CACHE: Mutex<LruCache<u32, String>> = Mutex::new(LruCache::new(10000));
@@ -23,19 +25,30 @@ pub struct Callsign {
     pub packed_28bits: u32,
     pub hashed_22bits: u32,
     pub hashed_12bits: u32,
-    pub hashed_10bits: u32
+    pub hashed_10bits: u32,
 }
 
 impl Display for Callsign {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.callsign, if self.is_rover {"/R"} else if self.is_portable {"/P"} else {""})
+        write!(
+            f,
+            "{}{}",
+            self.callsign,
+            if self.is_rover {
+                "/R"
+            } else if self.is_portable {
+                "/P"
+            } else {
+                ""
+            }
+        )
     }
 }
 
 impl TryFrom<u32> for Callsign {
-   type Error = ParseCallsignError;
-   
-   fn try_from(value: u32) -> Result<Self, Self::Error> {
+    type Error = ParseCallsignError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
         if value == 0 {
             return Callsign::from_callsign_str("DE");
         }
@@ -72,28 +85,29 @@ impl TryFrom<u32> for Callsign {
             if let Some(c) = get_hashed_callsign_string(value) {
                 return Callsign::from_callsign_str(&c);
             }
-            let c = Callsign{
-                callsign : "...".to_string(),
+            let c = Callsign {
+                callsign: "...".to_string(),
                 is_rover: false,
                 is_portable: false,
                 is_hashed: true,
                 was_hashed: false,
-                packed_58bits : 0,
-                packed_28bits : value,
-                hashed_22bits : (value - 2063592), 
-                hashed_12bits : (value - 2063592) >> 10, 
-                hashed_10bits : (value - 2063592) >>  12};
+                packed_58bits: 0,
+                packed_28bits: value,
+                hashed_22bits: (value - 2063592),
+                hashed_12bits: (value - 2063592) >> 10,
+                hashed_10bits: (value - 2063592) >> 12,
+            };
             return Ok(c);
         }
 
-        if value >= 6257896 && value <= 274693351{
+        if value >= 6257896 && value <= 274693351 {
             let radix_tables = [
                 FT8_CHAR_TABLE_ALPHANUM_SPACE,
                 FT8_CHAR_TABLE_ALPHANUM,
                 FT8_CHAR_TABLE_NUMERIC,
                 FT8_CHAR_TABLE_ALPHA_SPACE,
                 FT8_CHAR_TABLE_ALPHA_SPACE,
-                FT8_CHAR_TABLE_ALPHA_SPACE
+                FT8_CHAR_TABLE_ALPHA_SPACE,
             ];
             let mut s = match (value - 6257896).to_str_mixed_radix(&radix_tables) {
                 Ok(value) => value,
@@ -101,27 +115,25 @@ impl TryFrom<u32> for Callsign {
                     return Err(ParseCallsignError::OutOfRange);
                 }
             };
-            
+
             // special case for 3DA0...
             if s.starts_with("3D0") {
-                s = s.replacen("3D0","3DA0", 1,);
+                s = s.replacen("3D0", "3DA0", 1);
             }
 
             // special case for 3XB...
             if s.starts_with("Q") {
                 s = s.replacen("Q", "3X", 1);
             }
-           
 
             return Callsign::from_callsign_str(s.trim());
         }
 
         return Err(ParseCallsignError::OutOfRange);
     }
-   
 }
 
-impl TryFrom <u64> for Callsign {
+impl TryFrom<u64> for Callsign {
     type Error = ParseCallsignError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
@@ -136,7 +148,7 @@ impl TryFrom <u64> for Callsign {
             FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH,
             FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH,
             FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH,
-            FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH
+            FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH,
         ];
         let s = match value.to_str_mixed_radix(&radix_table) {
             Ok(value) => value,
@@ -151,25 +163,36 @@ impl TryFrom <u64> for Callsign {
 
 impl Callsign {
     pub fn to_string(&self) -> String {
-        format!("{}{}", self.callsign, if self.is_rover {"/R"} else if self.is_portable {"/P"} else {""})
+        format!(
+            "{}{}",
+            self.callsign,
+            if self.is_rover {
+                "/R"
+            } else if self.is_portable {
+                "/P"
+            } else {
+                ""
+            }
+        )
     }
 
-    pub fn try_from_callsign_hash(hash:u32) -> Result<Self, ParseCallsignError> {
+    pub fn try_from_callsign_hash(hash: u32) -> Result<Self, ParseCallsignError> {
         if let Some(callsign) = get_hashed_callsign_string(hash) {
             return Callsign::from_callsign_str(&callsign);
         }
 
-        let callsign = Callsign{
-            callsign : "<...>".to_string(),
+        let callsign = Callsign {
+            callsign: "<...>".to_string(),
             is_rover: false,
             is_portable: false,
             is_hashed: true,
             was_hashed: false,
-            packed_58bits : 0,
-            packed_28bits : 0, 
-            hashed_22bits : 0, 
-            hashed_12bits : 0, 
-            hashed_10bits : 0};
+            packed_58bits: 0,
+            packed_28bits: 0,
+            hashed_22bits: 0,
+            hashed_12bits: 0,
+            hashed_10bits: 0,
+        };
 
         return Ok(callsign);
     }
@@ -177,9 +200,13 @@ impl Callsign {
     pub fn from_callsign_str(s: &str) -> Result<Self, ParseCallsignError> {
         let is_rover = s.ends_with("/R");
         let is_portable = s.ends_with("/P");
-        let was_hashed:bool;
+        let was_hashed: bool;
 
-        let mut string_to_pack = if is_rover || is_portable { &s[0..s.len()-2]} else {s};
+        let mut string_to_pack = if is_rover || is_portable {
+            &s[0..s.len() - 2]
+        } else {
+            s
+        };
         if string_to_pack.starts_with("<") && string_to_pack.ends_with(">") {
             string_to_pack = rem_first_and_last(&string_to_pack);
             was_hashed = true;
@@ -196,13 +223,13 @@ impl Callsign {
 
         let is_hashed = packed28 >= 2063592 && packed28 <= 6257895;
 
-        let packed58 = match pack_callsign_into_58bits(string_to_pack){
+        let packed58 = match pack_callsign_into_58bits(string_to_pack) {
             Ok(value) => value,
             Err(err) => {
                 return Err(err);
             }
         };
-        
+
         let hashed22 = hash_callsign(string_to_pack, 22) as u32;
         let hashed12 = hash_callsign(string_to_pack, 12) as u32;
         let hashed10 = hash_callsign(string_to_pack, 10) as u32;
@@ -215,17 +242,18 @@ impl Callsign {
         //let packed_callsign = format!("{}{}", string_to_pack, if is_rover {"/R"} else if is_portable {"/P"} else {""});
         let packed_callsign = format!("{}", string_to_pack);
 
-        let c = Callsign{
+        let c = Callsign {
             callsign: packed_callsign,
             is_rover,
             is_portable,
             is_hashed,
             was_hashed,
-            packed_58bits : packed58,
-            packed_28bits : packed28,
-            hashed_22bits : hashed22, 
-            hashed_12bits : hashed12, 
-            hashed_10bits : hashed10 };
+            packed_58bits: packed58,
+            packed_28bits: packed28,
+            hashed_22bits: hashed22,
+            hashed_12bits: hashed12,
+            hashed_10bits: hashed10,
+        };
 
         return Ok(c);
     }
@@ -238,19 +266,19 @@ pub enum ParseCallsignError {
     InvalidLength,
 
     /// String contains invalid character
-    /// 
+    ///
     /// Must be in " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/"
     #[snafu(display("string contains invalid character"))]
     InvalidChar,
 
     /// Integer out of range to be a valid callsign
     #[snafu(display("integer out of range"))]
-    OutOfRange
+    OutOfRange,
 }
 
-pub fn pack_callsign_into_28bits(callsign:&str) -> Result<u32, ParseCallsignError> {
+pub fn pack_callsign_into_28bits(callsign: &str) -> Result<u32, ParseCallsignError> {
     if callsign.len() < 2 || callsign.len() > 11 {
-        return Err(ParseCallsignError::InvalidLength)
+        return Err(ParseCallsignError::InvalidLength);
     }
 
     // special tokens see https://wsjt.sourceforge.io/FT4_FT8_QEX.pdf table 7 on page 16
@@ -260,12 +288,12 @@ pub fn pack_callsign_into_28bits(callsign:&str) -> Result<u32, ParseCallsignErro
     }
 
     // QRZ 1
-    if callsign == "QRZ" { 
-        return Ok(1);    
+    if callsign == "QRZ" {
+        return Ok(1);
     }
 
     // CQ 2
-    if callsign == "CQ"{
+    if callsign == "CQ" {
         return Ok(2);
     }
 
@@ -278,13 +306,14 @@ pub fn pack_callsign_into_28bits(callsign:&str) -> Result<u32, ParseCallsignErro
                 &[
                     FT8_CHAR_TABLE_NUMERIC,
                     FT8_CHAR_TABLE_NUMERIC,
-                    FT8_CHAR_TABLE_NUMERIC
-                ]) {
-                    Ok(value) => {
-                        return Ok(value + 3);
-                    },
-                    Err(_) => {}
-                };
+                    FT8_CHAR_TABLE_NUMERIC,
+                ],
+            ) {
+                Ok(value) => {
+                    return Ok(value + 3);
+                }
+                Err(_) => {}
+            };
         }
     }
 
@@ -294,7 +323,12 @@ pub fn pack_callsign_into_28bits(callsign:&str) -> Result<u32, ParseCallsignErro
     // CQ AAAA - CQ ZZZZ 21443 to 532443
     if callsign.starts_with("CQ ") {
         let remainder = &callsign[3..];
-        if remainder.len() >= 1 && remainder.len() <= 4 && remainder.chars().all(|c| FT8_CHAR_TABLE_ALPHA_SPACE.contains(c)) {
+        if remainder.len() >= 1
+            && remainder.len() <= 4
+            && remainder
+                .chars()
+                .all(|c| FT8_CHAR_TABLE_ALPHA_SPACE.contains(c))
+        {
             let padded_remainder = format!("{: >4}", remainder);
             match u32::from_mixed_radix_str(
                 &padded_remainder,
@@ -303,8 +337,11 @@ pub fn pack_callsign_into_28bits(callsign:&str) -> Result<u32, ParseCallsignErro
                     FT8_CHAR_TABLE_ALPHA_SPACE,
                     FT8_CHAR_TABLE_ALPHA_SPACE,
                     FT8_CHAR_TABLE_ALPHA_SPACE,
-            ]) {
-                Ok(value) => { return Ok(value + 1003); },
+                ],
+            ) {
+                Ok(value) => {
+                    return Ok(value + 1003);
+                }
                 Err(_) => {}
             };
         }
@@ -319,18 +356,26 @@ pub fn pack_callsign_into_28bits(callsign:&str) -> Result<u32, ParseCallsignErro
 
     // Workaround for Swaziland prefix
     if adjusted_callsign.starts_with("3DA0") {
-        adjusted_callsign = callsign.replacen("3DA0","3D0", 1,);
+        adjusted_callsign = callsign.replacen("3DA0", "3D0", 1);
     }
 
     // Workaround for Guinea prefix
-    if adjusted_callsign.starts_with("3X") 
-    && adjusted_callsign.chars().nth(2).unwrap() >= 'B' 
-    && adjusted_callsign.chars().nth(2).unwrap() <= 'Z' {
-        let lastn:String = adjusted_callsign.chars().skip(2).take(adjusted_callsign.len()-2).collect();
+    if adjusted_callsign.starts_with("3X")
+        && adjusted_callsign.chars().nth(2).unwrap() >= 'B'
+        && adjusted_callsign.chars().nth(2).unwrap() <= 'Z'
+    {
+        let lastn: String = adjusted_callsign
+            .chars()
+            .skip(2)
+            .take(adjusted_callsign.len() - 2)
+            .collect();
         adjusted_callsign = format!("Q{}", lastn);
     }
 
-    if !adjusted_callsign.chars().all(|c| FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH.contains(c)) {
+    if !adjusted_callsign
+        .chars()
+        .all(|c| FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH.contains(c))
+    {
         return Err(ParseCallsignError::InvalidChar);
     }
 
@@ -345,12 +390,13 @@ pub fn pack_callsign_into_28bits(callsign:&str) -> Result<u32, ParseCallsignErro
             FT8_CHAR_TABLE_NUMERIC,
             FT8_CHAR_TABLE_ALPHA_SPACE,
             FT8_CHAR_TABLE_ALPHA_SPACE,
-            FT8_CHAR_TABLE_ALPHA_SPACE
-    ]) {
-        Ok(value) => { return Ok(value + 6257896)},
+            FT8_CHAR_TABLE_ALPHA_SPACE,
+        ],
+    ) {
+        Ok(value) => return Ok(value + 6257896),
         Err(_) => {}
     };
-    
+
     // must be a non-standard callsign, return a 22 bit hash
     // 22-bit hash codes 2063592 + (0 to 4194303)
     //let hash = (hash_callsign(&aligned_callsign) >> 42) as u32;
@@ -365,28 +411,34 @@ fn rem_first_and_last(value: &str) -> &str {
     chars.as_str()
 }
 
-fn pack_callsign_into_58bits(callsign:&str) -> Result<u64, ParseCallsignError> {
+fn pack_callsign_into_58bits(callsign: &str) -> Result<u64, ParseCallsignError> {
     if callsign.len() == 0 || callsign.len() > 11 {
-        return Err(ParseCallsignError::InvalidLength)
+        return Err(ParseCallsignError::InvalidLength);
     }
 
-    if !callsign.chars().all(|c| FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH.contains(c)) {
+    if !callsign
+        .chars()
+        .all(|c| FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH.contains(c))
+    {
         return Err(ParseCallsignError::InvalidChar);
     }
 
     let right_aligned_callsign = format!("{: >11}", callsign);
 
     let l = FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH.len() as u64;
-    let mut value:u64 = 0;
+    let mut value: u64 = 0;
     for c in right_aligned_callsign.chars() {
-        let pos = FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH.chars().position(|ch| c == ch ).unwrap() as u64;
+        let pos = FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH
+            .chars()
+            .position(|ch| c == ch)
+            .unwrap() as u64;
         value = value * l + pos;
     }
     return Ok(value);
 }
 
-fn index_of_last_number(s:&str) -> Option<usize> {
-    for index in (0..s.len()-1).rev() {
+fn index_of_last_number(s: &str) -> Option<usize> {
+    for index in (0..s.len() - 1).rev() {
         let c = s.chars().nth(index);
         if c.is_some_and(|c| c.is_numeric()) {
             return Some(index);
@@ -395,10 +447,10 @@ fn index_of_last_number(s:&str) -> Option<usize> {
     return None;
 }
 
-fn align_callsign(callsign:&str) -> String {
-    // Align the callsign into a 6-character field by identifying the last 
-    // (or only) digit, and placing it in the third position. If there are 
-    // fewer than two characters before the digit, or fewer than three 
+fn align_callsign(callsign: &str) -> String {
+    // Align the callsign into a 6-character field by identifying the last
+    // (or only) digit, and placing it in the third position. If there are
+    // fewer than two characters before the digit, or fewer than three
     // characters after the digit, pad with spaces.
 
     let separating_numeral_index = index_of_last_number(callsign);
@@ -412,7 +464,10 @@ fn align_callsign(callsign:&str) -> String {
     let prefix = &callsign[0..separating_numeral_index.unwrap()];
 
     // get the separating numeral itself
-    let separating_numeral = callsign.chars().nth(separating_numeral_index.unwrap()).unwrap();
+    let separating_numeral = callsign
+        .chars()
+        .nth(separating_numeral_index.unwrap())
+        .unwrap();
 
     // suffix is all the characters after the separating numeral
     let suffix = &callsign[separating_numeral_index.unwrap() + 1..];
@@ -421,26 +476,29 @@ fn align_callsign(callsign:&str) -> String {
     return format!("{: >2}{}{: <3}", prefix, separating_numeral, suffix);
 }
 
-fn hash_callsign(callsign:&str, m:u32) -> u64 {
+fn hash_callsign(callsign: &str, m: u32) -> u64 {
     let left_aligned_callsign = format!("{: <11}", callsign);
 
     let l = FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH.len() as u64;
-    let mut value:u64 = 0;
+    let mut value: u64 = 0;
     for c in left_aligned_callsign.chars() {
-        let pos = FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH.chars().position(|ch| c == ch ).unwrap() as u64;
+        let pos = FT8_CHAR_TABLE_ALPHANUM_SPACE_SLASH
+            .chars()
+            .position(|ch| c == ch)
+            .unwrap() as u64;
         value = value * l + pos;
     }
 
-    value = (value as u128 * 47055833459u128) as u64 >> (64-m);
+    value = (value as u128 * 47055833459u128) as u64 >> (64 - m);
     return value;
 }
 
-fn store_hashed_callsign_string(hash:u32, callsign:String) {
+fn store_hashed_callsign_string(hash: u32, callsign: String) {
     let mut cache = CALLSIGN_CACHE.lock().unwrap();
     cache.put(hash, callsign);
 }
 
-fn get_hashed_callsign_string(hash:u32) -> Option<String> {
+fn get_hashed_callsign_string(hash: u32) -> Option<String> {
     let mut cache = CALLSIGN_CACHE.lock().unwrap();
     if let Some(callsign) = cache.get(&hash) {
         return Some(callsign.clone());
@@ -452,7 +510,6 @@ fn get_hashed_callsign_string(hash:u32) -> Option<String> {
 mod tests {
 
     use super::*;
-
 
     macro_rules! test_callsign_success {
         ($name:ident, $callsign:expr, $expected_callsign:expr, $expected_rover:expr) => {
@@ -535,29 +592,51 @@ mod tests {
 
     mod callsign_from_str {
         use super::*;
-        test_nonstd_callsign_success!(n0ypr, "N0YPR", "N0YPR", false, 10803661, 50149692, 1836698, 1793, 448);
-        test_nonstd_callsign_success!(ve5_slant_n0ypr, "VE5/N0YPR", "VE5/N0YPR", false, 5686519, 140866629639964, 3622927, 3538, 884);
-        test_nonstd_callsign_success!(bracket_ve5_slant_n0ypr, "<VE5/N0YPR>", "VE5/N0YPR", false, 5686519, 140866629639964, 3622927, 3538, 884);
-        test_standard_callsign_success!(de, "DE", "DE",false, 0);
-        test_standard_callsign_success!(qrz, "QRZ", "QRZ",false, 1);
+        test_nonstd_callsign_success!(
+            n0ypr, "N0YPR", "N0YPR", false, 10803661, 50149692, 1836698, 1793, 448
+        );
+        test_nonstd_callsign_success!(
+            ve5_slant_n0ypr,
+            "VE5/N0YPR",
+            "VE5/N0YPR",
+            false,
+            5686519,
+            140866629639964,
+            3622927,
+            3538,
+            884
+        );
+        test_nonstd_callsign_success!(
+            bracket_ve5_slant_n0ypr,
+            "<VE5/N0YPR>",
+            "VE5/N0YPR",
+            false,
+            5686519,
+            140866629639964,
+            3622927,
+            3538,
+            884
+        );
+        test_standard_callsign_success!(de, "DE", "DE", false, 0);
+        test_standard_callsign_success!(qrz, "QRZ", "QRZ", false, 1);
         test_standard_callsign_success!(n0ypr_slant_r, "N0YPR/R", "N0YPR/R", true, 10803661);
-        test_standard_callsign_success!(cq_000, "CQ 000", "CQ 000",false, 3);
-        test_standard_callsign_success!(cq_001, "CQ 001", "CQ 001",false, 4);
-        test_standard_callsign_success!(cq_999, "CQ 999", "CQ 999",false, 1002);
-        test_standard_callsign_success!(cq_a, "CQ A", "CQ A",false, 1004);
-        test_standard_callsign_success!(cq_b, "CQ B", "CQ B",false, 1005);
-        test_standard_callsign_success!(cq_z, "CQ Z", "CQ Z",false, 1029);
-        test_standard_callsign_success!(cq_aa, "CQ AA", "CQ AA",false, 1031);
-        test_standard_callsign_success!(cq_ab, "CQ AB", "CQ AB",false, 1032);
-        test_standard_callsign_success!(cq_zz, "CQ ZZ", "CQ ZZ",false, 1731);
-        test_standard_callsign_success!(cq_aaa, "CQ AAA", "CQ AAA",false, 1760);
-        test_standard_callsign_success!(cq_aab, "CQ AAB", "CQ AAB",false, 1761);
-        test_standard_callsign_success!(cq_zzz, "CQ ZZZ", "CQ ZZZ",false, 20685);
-        test_standard_callsign_success!(cq_aaaa, "CQ AAAA", "CQ AAAA",false, 21443);
-        test_standard_callsign_success!(cq_aaab, "CQ AAAB", "CQ AAAB",false, 21444);
-        test_standard_callsign_success!(cq_zzzz, "CQ ZZZZ", "CQ ZZZZ",false, 532443);
-        test_standard_callsign_success!(n0ypr_bracket, "<N0YPR>", "N0YPR",false, 10803661);
-       
+        test_standard_callsign_success!(cq_000, "CQ 000", "CQ 000", false, 3);
+        test_standard_callsign_success!(cq_001, "CQ 001", "CQ 001", false, 4);
+        test_standard_callsign_success!(cq_999, "CQ 999", "CQ 999", false, 1002);
+        test_standard_callsign_success!(cq_a, "CQ A", "CQ A", false, 1004);
+        test_standard_callsign_success!(cq_b, "CQ B", "CQ B", false, 1005);
+        test_standard_callsign_success!(cq_z, "CQ Z", "CQ Z", false, 1029);
+        test_standard_callsign_success!(cq_aa, "CQ AA", "CQ AA", false, 1031);
+        test_standard_callsign_success!(cq_ab, "CQ AB", "CQ AB", false, 1032);
+        test_standard_callsign_success!(cq_zz, "CQ ZZ", "CQ ZZ", false, 1731);
+        test_standard_callsign_success!(cq_aaa, "CQ AAA", "CQ AAA", false, 1760);
+        test_standard_callsign_success!(cq_aab, "CQ AAB", "CQ AAB", false, 1761);
+        test_standard_callsign_success!(cq_zzz, "CQ ZZZ", "CQ ZZZ", false, 20685);
+        test_standard_callsign_success!(cq_aaaa, "CQ AAAA", "CQ AAAA", false, 21443);
+        test_standard_callsign_success!(cq_aaab, "CQ AAAB", "CQ AAAB", false, 21444);
+        test_standard_callsign_success!(cq_zzzz, "CQ ZZZZ", "CQ ZZZZ", false, 532443);
+        test_standard_callsign_success!(n0ypr_bracket, "<N0YPR>", "N0YPR", false, 10803661);
+
         macro_rules! test_pack28bits_error {
             ($name:ident, $callsign:expr, $expectederror:expr) => {
                 paste::item! {
@@ -568,9 +647,21 @@ mod tests {
                 }
             };
         }
-        test_pack28bits_error!(disallowed_chars_should_return_invalid_char_error, "***", ParseCallsignError::InvalidChar);
-        test_pack28bits_error!(too_many_chars_should_return_invalid_length_error, "ABCDEFGHIJKL", ParseCallsignError::InvalidLength);
-        test_pack28bits_error!(empty_string_should_return_invalid_length_error, "", ParseCallsignError::InvalidLength);
+        test_pack28bits_error!(
+            disallowed_chars_should_return_invalid_char_error,
+            "***",
+            ParseCallsignError::InvalidChar
+        );
+        test_pack28bits_error!(
+            too_many_chars_should_return_invalid_length_error,
+            "ABCDEFGHIJKL",
+            ParseCallsignError::InvalidLength
+        );
+        test_pack28bits_error!(
+            empty_string_should_return_invalid_length_error,
+            "",
+            ParseCallsignError::InvalidLength
+        );
     }
 
     mod callsign_try_from {
@@ -657,8 +748,6 @@ mod tests {
                 let callsign = Callsign::try_from(2386265u32).unwrap();
                 assert_eq!(callsign.hashed_10bits, 78);
             }
-
-        
         }
 
         #[test]
@@ -673,15 +762,31 @@ mod tests {
 
         #[test]
         fn can_cache() {
-            let callsign1 = Callsign::from_callsign_str("PJ4/K1ABC").expect("callsign should have been cached");
+            let callsign1 =
+                Callsign::from_callsign_str("PJ4/K1ABC").expect("callsign should have been cached");
 
             let h10 = callsign1.hashed_10bits;
             let h12 = callsign1.hashed_12bits;
             let h22 = callsign1.hashed_22bits;
 
-            assert_eq!("PJ4/K1ABC", Callsign::try_from_callsign_hash(h10).expect("callsign should have been cached").callsign);
-            assert_eq!("PJ4/K1ABC", Callsign::try_from_callsign_hash(h12).expect("callsign should have been cached").callsign);
-            assert_eq!("PJ4/K1ABC", Callsign::try_from_callsign_hash(h22).expect("callsign should have been cached").callsign);
+            assert_eq!(
+                "PJ4/K1ABC",
+                Callsign::try_from_callsign_hash(h10)
+                    .expect("callsign should have been cached")
+                    .callsign
+            );
+            assert_eq!(
+                "PJ4/K1ABC",
+                Callsign::try_from_callsign_hash(h12)
+                    .expect("callsign should have been cached")
+                    .callsign
+            );
+            assert_eq!(
+                "PJ4/K1ABC",
+                Callsign::try_from_callsign_hash(h22)
+                    .expect("callsign should have been cached")
+                    .callsign
+            );
         }
     }
 
@@ -690,8 +795,10 @@ mod tests {
 
         #[test]
         fn can_deal_with_hashed() {
-            let callsign1 = Callsign::from_callsign_str("PJ4/K1ABC").expect("callsign should have parsed");
-            let callsign2 = Callsign::try_from(callsign1.packed_28bits) .expect("callsign should have parsed");
+            let callsign1 =
+                Callsign::from_callsign_str("PJ4/K1ABC").expect("callsign should have parsed");
+            let callsign2 =
+                Callsign::try_from(callsign1.packed_28bits).expect("callsign should have parsed");
             println!("callsign1: {:?}", callsign1);
             println!("callsign2: {:?}", callsign2);
             assert_eq!(callsign1.packed_28bits, callsign2.packed_28bits);
