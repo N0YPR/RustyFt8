@@ -1,0 +1,36 @@
+{
+  "name": "RustyFt8",
+  "image": "ghcr.io/n0ypr/n0ypr-rustyft8-devcontainer:sha-5fa16e0",
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "serayuzgur.crates",
+        "vadimcn.vscode-lldb"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "mounts": [
+    "type=volume,source=devcontainer-cargo-registry,target=/home/vscode/.cargo/registry",
+    "type=volume,source=devcontainer-cargo-git,target=/home/vscode/.cargo/git",
+    "type=volume,source=devcontainer-rustup,target=/home/vscode/.rustup",
+    "source=${localEnv:HOME}/ca-certificates.crt,target=/etc/ssl/certs/ca-certificates.crt,type=bind,readonly"
+  ],
+  "postCreateCommand": "rustup show && cargo --version",
+  "features": {},
+  "updateContentCommand": "",
+  "containerEnv": {
+    "CARGO_TERM_COLOR": "always",
+    "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+    "SSL_CERT_DIR": "/etc/ssl/certs",
+    "CURL_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
+    "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
+    "NODE_EXTRA_CA_CERTS": "/etc/ssl/certs/ca-certificates.crt"
+  }
+}
