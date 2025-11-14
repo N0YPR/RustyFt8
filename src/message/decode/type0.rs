@@ -56,7 +56,7 @@ fn decode_dxpedition(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache
     let report = (n5 as i8) * 2 - 30;
     
     // Try to look up the callsign from the cache
-    let hash_call = cache.and_then(|c| c.lookup_10bit(n10).cloned());
+    let hash_call = cache.and_then(|c| c.lookup_10bit(n10).map(|s| s.to_string()));
     
     // Format the hash display with angle brackets
     let hash_display = if let Some(call) = hash_call {

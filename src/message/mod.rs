@@ -1,7 +1,7 @@
 // Core modules
 mod callsign;
 mod grid;
-mod hash_cache;
+mod callsign_cache;
 
 // Refactored message77 modules
 mod types;
@@ -24,7 +24,7 @@ pub use types::MessageVariant;
 // Re-export callsign and grid utilities
 pub use callsign::{encode_callsign, decode_callsign, ihashcall, hash12, hash22};
 pub use grid::{encode_grid, decode_grid};
-pub use hash_cache::CallsignHashCache;
+pub use callsign_cache::CallsignHashCache;
 
 // Re-export lookup tables for external use
 pub use lookup_tables::{arrl_section_to_index, arrl_section_from_index, 
