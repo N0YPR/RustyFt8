@@ -13,6 +13,18 @@ const NTOKENS: u32 = 2063592;
 /// Maximum 22-bit hash value for non-standard callsigns
 const MAX22: u32 = 4194304;
 
+/// Character set for first position in standard callsigns (space + 0-9 + A-Z)
+const CHARSET_A1: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";  // 37 chars
+
+/// Character set for second position in standard callsigns (0-9 + A-Z)
+const CHARSET_A2: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";   // 36 chars
+
+/// Character set for digit position in standard callsigns (0-9)
+const CHARSET_A3: &str = "0123456789";                             // 10 chars
+
+/// Character set for letter-only positions in standard callsigns (space + A-Z)
+const CHARSET_A4: &str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";            // 27 chars
+
 /// Unpack a 28-bit value to a callsign using WSJT-X protocol
 ///
 /// This implements the WSJT-X unpack28 algorithm, reversing pack28 encoding
@@ -89,48 +101,42 @@ pub fn unpack_callsign(n28: u32) -> Result<String, String> {
     // Standard callsign decoding
     if n28 >= NTOKENS + MAX22 {
         let n = n28 - NTOKENS - MAX22;
-        
-        // Character sets (matching WSJT-X)
-        const A1: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";  // 37 chars
-        const A2: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";   // 36 chars
-        const A3: &str = "0123456789";                             // 10 chars
-        const A4: &str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";            // 27 chars
-        
+
         // Reverse the encoding formula:
         // n = 36*10*27*27*27*i1 + 10*27*27*27*i2 + 27*27*27*i3 + 27*27*i4 + 27*i5 + i6
-        
+
         let base = 36 * 10 * 27 * 27 * 27;
         let i1 = (n / base) as usize;
         let mut remainder = n % base;
-        
+
         let base = 10 * 27 * 27 * 27;
         let i2 = (remainder / base) as usize;
         remainder %= base;
-        
+
         let base = 27 * 27 * 27;
         let i3 = (remainder / base) as usize;
         remainder %= base;
-        
+
         let base = 27 * 27;
         let i4 = (remainder / base) as usize;
         remainder %= base;
-        
+
         let i5 = (remainder / 27) as usize;
         let i6 = (remainder % 27) as usize;
-        
+
         // Validate indices
-        if i1 >= A1.len() || i2 >= A2.len() || i3 >= A3.len() || 
-           i4 >= A4.len() || i5 >= A4.len() || i6 >= A4.len() {
+        if i1 >= CHARSET_A1.len() || i2 >= CHARSET_A2.len() || i3 >= CHARSET_A3.len() ||
+           i4 >= CHARSET_A4.len() || i5 >= CHARSET_A4.len() || i6 >= CHARSET_A4.len() {
             return Err(format!("Invalid n28 value produces out-of-range indices: {}", n28));
         }
-        
+
         // Extract characters
-        let c1 = A1.chars().nth(i1).unwrap();
-        let c2 = A2.chars().nth(i2).unwrap();
-        let c3 = A3.chars().nth(i3).unwrap();
-        let c4 = A4.chars().nth(i4).unwrap();
-        let c5 = A4.chars().nth(i5).unwrap();
-        let c6 = A4.chars().nth(i6).unwrap();
+        let c1 = CHARSET_A1.chars().nth(i1).unwrap();
+        let c2 = CHARSET_A2.chars().nth(i2).unwrap();
+        let c3 = CHARSET_A3.chars().nth(i3).unwrap();
+        let c4 = CHARSET_A4.chars().nth(i4).unwrap();
+        let c5 = CHARSET_A4.chars().nth(i5).unwrap();
+        let c6 = CHARSET_A4.chars().nth(i6).unwrap();
         
         // Build the 6-character callsign and trim leading/trailing spaces
         let callsign_6 = format!("{}{}{}{}{}{}", c1, c2, c3, c4, c5, c6);
@@ -146,7 +152,7 @@ pub fn unpack_callsign(n28: u32) -> Result<String, String> {
         return Ok("<...>".to_string());
     }
     
-    Err(format!("Invalid n28 value: {} (in hash range)", n28))
+    Err(format!("Invalid n28 value: {} (unexpected hash range value)", n28))
 }
 
 /// Calculate a hash of a callsign with specified bit width
@@ -265,7 +271,7 @@ pub fn pack_callsign(callsign: &str) -> Result<u32, String> {
             return Ok(base_offset + value);
         }
         
-        return Err(format!("Invalid directed CQ format: '{}'", callsign));
+        return Err(format!("Invalid directed CQ format: '{}' (suffix must be numeric 000-999 or alphabetic A-ZZZZ)", callsign));
     }
     
     // Non-standard callsign handling (angle brackets)
@@ -326,7 +332,7 @@ pub fn pack_callsign(callsign: &str) -> Result<u32, String> {
     
     let iarea = match iarea {
         Some(pos) if pos >= 1 && pos <= 2 => pos,
-        _ => return Err(format!("Invalid callsign format (digit position): '{}'", callsign)),
+        _ => return Err(format!("Invalid callsign format: '{}' (must have a digit in position 2 or 3)", callsign)),
     };
     
     // Count digits and letters before area digit
@@ -351,7 +357,7 @@ pub fn pack_callsign(callsign: &str) -> Result<u32, String> {
     
     // Validate standard callsign format
     if nplet == 0 || npdig >= iarea || nslet > 3 {
-        return Err(format!("Invalid standard callsign format: '{}'", callsign));
+        return Err(format!("Invalid standard callsign format: '{}' (must have 1-2 letters before digit, max 3 letters after)", callsign));
     }
     
     // Right-adjust to 6 characters with space padding on the left
@@ -362,20 +368,14 @@ pub fn pack_callsign(callsign: &str) -> Result<u32, String> {
     };
     
     let c6: Vec<char> = callsign_6.chars().collect();
-    
-    // Character sets (matching WSJT-X)
-    const A1: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";  // 37 chars
-    const A2: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";   // 36 chars
-    const A3: &str = "0123456789";                             // 10 chars
-    const A4: &str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";            // 27 chars
-    
+
     // Find indices in character sets
-    let i1 = A1.find(c6[0]).ok_or_else(|| format!("Invalid character at position 1: '{}'", c6[0]))?;
-    let i2 = A2.find(c6[1]).ok_or_else(|| format!("Invalid character at position 2: '{}'", c6[1]))?;
-    let i3 = A3.find(c6[2]).ok_or_else(|| format!("Invalid character at position 3: '{}'", c6[2]))?;
-    let i4 = A4.find(c6[3]).ok_or_else(|| format!("Invalid character at position 4: '{}'", c6[3]))?;
-    let i5 = A4.find(c6[4]).ok_or_else(|| format!("Invalid character at position 5: '{}'", c6[4]))?;
-    let i6 = A4.find(c6[5]).ok_or_else(|| format!("Invalid character at position 6: '{}'", c6[5]))?;
+    let i1 = CHARSET_A1.find(c6[0]).ok_or_else(|| format!("Invalid character at position 1: '{}'", c6[0]))?;
+    let i2 = CHARSET_A2.find(c6[1]).ok_or_else(|| format!("Invalid character at position 2: '{}'", c6[1]))?;
+    let i3 = CHARSET_A3.find(c6[2]).ok_or_else(|| format!("Invalid character at position 3: '{}'", c6[2]))?;
+    let i4 = CHARSET_A4.find(c6[3]).ok_or_else(|| format!("Invalid character at position 4: '{}'", c6[3]))?;
+    let i5 = CHARSET_A4.find(c6[4]).ok_or_else(|| format!("Invalid character at position 5: '{}'", c6[4]))?;
+    let i6 = CHARSET_A4.find(c6[5]).ok_or_else(|| format!("Invalid character at position 6: '{}'", c6[5]))?;
     
     // Encode as per WSJT-X formula
     let n28 = 36 * 10 * 27 * 27 * 27 * (i1 as u32)
@@ -432,8 +432,6 @@ pub fn hash22(callsign: &str) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use std::string::String;
-    use std::vec;
     use super::*;
     use rstest::rstest;
 
