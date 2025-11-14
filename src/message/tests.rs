@@ -94,7 +94,7 @@ fn test_encode_decode_roundtrip() {
         let mut storage = bitarr![u8, Msb0; 0; 80];  // 10 bytes
         
         // Encode the message
-        encode(&test.message, &mut storage[0..77], Some(&mut cache))
+        encode(&test.message, &mut storage[0..77], &mut cache)
             .unwrap_or_else(|e| panic!(
                 "\n❌ ENCODE FAILED [Case {}]\n   Message: \"{}\"\n   Error: {}\n", 
                 idx, test.message, e

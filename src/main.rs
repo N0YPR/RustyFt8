@@ -17,7 +17,7 @@ fn main() {
         // Create storage for the 77-bit message
         let mut storage = bitarr![u8, Msb0; 0; 80];  // 10 bytes
         
-        match encode(msg_text, &mut storage[0..77], Some(&mut cache)) {
+        match encode(msg_text, &mut storage[0..77], &mut cache) {
             Ok(()) => {
                 let bits = &storage[0..77];
                 

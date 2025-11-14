@@ -41,7 +41,7 @@ use bitvec::prelude::*;
 /// # Arguments
 /// * `text` - The message text (e.g., "CQ N0YPR DM42")
 /// * `output` - Mutable bit slice to write the 77 bits into (must be exactly 77 bits)
-/// * `cache` - Optional mutable reference to a CallsignHashCache for DXpedition mode
+/// * `cache` - Mutable reference to a CallsignHashCache for non-standard callsigns
 ///
 /// # Examples
 ///
@@ -51,23 +51,23 @@ use bitvec::prelude::*;
 ///
 /// let mut cache = CallsignHashCache::new();
 /// let mut storage = bitarr![u8, Msb0; 0; 80];  // 10 bytes
-/// encode("CQ N0YPR DM42", &mut storage[0..77], None)?;
+/// encode("CQ N0YPR DM42", &mut storage[0..77], &mut cache)?;
 ///
-/// // For DXpedition mode, provide cache
-/// encode("K1ABC RR73; W9XYZ <KH1/KH7Z> -08", &mut storage[0..77], Some(&mut cache))?;
+/// // Non-standard callsigns are automatically cached
+/// encode("K1ABC RR73; W9XYZ <KH1/KH7Z> -08", &mut storage[0..77], &mut cache)?;
 /// # Ok::<(), String>(())
 /// ```
-pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>, cache: Option<&mut CallsignHashCache>) -> Result<(), String> {
+pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>, cache: &mut CallsignHashCache) -> Result<(), String> {
     if output.len() != 77 {
         return Err(alloc::format!("Output buffer must be exactly 77 bits, got {}", output.len()));
     }
 
     // 1. Parse text into MessageVariant (internal detail)
     let variant = parse_message_variant(text)?;
-    
+
     // 2. Encode variant into 77 bits
-    encode_variant(&variant, output, cache)?;
-    
+    encode_variant(&variant, output, Some(cache))?;
+
     Ok(())
 }
 
@@ -93,7 +93,7 @@ pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>, cache: Option<&mut Ca
 ///
 /// let mut cache = CallsignHashCache::new();
 /// let mut storage = bitarr![u8, Msb0; 0; 80];
-/// encode("CQ N0YPR DM42", &mut storage[0..77], None)?;
+/// encode("CQ N0YPR DM42", &mut storage[0..77], &mut cache)?;
 /// let text = decode(&storage[0..77], None)?;
 /// assert_eq!(text, "CQ N0YPR DM42");
 /// # Ok::<(), String>(())
