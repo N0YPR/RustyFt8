@@ -10,6 +10,12 @@ use alloc::string::{String, ToString};
 /// Values above this are signal reports and special codes
 const MAXGRID4: u16 = 32400;
 
+/// Special code offsets (added to MAXGRID4)
+const BLANK_CODE: u16 = 1;   // Empty string (2-word message)
+const RRR_CODE: u16 = 2;     // "RRR" acknowledgment
+const RR73_CODE: u16 = 3;    // "RR73" acknowledgment (special, handled as grid)
+const CODE_73: u16 = 4;      // "73" sign-off
+
 /// Encode a grid square or signal report to 15 bits
 /// 
 /// Handles:
@@ -36,7 +42,7 @@ pub fn encode_grid(grid_or_report: &str) -> Result<u16, String> {
     
     // Handle BLANK (empty string means 2-word message like "CALL1 CALL2")
     if trimmed.is_empty() {
-        return Ok(MAXGRID4 + 1);  // irpt=1
+        return Ok(MAXGRID4 + BLANK_CODE);
     }
     
     // Check for signal report (starts with + or -)
@@ -56,25 +62,26 @@ pub fn encode_grid(grid_or_report: &str) -> Result<u16, String> {
     }
     
     // Check for special codes (only if not a valid grid square)
-    // From WSJT-X: RRR=2, RR73=3, 73=4
     match trimmed {
-        "RRR" => return Ok(MAXGRID4 + 2),
-        "73" => return Ok(MAXGRID4 + 4),
+        "RRR" => return Ok(MAXGRID4 + RRR_CODE),
+        "73" => return Ok(MAXGRID4 + CODE_73),
         _ => {}
     }
     
     // If we get here, it's an unrecognized format
-    Err(format!("Invalid grid/report format: '{}'", trimmed))
+    Err(format!("Invalid grid/report format: '{}' (expected: grid AA00-RR99, signal report +/-NN, or special code RRR/73)", trimmed))
 }
 
 /// Encode a grid square (internal helper)
 fn encode_grid_square(grid: &str) -> Result<u16, String> {
-    let chars: Vec<char> = grid.chars().collect();
-    
+    // Convert to uppercase for case-insensitive matching
+    let grid_upper = grid.to_uppercase();
+    let chars: Vec<char> = grid_upper.chars().collect();
+
     if chars.len() != 4 {
-        return Err(format!("Grid must be 4 characters: '{}'", grid));
+        return Err(format!("Grid must be 4 characters (format: AA00-RR99): '{}'", grid));
     }
-    
+
     // Convert letters A-R to 0-17
     let c1 = (chars[0] as u32 - 'A' as u32) as u16;
     let c2 = (chars[1] as u32 - 'A' as u32) as u16;
@@ -85,7 +92,7 @@ fn encode_grid_square(grid: &str) -> Result<u16, String> {
     
     // Validate ranges
     if c1 > 17 || c2 > 17 {
-        return Err(format!("Grid letters must be A-R: '{}'", grid));
+        return Err(format!("Grid letters must be A-R: '{}' (got '{}{}', valid range: AA-RR)", grid, chars[0], chars[1]));
     }
     
     // Encode using WSJT-X formula
@@ -148,13 +155,13 @@ pub fn decode_grid(igrid4: u16) -> Result<String, String> {
     
     // It's a signal report or special code
     let irpt = igrid4 - MAXGRID4;
-    
-    // From WSJT-X: BLANK=1, RRR=2, RR73=3, 73=4
+
+    // Check for special codes
     match irpt {
-        1 => Ok(String::new()),  // BLANK
-        2 => Ok("RRR".to_string()),
-        3 => Ok("RR73".to_string()),
-        4 => Ok("73".to_string()),
+        BLANK_CODE => Ok(String::new()),
+        RRR_CODE => Ok("RRR".to_string()),
+        RR73_CODE => Ok("RR73".to_string()),
+        CODE_73 => Ok("73".to_string()),
         _ => decode_signal_report(irpt),
     }
 }
@@ -221,8 +228,6 @@ fn decode_signal_report(irpt: u16) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::vec::Vec;
-    use std::string::String;
     use super::*;
 
     #[test]
@@ -274,5 +279,137 @@ mod tests {
             let decoded = decode_grid(encoded).unwrap();
             assert_eq!(decoded, grid, "Failed roundtrip for {}", grid);
         }
+    }
+
+    #[test]
+    fn test_case_insensitive_grids() {
+        // Test that lowercase grids work the same as uppercase
+        let lowercase_grids = vec!["dm42", "fn31", "aa00", "rr99"];
+        let uppercase_grids = vec!["DM42", "FN31", "AA00", "RR99"];
+
+        for (lower, upper) in lowercase_grids.iter().zip(uppercase_grids.iter()) {
+            let encoded_lower = encode_grid(lower).unwrap();
+            let encoded_upper = encode_grid(upper).unwrap();
+            assert_eq!(encoded_lower, encoded_upper, "Case mismatch for {}/{}", lower, upper);
+
+            // Decode should always return uppercase
+            let decoded = decode_grid(encoded_lower).unwrap();
+            assert_eq!(decoded, *upper, "Decoded value should be uppercase");
+        }
+    }
+
+    #[test]
+    fn test_signal_reports() {
+        // Test positive signal reports
+        let val = encode_grid("+10").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "+10");
+
+        let val = encode_grid("+00").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "+00");
+
+        let val = encode_grid("+49").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "+49");
+
+        // Test negative signal reports
+        let val = encode_grid("-10").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "-10");
+
+        let val = encode_grid("-01").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "-01");
+
+        let val = encode_grid("-30").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "-30");
+    }
+
+    #[test]
+    fn test_signal_report_boundaries() {
+        // Test boundary values
+        let val = encode_grid("-50").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "-50");
+
+        let val = encode_grid("+49").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "+49");
+
+        // Test the special -31 to -50 range that gets special encoding
+        let val = encode_grid("-31").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "-31");
+
+        let val = encode_grid("-40").unwrap();
+        assert_eq!(decode_grid(val).unwrap(), "-40");
+
+        // Test out of range
+        assert!(encode_grid("-51").is_err());
+        assert!(encode_grid("+50").is_err());
+    }
+
+    #[test]
+    fn test_signal_report_roundtrip() {
+        // Test roundtrip for various signal reports
+        let reports = vec!["-50", "-30", "-15", "-08", "+00", "+10", "+20", "+49"];
+        for report in reports {
+            let encoded = encode_grid(report).unwrap();
+            let decoded = decode_grid(encoded).unwrap();
+            assert_eq!(decoded, report, "Failed roundtrip for {}", report);
+        }
+    }
+
+    #[test]
+    fn test_special_codes() {
+        // Test BLANK (empty string)
+        let val = encode_grid("").unwrap();
+        assert_eq!(val, MAXGRID4 + BLANK_CODE);
+        assert_eq!(decode_grid(val).unwrap(), "");
+
+        // Test RRR
+        let val = encode_grid("RRR").unwrap();
+        assert_eq!(val, MAXGRID4 + RRR_CODE);
+        assert_eq!(decode_grid(val).unwrap(), "RRR");
+
+        // Test 73
+        let val = encode_grid("73").unwrap();
+        assert_eq!(val, MAXGRID4 + CODE_73);
+        assert_eq!(decode_grid(val).unwrap(), "73");
+
+        // Test RR73 (this is a special case - it's a valid grid square!)
+        // RR73: R=17, R=17, 7=7, 3=3
+        // j1 = 17*1800 = 30600
+        // j2 = 17*100 = 1700
+        // j3 = 7*10 = 70
+        // j4 = 3
+        // Total = 32373
+        let val = encode_grid("RR73").unwrap();
+        assert_eq!(val, 32373);  // It's encoded as a grid square, not a special code
+        assert_eq!(decode_grid(val).unwrap(), "RR73");
+    }
+
+    #[test]
+    fn test_special_code_roundtrip() {
+        let codes = vec!["", "RRR", "73"];
+        for code in codes {
+            let encoded = encode_grid(code).unwrap();
+            let decoded = decode_grid(encoded).unwrap();
+            assert_eq!(decoded, code, "Failed roundtrip for special code '{}'", code);
+        }
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        // Test that RR73 is treated as a grid square, not the special code
+        let val_rr73 = encode_grid("RR73").unwrap();
+        assert!(val_rr73 < MAXGRID4, "RR73 should be encoded as a grid square");
+
+        // Verify direct decode of special code values
+        assert_eq!(decode_grid(MAXGRID4 + RR73_CODE).unwrap(), "RR73");
+
+        // Test max valid grid RR99
+        let val = encode_grid("RR99").unwrap();
+        assert_eq!(val, 32399);  // Max grid value
+        assert!(val < MAXGRID4);
+
+        // Test invalid inputs
+        assert!(encode_grid("XY12").is_err());  // X, Y > R
+        assert!(encode_grid("DM").is_err());    // Too short
+        assert!(encode_grid("DM423").is_err()); // Too long
+        assert!(encode_grid("DMAB").is_err());  // Invalid digits
     }
 }
