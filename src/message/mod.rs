@@ -12,20 +12,14 @@ mod parser;
 mod encode;
 mod decode;
 
-// Public API - main encoding/decoding functions
-pub use encode::encode_variant;
-pub use decode::decode_message_bits;
-pub use parser::parse_message_variant;
-pub use types::MessageVariant;
-
-// Re-export callsign and grid utilities
-pub use callsign::{pack_callsign, unpack_callsign, hash10, hash12, hash22};
-pub use grid::{encode_grid, decode_grid};
+// Public API - minimal surface area
+// Only expose the high-level encode/decode functions and the hash cache
 pub use callsign_cache::CallsignHashCache;
 
-// Re-export lookup tables for external use
-pub use lookup_tables::{arrl_section_to_index, arrl_section_from_index, 
-                         rtty_state_to_index, rtty_state_from_index};
+// Internal imports - not exported
+use encode::encode_variant;
+use decode::decode_message_bits;
+use parser::parse_message_variant;
 
 use alloc::string::String;
 use bitvec::prelude::*;

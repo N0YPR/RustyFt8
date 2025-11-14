@@ -29,18 +29,7 @@ const MIN_RTTY_FIELD_DAY_PARTS: usize = 4;
 ///
 /// This is the main entry point for parsing FT8 messages. It tries different message
 /// types in order of specificity and falls back to free text if no match is found.
-///
-/// # Examples
-///
-/// ```no_run
-/// use rustyft8::message::parse_message_variant;
-///
-/// let msg = parse_message_variant("CQ N0YPR DM42")?;
-/// let msg = parse_message_variant("K1ABC W9XYZ EN37")?;
-/// let msg = parse_message_variant("TNX BOB 73 GL")?;
-/// # Ok::<(), String>(())
-/// ```
-pub fn parse_message_variant(text: &str) -> Result<MessageVariant, String> {
+pub(crate) fn parse_message_variant(text: &str) -> Result<MessageVariant, String> {
     let trimmed = text.trim();
     let parts: Vec<&str> = trimmed.split_whitespace().collect();
 
