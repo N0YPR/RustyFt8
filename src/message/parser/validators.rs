@@ -1,3 +1,9 @@
+//! Validation Functions for FT8 Message Parsing
+//!
+//! This module provides validation utilities for callsigns, grid squares, and signal reports
+//! used throughout the FT8 message parsing system. It handles both standard and non-standard
+//! callsign formats, including hash callsigns and portable/rover suffixes.
+
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::format;
