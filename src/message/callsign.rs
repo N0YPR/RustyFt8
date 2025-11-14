@@ -6,24 +6,7 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use alloc::format;
-
-/// Number of special tokens (CQ variants, DE, QRZ) in the WSJT-X protocol
-const NTOKENS: u32 = 2063592;
-
-/// Maximum 22-bit hash value for non-standard callsigns
-const MAX22: u32 = 4194304;
-
-/// Character set for first position in standard callsigns (space + 0-9 + A-Z)
-const CHARSET_A1: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";  // 37 chars
-
-/// Character set for second position in standard callsigns (0-9 + A-Z)
-const CHARSET_A2: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";   // 36 chars
-
-/// Character set for digit position in standard callsigns (0-9)
-const CHARSET_A3: &str = "0123456789";                             // 10 chars
-
-/// Character set for letter-only positions in standard callsigns (space + A-Z)
-const CHARSET_A4: &str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";            // 27 chars
+use crate::message::constants::{NTOKENS, MAX22, CHARSET_A1, CHARSET_A2, CHARSET_A3, CHARSET_A4, CHARSET_BASE38};
 
 /// Unpack a 28-bit value to a callsign using WSJT-X protocol
 ///
@@ -169,8 +152,6 @@ pub fn unpack_callsign(n28: u32) -> Result<String, String> {
 /// # Returns
 /// m-bit hash value
 fn ihashcall(callsign: &str, m: u32) -> u32 {
-    const CHARSET: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/";
-    
     // Pad callsign to 11 characters (WSJT-X uses 13, but only first 11 matter)
     let mut c13 = callsign.to_uppercase();
     while c13.len() < 11 {
@@ -179,14 +160,14 @@ fn ihashcall(callsign: &str, m: u32) -> u32 {
     if c13.len() > 11 {
         c13.truncate(11);
     }
-    
+
     // Convert to base-38 number
     let mut n8: u64 = 0;
     for ch in c13.chars() {
         // In Fortran, index() returns 0 if not found (1-indexed), then we subtract 1
         // So not found -> 0 - 1 = -1, but we treat as 0
-        // In our case, find() returns None if not found, we'll use 0 (space)
-        let j = CHARSET.find(ch).unwrap_or(0) as u64;
+        // In our case, we find the character position in the base-38 charset
+        let j = CHARSET_BASE38.iter().position(|&c| c == ch as u8).unwrap_or(0) as u64;
         n8 = 38 * n8 + j;
     }
     

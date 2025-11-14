@@ -6,9 +6,7 @@ use crate::message::CallsignHashCache;
 use crate::message::callsign::unpack_callsign;
 use crate::message::grid::decode_grid;
 use crate::message::text_encoding::decode_callsign_base38;
-
-const NTOKENS: u32 = 2063592;
-const MAX22: u32 = 4194304;
+use crate::message::constants::{NTOKENS, MAX22};
 
 /// Decode Type 1 messages (i3=1)
 pub fn decode_type1(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {

@@ -5,10 +5,7 @@
 use alloc::vec::Vec;
 use alloc::format;
 use alloc::string::{String, ToString};
-
-/// Maximum grid square value (18*18*10*10 = 32400)
-/// Values above this are signal reports and special codes
-const MAXGRID4: u16 = 32400;
+use crate::message::constants::MAXGRID4;
 
 /// Special code offsets (added to MAXGRID4)
 const BLANK_CODE: u16 = 1;   // Empty string (2-word message)

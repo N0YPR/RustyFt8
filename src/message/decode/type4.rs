@@ -2,26 +2,26 @@ use alloc::string::{String, ToString};
 use alloc::format;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
+use crate::message::constants::CHARSET_BASE38;
 
 /// Decode Type 4 NonStandardCall message (i3=4)
 pub fn decode_type4(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
     let mut bit_index = 0;
-    
+
     // n12: 12-bit hash (bits 0-11)
     let n12: u16 = bits[bit_index..bit_index + 12].load_be();
     bit_index += 12;
-    
+
     // n58: base-38 encoded callsign (bits 12-69)
     let n58: u64 = bits[bit_index..bit_index + 58].load_be();
     bit_index += 58;
-    
+
     // Decode n58 as base-38 callsign
-    const CHARSET: &[u8] = b" 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/";
     let mut acc = n58;
     let mut callsign = String::with_capacity(11);
     for _ in 0..11 {
         let idx = (acc % 38) as usize;
-        callsign.push(CHARSET[idx] as char);
+        callsign.push(CHARSET_BASE38[idx] as char);
         acc /= 38;
     }
     callsign = callsign.chars().rev().collect::<String>().trim_start().to_string();

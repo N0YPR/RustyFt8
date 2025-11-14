@@ -4,9 +4,7 @@ use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::callsign::unpack_callsign;
 use crate::message::grid::decode_grid;
-
-const NTOKENS: u32 = 2063592;
-const MAX22: u32 = 4194304;
+use crate::message::constants::{NTOKENS, MAX22};
 
 /// Decode Type 2 EU VHF Contest message (i3=2)
 pub fn decode_type2(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {

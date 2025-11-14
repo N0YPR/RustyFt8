@@ -4,8 +4,7 @@ use crate::message::CallsignHashCache;
 use crate::message::types::MessageVariant;
 use crate::message::callsign::{pack_callsign, hash22};
 use crate::message::grid::encode_grid;
-
-const NTOKENS: u32 = 2063592;
+use crate::message::constants::NTOKENS;
 
 /// Encode Type 1 Standard message (i3=1)
 pub fn encode_standard(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>, mut cache: Option<&mut CallsignHashCache>) -> Result<(), String> {

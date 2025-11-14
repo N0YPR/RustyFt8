@@ -1,9 +1,6 @@
 use alloc::string::{String, ToString};
 use alloc::format;
-
-// Character sets for different encoding types
-const CHARSET_BASE42: &[u8] = b" 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-./?";  // 42 chars
-const CHARSET_BASE38: &[u8] = b" 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/";      // 38 chars
+use crate::message::constants::{CHARSET_BASE42, CHARSET_BASE38};
 
 /// Encode compound callsign for Type 4 NonStandardCall (up to 11 characters) into 58 bits
 /// Uses base-38 encoding with character set: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/'

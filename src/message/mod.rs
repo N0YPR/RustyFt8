@@ -4,6 +4,7 @@ mod grid;
 mod callsign_cache;
 
 // Refactored message77 modules
+mod constants;
 mod types;
 mod lookup_tables;
 mod text_encoding;
