@@ -5,7 +5,7 @@ use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::callsign::unpack_callsign;
 use crate::message::grid::decode_grid;
-use crate::message::text_encoding::decode_text_c58;
+use crate::message::text_encoding::decode_callsign_base38;
 
 const NTOKENS: u32 = 2063592;
 const MAX22: u32 = 4194304;
@@ -131,9 +131,9 @@ fn decode_type1_nonstandard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHa
     
     // c58: Encoded text (bits 18-75, 58 bits)
     let c58: u64 = bits[bit_index..bit_index + 58].load_be();
-    
+
     // Decode the text
-    let text = decode_text_c58(c58)?;
+    let text = decode_callsign_base38(c58)?;
     
     // Extract compound callsign and add to cache
     let parts: Vec<&str> = text.split_whitespace().collect();

@@ -5,6 +5,7 @@ use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::types::MessageVariant;
 use crate::message::callsign::hash12;
+use crate::message::text_encoding::encode_callsign_base38;
 
 /// Encode Type 4 NonStandardCall message (i3=4)
 pub fn encode_nonstandard_call(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>, mut cache: Option<&mut CallsignHashCache>) -> Result<(), String> {
@@ -59,14 +60,7 @@ pub fn encode_nonstandard_call(variant: &MessageVariant, output: &mut BitSlice<u
         };
         
         // n58: base-38 encoding of the compound callsign (right-aligned to 11 chars)
-        const CHARSET: &[u8] = b" 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/";
-        let padded = format!("{:>11}", compound_callsign.to_uppercase());
-        let mut n58: u64 = 0;
-        for ch in padded.bytes() {
-            let idx = CHARSET.iter().position(|&c| c == ch)
-                .ok_or_else(|| format!("Invalid character in callsign: '{}'", ch as char))?;
-            n58 = n58 * 38 + idx as u64;
-        }
+        let n58 = encode_callsign_base38(compound_callsign)?;
         
         // Add callsigns to cache if available
         if let Some(ref mut cache_mut) = cache {
