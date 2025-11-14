@@ -2,7 +2,7 @@ use alloc::string::String;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::types::MessageVariant;
-use crate::message::callsign::{pack_callsign, ihashcall};
+use crate::message::callsign::{pack_callsign, hash22};
 use crate::message::grid::encode_grid;
 
 const NTOKENS: u32 = 2063592;
@@ -17,7 +17,7 @@ pub fn encode_standard(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>
         let n28a_value = if call1.starts_with('<') && call1.ends_with('>') {
             // Extract callsign from angle brackets
             let inner_call = &call1[1..call1.len()-1];
-            let hash22 = ihashcall(inner_call, 22);
+            let hash22 = hash22(inner_call);
             let n28 = NTOKENS + hash22;
             
             // Add to cache if available
@@ -41,7 +41,7 @@ pub fn encode_standard(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>
         let n28b_value = if call2.starts_with('<') && call2.ends_with('>') {
             // Extract callsign from angle brackets
             let inner_call = &call2[1..call2.len()-1];
-            let hash22 = ihashcall(inner_call, 22);
+            let hash22 = hash22(inner_call);
             let n28 = NTOKENS + hash22;
             
             // Add to cache if available
@@ -86,7 +86,7 @@ pub fn encode_type2(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>, m
         // n28a: Encode first callsign (28 bits)
         let n28a_value = if call1.starts_with('<') && call1.ends_with('>') {
             let inner_call = &call1[1..call1.len()-1];
-            let hash22 = ihashcall(inner_call, 22);
+            let hash22 = hash22(inner_call);
             let n28 = NTOKENS + hash22;
             
             if let Some(ref mut cache_mut) = cache {
@@ -107,7 +107,7 @@ pub fn encode_type2(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>, m
         // n28b: Encode second callsign to 28 bits
         let n28b_value = if call2.starts_with('<') && call2.ends_with('>') {
             let inner_call = &call2[1..call2.len()-1];
-            let hash22 = ihashcall(inner_call, 22);
+            let hash22 = hash22(inner_call);
             let n28 = NTOKENS + hash22;
             
             if let Some(ref mut cache_mut) = cache {

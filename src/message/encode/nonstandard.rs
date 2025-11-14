@@ -4,7 +4,7 @@ use alloc::format;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::types::MessageVariant;
-use crate::message::callsign::ihashcall;
+use crate::message::callsign::hash12;
 
 /// Encode Type 4 NonStandardCall message (i3=4)
 pub fn encode_nonstandard_call(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>, mut cache: Option<&mut CallsignHashCache>) -> Result<(), String> {
@@ -51,9 +51,9 @@ pub fn encode_nonstandard_call(variant: &MessageVariant, output: &mut BitSlice<u
         // For CQ messages: hash of the compound callsign (for cache/lookup)
         // For non-CQ messages: hash of the explicit hash callsign
         let n12 = if icq {
-            ihashcall(compound_callsign, 12) as u16
+            hash12(compound_callsign) as u16
         } else if let Some(hash_call) = hash_callsign {
-            ihashcall(hash_call, 12) as u16
+            hash12(hash_call) as u16
         } else {
             0
         };

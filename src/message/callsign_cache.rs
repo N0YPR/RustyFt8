@@ -93,8 +93,8 @@ impl CallsignHashCache {
     /// # Arguments
     /// * `callsign` - The callsign to cache
     pub fn insert(&mut self, callsign: &str) {
-        use crate::message::callsign::{ihashcall, hash12, hash22};
-        let hash10 = ihashcall(callsign, 10) as u16;
+        use crate::message::callsign::{hash10, hash12, hash22};
+        let hash10 = hash10(callsign) as u16;
         let h12 = hash12(callsign);
         let h22 = hash22(callsign);
         self.cache_10bit.insert(hash10, callsign.to_string());

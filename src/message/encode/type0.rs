@@ -3,7 +3,7 @@ use alloc::format;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::types::MessageVariant;
-use crate::message::callsign::{pack_callsign, ihashcall};
+use crate::message::callsign::{pack_callsign, hash10};
 use crate::message::text_encoding::encode_free_text;
 
 /// Encode Type 0.0 Free Text message (i3=0, n3=0)
@@ -47,7 +47,7 @@ pub fn encode_dxpedition(variant: &MessageVariant, output: &mut BitSlice<u8, Msb
         bit_index += 28;
         
         // n10: 10-bit hash of the callsign (10 bits)
-        let n10 = ihashcall(hash_call, 10) as u16;
+        let n10 = hash10(hash_call) as u16;
         output[bit_index..bit_index + 10].store_be(n10);
         bit_index += 10;
         

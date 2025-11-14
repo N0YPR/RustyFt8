@@ -162,7 +162,7 @@ pub fn unpack_callsign(n28: u32) -> Result<String, String> {
 /// 
 /// # Returns
 /// m-bit hash value
-pub fn ihashcall(callsign: &str, m: u32) -> u32 {
+fn ihashcall(callsign: &str, m: u32) -> u32 {
     const CHARSET: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/";
     
     // Pad callsign to 11 characters (WSJT-X uses 13, but only first 11 matter)
@@ -273,8 +273,8 @@ pub fn pack_callsign(callsign: &str) -> Result<u32, String> {
     // These are encoded using a 22-bit hash: n28 = NTOKENS + hash22(callsign)
     if callsign.starts_with('<') && callsign.ends_with('>') {
         let inner = &callsign[1..callsign.len()-1];
-        let hash22 = ihashcall(inner, 22);
-        return Ok(NTOKENS + hash22);
+        let hash22_value = hash22(inner);
+        return Ok(NTOKENS + hash22_value);
     }
     
     // Slash callsign handling
@@ -391,13 +391,26 @@ pub fn pack_callsign(callsign: &str) -> Result<u32, String> {
     Ok(n28 & ((1 << 28) - 1))
 }
 
-/// Compute a 12-bit hash of a callsign
-/// 
-/// Used in Type 2 messages for non-standard callsigns.
-/// 
+/// Compute a 10-bit hash of a callsign
+///
+/// Used in Type 0.5 messages (DXpedition mode) for referencing callsigns.
+///
 /// # Arguments
 /// * `callsign` - The callsign to hash
-/// 
+///
+/// # Returns
+/// 10-bit hash value
+pub fn hash10(callsign: &str) -> u16 {
+    ihashcall(callsign, 10) as u16
+}
+
+/// Compute a 12-bit hash of a callsign
+///
+/// Used in Type 2 messages for non-standard callsigns.
+///
+/// # Arguments
+/// * `callsign` - The callsign to hash
+///
 /// # Returns
 /// 12-bit hash value
 pub fn hash12(callsign: &str) -> u16 {
@@ -405,12 +418,12 @@ pub fn hash12(callsign: &str) -> u16 {
 }
 
 /// Compute a 22-bit hash of a callsign
-/// 
+///
 /// Used in Type 1 messages when referencing non-standard callsigns.
-/// 
+///
 /// # Arguments
 /// * `callsign` - The callsign to hash
-/// 
+///
 /// # Returns
 /// 22-bit hash value
 pub fn hash22(callsign: &str) -> u32 {
