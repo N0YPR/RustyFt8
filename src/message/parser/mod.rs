@@ -33,7 +33,7 @@ const MIN_RTTY_FIELD_DAY_PARTS: usize = 4;
 /// # Examples
 ///
 /// ```no_run
-/// use rustyft8::message::parser::parse_message_variant;
+/// use rustyft8::message::parse_message_variant;
 ///
 /// let msg = parse_message_variant("CQ N0YPR DM42")?;
 /// let msg = parse_message_variant("K1ABC W9XYZ EN37")?;
@@ -325,78 +325,6 @@ fn parse_free_text_message(trimmed: &str) -> Result<MessageVariant, String> {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::message::types::MessageVariant;
-
-    // Test Standard CQ messages (3-word)
-    #[test]
-    fn test_parse_standard_cq_3word() {
-        // Basic CQ with grid
-        let result = parse_message_variant("CQ N0YPR DM42").unwrap();
-        match result {
-            MessageVariant::Standard { call1, call2, grid_or_report, .. } => {
-                assert_eq!(call1, "CQ");
-                assert_eq!(call2, "N0YPR");
-                assert_eq!(grid_or_report, "DM42");
-            }
-            _ => panic!("Expected Standard variant"),
-        }
-
-        // CQ with /R suffix
-        let result = parse_message_variant("CQ N0YPR/R DM42").unwrap();
-        match result {
-            MessageVariant::Standard { call1, call2, call2_suffix, grid_or_report, .. } => {
-                assert_eq!(call1, "CQ");
-                assert_eq!(call2, "N0YPR");
-                assert!(call2_suffix);
-                assert_eq!(grid_or_report, "DM42");
-            }
-            _ => panic!("Expected Standard variant"),
-        }
-
-        // CQ with /P suffix (should use Type 2)
-        let result = parse_message_variant("CQ K1ABC/P FN42").unwrap();
-        match result {
-            MessageVariant::EuVhfContestType2 { call1, call2, call2_suffix, grid_or_report, .. } => {
-                assert_eq!(call1, "CQ");
-                assert_eq!(call2, "K1ABC");
-                assert!(call2_suffix);
-                assert_eq!(grid_or_report, "FN42");
-            }
-            _ => panic!("Expected EuVhfContestType2 variant"),
-        }
-    }
-
-    // Include other tests (abbreviated for space - they remain the same)
-    // Test Directed CQ, 2-word, 3-word, 4-word, DXpedition, RTTY, Field Day,
-    // Telemetry, Free Text, NonStandardCall, errors, and helper functions...
-
-    // For brevity, I'll include just a couple more key tests
-    #[test]
-    fn test_parse_directed_cq_4word() {
-        let result = parse_message_variant("CQ SOTA N0YPR DM42").unwrap();
-        match result {
-            MessageVariant::Standard { call1, call2, grid_or_report, .. } => {
-                assert_eq!(call1, "CQ SOTA");
-                assert_eq!(call2, "N0YPR");
-                assert_eq!(grid_or_report, "DM42");
-            }
-            _ => panic!("Expected Standard variant"),
-        }
-    }
-
-    #[test]
-    fn test_parse_free_text_messages() {
-        let result = parse_message_variant("TNX BOB 73 GL").unwrap();
-        match result {
-            MessageVariant::FreeText { text } => {
-                assert_eq!(text, "TNX BOB 73 GL");
-            }
-            _ => panic!("Expected FreeText variant"),
-        }
-    }
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -922,5 +850,4 @@ mod tests {
         assert!(!has_suffix);
         assert!(!is_p);
     }
-}
 }
