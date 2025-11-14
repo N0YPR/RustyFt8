@@ -16,6 +16,8 @@ This ensures accurate, authoritative answers based on the actual WSJT-X implemen
 
 ## Primary Authoritative Source
 
+**QEX article FT4 & FT8 protocol**: https://wsjt.sourceforge.io/FT4_FT8_QEX.pdf
+
 **Official WSJT-X Repository**: https://sourceforge.net/p/wsjt/wsjtx/ci/master/tree/
 
 This is the definitive source maintained by K1JT (Joe Taylor) and the WSJT development team. All FT8/FT4 LDPC implementations, test vectors, and behavioral questions should reference this source.
