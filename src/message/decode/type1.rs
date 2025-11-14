@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use alloc::format;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
-use crate::message::callsign::decode_callsign;
+use crate::message::callsign::unpack_callsign;
 use crate::message::grid::decode_grid;
 use crate::message::text_encoding::decode_text_c58;
 
@@ -43,7 +43,7 @@ fn decode_type1_standard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashC
             format!("<...{:06X}>", ihash)
         }
     } else {
-        decode_callsign(n28a)?
+        unpack_callsign(n28a)?
     };
     bit_index += 28;
     
@@ -66,7 +66,7 @@ fn decode_type1_standard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashC
             format!("<...{:06X}>", ihash)
         }
     } else {
-        decode_callsign(n28b)?
+        unpack_callsign(n28b)?
     };
     bit_index += 28;
     

@@ -2,7 +2,7 @@ use alloc::string::String;
 use alloc::format;
 use bitvec::prelude::*;
 use crate::message::types::MessageVariant;
-use crate::message::callsign::encode_callsign;
+use crate::message::callsign::pack_callsign;
 use crate::message::lookup_tables::rtty_state_to_index;
 
 /// Encode Type 3 ARRL RTTY Roundup message (i3=3)
@@ -15,12 +15,12 @@ pub fn encode_rtty_roundup(variant: &MessageVariant, output: &mut BitSlice<u8, M
         bit_index += 1;
         
         // n28a: Encode first callsign (28 bits)
-        let n28a = encode_callsign(call1)?;
+        let n28a = pack_callsign(call1)?;
         output[bit_index..bit_index + 28].store_be(n28a);
         bit_index += 28;
         
         // n28b: Encode second callsign (28 bits)
-        let n28b = encode_callsign(call2)?;
+        let n28b = pack_callsign(call2)?;
         output[bit_index..bit_index + 28].store_be(n28b);
         bit_index += 28;
         

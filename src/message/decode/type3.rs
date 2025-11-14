@@ -1,7 +1,7 @@
 use alloc::string::{String, ToString};
 use alloc::format;
 use bitvec::prelude::*;
-use crate::message::callsign::decode_callsign;
+use crate::message::callsign::unpack_callsign;
 use crate::message::lookup_tables::rtty_state_from_index;
 
 /// Decode Type 3 ARRL RTTY Roundup message (i3=3)
@@ -14,12 +14,12 @@ pub fn decode_type3(bits: &BitSlice<u8, Msb0>) -> Result<String, String> {
     
     // n28a: Decode first callsign (bits 1-28)
     let n28a: u32 = bits[bit_index..bit_index + 28].load_be();
-    let call1 = decode_callsign(n28a)?;
+    let call1 = unpack_callsign(n28a)?;
     bit_index += 28;
     
     // n28b: Decode second callsign (bits 29-56)
     let n28b: u32 = bits[bit_index..bit_index + 28].load_be();
-    let call2 = decode_callsign(n28b)?;
+    let call2 = unpack_callsign(n28b)?;
     bit_index += 28;
     
     // r: R/acknowledge flag (bit 57)

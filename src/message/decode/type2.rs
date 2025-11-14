@@ -2,7 +2,7 @@ use alloc::string::{String, ToString};
 use alloc::format;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
-use crate::message::callsign::decode_callsign;
+use crate::message::callsign::unpack_callsign;
 use crate::message::grid::decode_grid;
 
 const NTOKENS: u32 = 2063592;
@@ -27,7 +27,7 @@ pub fn decode_type2(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>
             format!("<...{:06X}>", ihash)
         }
     } else {
-        decode_callsign(n28a)?
+        unpack_callsign(n28a)?
     };
     bit_index += 28;
     
@@ -50,7 +50,7 @@ pub fn decode_type2(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>
             format!("<...{:06X}>", ihash)
         }
     } else {
-        decode_callsign(n28b)?
+        unpack_callsign(n28b)?
     };
     bit_index += 28;
     

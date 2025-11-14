@@ -2,7 +2,7 @@ use alloc::string::{String, ToString};
 use alloc::format;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
-use crate::message::callsign::decode_callsign;
+use crate::message::callsign::unpack_callsign;
 use crate::message::text_encoding::decode_free_text;
 use crate::message::lookup_tables::arrl_section_from_index;
 
@@ -39,12 +39,12 @@ fn decode_dxpedition(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache
     
     // n28a: Decode first callsign (bits 0-27)
     let n28a: u32 = bits[bit_index..bit_index + 28].load_be();
-    let call1 = decode_callsign(n28a)?;
+    let call1 = unpack_callsign(n28a)?;
     bit_index += 28;
     
     // n28b: Decode second callsign (bits 28-55)
     let n28b: u32 = bits[bit_index..bit_index + 28].load_be();
-    let call2 = decode_callsign(n28b)?;
+    let call2 = unpack_callsign(n28b)?;
     bit_index += 28;
     
     // n10: 10-bit hash (bits 56-65)
@@ -80,12 +80,12 @@ fn decode_field_day(bits: &BitSlice<u8, Msb0>, n3: u8) -> Result<String, String>
     
     // n28a: Decode first callsign (bits 0-27)
     let n28a: u32 = bits[bit_index..bit_index + 28].load_be();
-    let call1 = decode_callsign(n28a)?;
+    let call1 = unpack_callsign(n28a)?;
     bit_index += 28;
     
     // n28b: Decode second callsign (bits 28-55)
     let n28b: u32 = bits[bit_index..bit_index + 28].load_be();
-    let call2 = decode_callsign(n28b)?;
+    let call2 = unpack_callsign(n28b)?;
     bit_index += 28;
     
     // ir: R/acknowledge flag (bit 56)

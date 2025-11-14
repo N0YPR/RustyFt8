@@ -2,7 +2,7 @@ use alloc::string::String;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::types::MessageVariant;
-use crate::message::callsign::{encode_callsign, ihashcall};
+use crate::message::callsign::{pack_callsign, ihashcall};
 use crate::message::grid::encode_grid;
 
 const NTOKENS: u32 = 2063592;
@@ -27,7 +27,7 @@ pub fn encode_standard(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>
             
             n28
         } else {
-            encode_callsign(call1)?
+            pack_callsign(call1)?
         };
         output[bit_index..bit_index + 28].store_be(n28a_value);
         bit_index += 28;
@@ -51,7 +51,7 @@ pub fn encode_standard(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>
             
             n28
         } else {
-            encode_callsign(call2)?
+            pack_callsign(call2)?
         };
         output[bit_index..bit_index + 28].store_be(n28b_value);
         bit_index += 28;
@@ -95,7 +95,7 @@ pub fn encode_type2(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>, m
             
             n28
         } else {
-            encode_callsign(call1)?
+            pack_callsign(call1)?
         };
         output[bit_index..bit_index + 28].store_be(n28a_value);
         bit_index += 28;
@@ -116,7 +116,7 @@ pub fn encode_type2(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0>, m
             
             n28
         } else {
-            encode_callsign(call2)?
+            pack_callsign(call2)?
         };
         output[bit_index..bit_index + 28].store_be(n28b_value);
         bit_index += 28;

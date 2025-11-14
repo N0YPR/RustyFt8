@@ -3,7 +3,7 @@ use alloc::format;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::types::MessageVariant;
-use crate::message::callsign::{encode_callsign, ihashcall};
+use crate::message::callsign::{pack_callsign, ihashcall};
 use crate::message::text_encoding::encode_free_text;
 
 /// Encode Type 0.0 Free Text message (i3=0, n3=0)
@@ -37,12 +37,12 @@ pub fn encode_dxpedition(variant: &MessageVariant, output: &mut BitSlice<u8, Msb
         let mut bit_index = 0;
         
         // n28a: Encode first callsign (28 bits)
-        let n28a = encode_callsign(call1)?;
+        let n28a = pack_callsign(call1)?;
         output[bit_index..bit_index + 28].store_be(n28a);
         bit_index += 28;
         
         // n28b: Encode second callsign (28 bits)
-        let n28b = encode_callsign(call2)?;
+        let n28b = pack_callsign(call2)?;
         output[bit_index..bit_index + 28].store_be(n28b);
         bit_index += 28;
         
@@ -81,12 +81,12 @@ pub fn encode_field_day(variant: &MessageVariant, output: &mut BitSlice<u8, Msb0
         let mut bit_index = 0;
         
         // n28a: Encode first callsign (28 bits)
-        let n28a = encode_callsign(call1)?;
+        let n28a = pack_callsign(call1)?;
         output[bit_index..bit_index + 28].store_be(n28a);
         bit_index += 28;
         
         // n28b: Encode second callsign (28 bits)
-        let n28b = encode_callsign(call2)?;
+        let n28b = pack_callsign(call2)?;
         output[bit_index..bit_index + 28].store_be(n28b);
         bit_index += 28;
         

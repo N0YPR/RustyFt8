@@ -1,5 +1,5 @@
 /// Callsign encoding and decoding functions
-/// 
+///
 /// Implements the WSJT-X pack28/unpack28 algorithm for encoding callsigns
 /// into 28-bit integers.
 
@@ -7,14 +7,17 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use alloc::format;
 
-/// Decode a 28-bit value to a callsign using WSJT-X protocol
-/// 
-/// Reverses the pack28 encoding to recover the original callsign
-#[allow(dead_code)]
-pub fn decode_callsign(n28: u32) -> Result<String, String> {
-    const NTOKENS: u32 = 2063592;
-    const MAX22: u32 = 4194304;
-    
+/// Number of special tokens (CQ variants, DE, QRZ) in the WSJT-X protocol
+const NTOKENS: u32 = 2063592;
+
+/// Maximum 22-bit hash value for non-standard callsigns
+const MAX22: u32 = 4194304;
+
+/// Unpack a 28-bit value to a callsign using WSJT-X protocol
+///
+/// This implements the WSJT-X unpack28 algorithm, reversing pack28 encoding
+/// to recover the original callsign from its 28-bit representation.
+pub fn unpack_callsign(n28: u32) -> Result<String, String> {
     // Special token handling
     if n28 == 0 {
         return Ok("DE".to_string());
@@ -188,21 +191,20 @@ pub fn ihashcall(callsign: &str, m: u32) -> u32 {
     (shifted & ((1u64 << m) - 1)) as u32
 }
 
-/// Encode a callsign to 28 bits using WSJT-X protocol
-/// 
-/// From WSJT-X packjt77.f90:
+/// Pack a callsign into a 28-bit value using WSJT-X protocol
+///
+/// This implements the WSJT-X pack28 algorithm from packjt77.f90.
+///
+/// # Format
 /// - Callsign must be right-adjusted to 6 characters
 /// - Character sets:
 ///   - a1: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' (37 chars, space + 0-9 + A-Z)
 ///   - a2: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' (36 chars, 0-9 + A-Z)
 ///   - a3: '0123456789' (10 chars)
 ///   - a4: ' ABCDEFGHIJKLMNOPQRSTUVWXYZ' (27 chars, space + A-Z)
-/// - Encoding: n28 = NTOKENS + MAX22 + 36*10*27*27*27*i1 + 10*27*27*27*i2 
+/// - Encoding: n28 = NTOKENS + MAX22 + 36*10*27*27*27*i1 + 10*27*27*27*i2
 ///                   + 27*27*27*i3 + 27*27*i4 + 27*i5 + i6
-pub fn encode_callsign(callsign: &str) -> Result<u32, String> {
-    const NTOKENS: u32 = 2063592;
-    const MAX22: u32 = 4194304;
-    
+pub fn pack_callsign(callsign: &str) -> Result<u32, String> {
     // Special token handling
     if callsign == "DE" {
         return Ok(0);
@@ -417,8 +419,7 @@ pub fn hash22(callsign: &str) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use std::vec::Vec;
-    use std::string::{String, ToString};
+    use std::string::String;
     use std::vec;
     use super::*;
     use rstest::rstest;
@@ -426,11 +427,11 @@ mod tests {
     #[test]
     fn test_invalid_callsigns() {
         // No digits
-        assert!(encode_callsign("ABC").is_err());
+        assert!(pack_callsign("ABC").is_err());
         // Too long
-        assert!(encode_callsign("AB1CDEF").is_err());
+        assert!(pack_callsign("AB1CDEF").is_err());
         // Too many letters after digit (more than 3)
-        assert!(encode_callsign("A1BCDE").is_err());
+        assert!(pack_callsign("A1BCDE").is_err());
     }
 
     /// Test special callsigns that are too long for standard pack28 encoding
@@ -443,15 +444,15 @@ mod tests {
         ];
         
         for call in unsupported {
-            let result = encode_callsign(call);
+            let result = pack_callsign(call);
             // These should fail because they're too long for standard encoding
             // They would need angle brackets to use hash encoding: <WB2000XYZ>
             assert!(result.is_err(), "Should fail without angle brackets: {}", call);
         }
-        
+
         // Verify they work with angle brackets
-        assert!(encode_callsign("<WB2000XYZ>").is_ok());
-        assert!(encode_callsign("<WB2000XYZABCD>").is_ok());
+        assert!(pack_callsign("<WB2000XYZ>").is_ok());
+        assert!(pack_callsign("<WB2000XYZABCD>").is_ok());
     }
 
     /// Test callsign encoding and decoding against ft8code reference values
@@ -521,38 +522,35 @@ mod tests {
     #[case::g4abc("G4ABC", 0b0000100100001100000101100110)]
     #[case::ja1abc("JA1ABC", 0b1000111100000100010111101001)]
     fn test_callsign_encode_decode(#[case] callsign: &str, #[case] expected_n28: u32) {
-        const NTOKENS: u32 = 2063592;
-        const MAX22: u32 = 4194304;
-        
         // Test encoding
-        let encoded = encode_callsign(callsign)
+        let encoded = pack_callsign(callsign)
             .expect(&format!("Failed to encode callsign: {}", callsign));
-        
+
         assert_eq!(
             encoded, expected_n28,
             "Encoding '{}' mismatch:\n  Expected: {}\n  Actual:   {}",
             callsign, expected_n28, encoded
         );
-        
+
         // For hashed callsigns (non-standard with angle brackets), we cannot recover
         // the original callsign from the hash. The decoder returns "<...>" for these.
         let is_hashed = callsign.starts_with('<') && callsign.ends_with('>');
-        
+
         if !is_hashed {
             // Test decoding (only for non-hashed callsigns)
-            let decoded = decode_callsign(expected_n28)
+            let decoded = unpack_callsign(expected_n28)
                 .expect(&format!("Failed to decode n28: {}", expected_n28));
-            
+
             assert_eq!(
                 decoded, callsign.to_uppercase(),
                 "Decoding {} mismatch:\n  Expected: {}\n  Actual:   {}",
                 expected_n28, callsign.to_uppercase(), decoded
             );
-            
+
             // Test round-trip
-            let roundtrip = decode_callsign(encoded)
+            let roundtrip = unpack_callsign(encoded)
                 .expect(&format!("Failed to decode encoded value: {}", encoded));
-            
+
             assert_eq!(
                 roundtrip, callsign.to_uppercase(),
                 "Round-trip failed for '{}': encode = {} -> decode = '{}'",
@@ -560,9 +558,9 @@ mod tests {
             );
         } else {
             // For hashed callsigns, verify that decode returns the placeholder
-            let decoded = decode_callsign(expected_n28)
+            let decoded = unpack_callsign(expected_n28)
                 .expect(&format!("Failed to decode hashed n28: {}", expected_n28));
-            
+
             assert_eq!(
                 decoded, "<...>",
                 "Hashed callsign should decode to '<...>', got: '{}'",
@@ -579,11 +577,11 @@ mod tests {
     #[case("K1ABC/P", "K1ABC", 10214965)]    // Portable suffix stripped
     #[case("N0YPR/R", "N0YPR", 10803661)]    // Rover suffix stripped
     fn test_slash_callsigns(#[case] slash_call: &str, #[case] base_call: &str, #[case] expected_n28: u32) {
-        let encoded = encode_callsign(slash_call).unwrap();
+        let encoded = pack_callsign(slash_call).unwrap();
         assert_eq!(encoded, expected_n28);
-        
+
         // Decode returns the base call (without slash)
-        let decoded = decode_callsign(encoded).unwrap();
+        let decoded = unpack_callsign(encoded).unwrap();
         assert_eq!(decoded, base_call);
     }
 }

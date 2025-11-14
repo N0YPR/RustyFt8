@@ -22,7 +22,7 @@ pub use parser::parse_message_variant;
 pub use types::MessageVariant;
 
 // Re-export callsign and grid utilities
-pub use callsign::{encode_callsign, decode_callsign, ihashcall, hash12, hash22};
+pub use callsign::{pack_callsign, unpack_callsign, ihashcall, hash12, hash22};
 pub use grid::{encode_grid, decode_grid};
 pub use callsign_cache::CallsignHashCache;
 
