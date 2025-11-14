@@ -3,17 +3,17 @@ use alloc::format;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 
-mod type0;
-mod type1;
-mod type2;
-mod type3;
-mod type4;
+mod free_text;
+mod standard;
+mod eu_vhf;
+mod rtty_field_day;
+mod nonstandard;
 
-pub use type0::*;
-pub use type1::*;
-pub use type2::*;
-pub use type3::*;
-pub use type4::*;
+pub use free_text::*;
+pub use standard::*;
+pub use eu_vhf::*;
+pub use rtty_field_day::*;
+pub use nonstandard::*;
 
 /// Decode 77-bit message back to text
 pub fn decode_message_bits(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
