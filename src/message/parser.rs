@@ -5,93 +5,26 @@ use crate::message::types::MessageVariant;
 use crate::message::validation::{validate_callsign_basic, validate_grid_basic, is_nonstandard_callsign};
 use crate::message::lookup_tables::arrl_section_to_index;
 
+// Constants for message parsing
+const MAX_TELEMETRY_HEX_LEN: usize = 18;
+const MAX_FREE_TEXT_LEN: usize = 13;
+const DXPEDITION_PARTS: usize = 5;
+const MIN_RTTY_FIELD_DAY_PARTS: usize = 4;
+
 /// Parse text message into internal MessageVariant representation
 pub fn parse_message_variant(text: &str) -> Result<MessageVariant, String> {
     let trimmed = text.trim();
     let parts: Vec<&str> = trimmed.split_whitespace().collect();
     
-    // Try to parse as Standard CQ message: "CQ [CALLSIGN] [GRID]" or "CQ [WORD] [CALLSIGN] [GRID]"
+    // Try to parse as Standard CQ message: "CQ CALLSIGN GRID"
     if parts.len() == 3 && parts[0].eq_ignore_ascii_case("CQ") {
-        let callsign = parts[1].to_uppercase();
-        let grid = parts[2].to_uppercase();
-        
-        // Check for /R or /P suffix on callsign
-        let (base_callsign, has_suffix, is_p_suffix) = if callsign.ends_with("/R") {
-            (callsign.strip_suffix("/R").unwrap().to_string(), true, false)
-        } else if callsign.ends_with("/P") {
-            (callsign.strip_suffix("/P").unwrap().to_string(), true, true)
-        } else {
-            (callsign, false, false)
-        };
-        
-        // Validate using existing functions
-        validate_callsign_basic(&base_callsign)?;
-        validate_grid_basic(&grid)?;
-        
-        // Use Type 2 for /P suffixes, Type 1 (Standard) for /R or no suffix
-        if is_p_suffix {
-            return Ok(MessageVariant::EuVhfContestType2 {
-                call1: "CQ".to_string(),
-                call1_suffix: false,
-                call2: base_callsign,
-                call2_suffix: true,
-                r_flag: false,
-                grid_or_report: grid,
-            });
-        } else {
-            return Ok(MessageVariant::Standard {
-                call1: "CQ".to_string(),
-                call1_suffix: false,
-                call2: base_callsign,
-                call2_suffix: has_suffix,
-                r_flag: false,
-                grid_or_report: grid,
-            });
-        }
+        return parse_cq_message("CQ", parts[1], parts[2]);
     }
-    
-    // Try to parse as Directed CQ: "CQ [WORD] [CALLSIGN] [GRID]"
+
+    // Try to parse as Directed CQ: "CQ MODIFIER CALLSIGN GRID" (e.g., "CQ SOTA N0YPR DM42")
     if parts.len() == 4 && parts[0].eq_ignore_ascii_case("CQ") {
-        let cq_modifier = parts[1].to_uppercase();
-        let callsign = parts[2].to_uppercase();
-        let grid = parts[3].to_uppercase();
-        
-        // Check for /R or /P suffix on callsign
-        let (base_callsign, has_suffix, is_p_suffix) = if callsign.ends_with("/R") {
-            (callsign.strip_suffix("/R").unwrap().to_string(), true, false)
-        } else if callsign.ends_with("/P") {
-            (callsign.strip_suffix("/P").unwrap().to_string(), true, true)
-        } else {
-            (callsign, false, false)
-        };
-        
-        // Validate using existing functions
-        validate_callsign_basic(&base_callsign)?;
-        validate_grid_basic(&grid)?;
-        
-        // Construct the directed CQ call (e.g., "CQ SOTA")
-        let cq_call = format!("CQ {}", cq_modifier);
-        
-        // Use Type 2 for /P suffixes, Type 1 (Standard) for /R or no suffix
-        if is_p_suffix {
-            return Ok(MessageVariant::EuVhfContestType2 {
-                call1: cq_call,
-                call1_suffix: false,
-                call2: base_callsign,
-                call2_suffix: true,
-                r_flag: false,
-                grid_or_report: grid,
-            });
-        } else {
-            return Ok(MessageVariant::Standard {
-                call1: cq_call,
-                call1_suffix: false,
-                call2: base_callsign,
-                call2_suffix: has_suffix,
-                r_flag: false,
-                grid_or_report: grid,
-            });
-        }
+        let cq_prefix = format!("CQ {}", parts[1].to_uppercase());
+        return parse_cq_message(&cq_prefix, parts[2], parts[3]);
     }
     
     // Try 2-word messages
@@ -112,27 +45,27 @@ pub fn parse_message_variant(text: &str) -> Result<MessageVariant, String> {
         // If 4-word parsing failed, try as free text
     }
     
-    // Try 5-word DXpedition message
-    if parts.len() == 5 && parts[1] == "RR73;" {
+    // Try 5-word DXpedition message (format: "CALL1 RR73; CALL2 <HASH> REPORT")
+    if parts.len() == DXPEDITION_PARTS && parts[1] == "RR73;" {
         return parse_dxpedition_message(&parts);
     }
-    
+
     // Try RTTY Roundup (4+ words)
-    if parts.len() >= 4 {
+    if parts.len() >= MIN_RTTY_FIELD_DAY_PARTS {
         if let Ok(msg) = parse_rtty_message(&parts) {
             return Ok(msg);
         }
     }
-    
+
     // Try Field Day (4+ words)
-    if parts.len() >= 4 {
+    if parts.len() >= MIN_RTTY_FIELD_DAY_PARTS {
         if let Ok(msg) = parse_field_day_message(&parts) {
             return Ok(msg);
         }
     }
     
-    // Try Telemetry (hex string)
-    if trimmed.len() <= 18 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+    // Try Telemetry (hex string, max 18 hex digits)
+    if trimmed.len() <= MAX_TELEMETRY_HEX_LEN && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
         return parse_telemetry_message(trimmed);
     }
     
@@ -446,18 +379,24 @@ fn parse_telemetry_message(trimmed: &str) -> Result<MessageVariant, String> {
 }
 
 fn parse_free_text_message(trimmed: &str) -> Result<MessageVariant, String> {
-    if trimmed.len() > 13 {
-        return Err(format!("Message too long for free text (max 13 chars): '{}'", trimmed));
+    if trimmed.len() > MAX_FREE_TEXT_LEN {
+        return Err(format!(
+            "Message too long for free text (max {} chars): '{}' ({} chars)",
+            MAX_FREE_TEXT_LEN, trimmed, trimmed.len()
+        ));
     }
-    
+
     const CHARSET: &str = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-./?";
     let upper_text = trimmed.to_uppercase();
     for ch in upper_text.chars() {
         if !CHARSET.contains(ch) {
-            return Err(format!("Invalid character '{}' for free text message", ch));
+            return Err(format!(
+                "Invalid character '{}' in free text message (valid charset: {})",
+                ch, CHARSET
+            ));
         }
     }
-    
+
     Ok(MessageVariant::FreeText {
         text: upper_text,
     })
@@ -465,6 +404,24 @@ fn parse_free_text_message(trimmed: &str) -> Result<MessageVariant, String> {
 
 // Helper functions
 
+/// Parse callsign suffix and return (base_callsign, has_suffix, is_p_suffix)
+///
+/// This function handles both /R and /P suffixes:
+/// - /R suffix: has_suffix=true, is_p_suffix=false (uses Type 1/Standard encoding)
+/// - /P suffix: has_suffix=true, is_p_suffix=true (uses Type 2 encoding)
+/// - No suffix: has_suffix=false, is_p_suffix=false
+fn parse_suffix(callsign: &str) -> (String, bool, bool) {
+    if callsign.ends_with("/R") {
+        (callsign.strip_suffix("/R").unwrap().to_string(), true, false)
+    } else if callsign.ends_with("/P") {
+        (callsign.strip_suffix("/P").unwrap().to_string(), true, true)
+    } else {
+        (callsign.to_string(), false, false)
+    }
+}
+
+/// Strip suffix from callsign (simpler version that doesn't distinguish /R from /P)
+/// Returns (base_callsign, has_suffix)
 fn strip_suffix(callsign: &str) -> (String, bool) {
     if callsign.ends_with("/R") || callsign.ends_with("/P") {
         (callsign[..callsign.len()-2].to_string(), true)
@@ -473,13 +430,45 @@ fn strip_suffix(callsign: &str) -> (String, bool) {
     }
 }
 
-fn parse_suffix(callsign: &str) -> (String, bool, bool) {
-    if callsign.ends_with("/R") {
-        (callsign.strip_suffix("/R").unwrap().to_string(), true, false)
-    } else if callsign.ends_with("/P") {
-        (callsign.strip_suffix("/P").unwrap().to_string(), true, true)
+/// Parse CQ message and return appropriate MessageVariant
+///
+/// Handles both 3-word and 4-word CQ messages:
+/// - 3-word: "CQ CALLSIGN GRID"
+/// - 4-word: "CQ MODIFIER CALLSIGN GRID" (e.g., "CQ SOTA N0YPR DM42")
+///
+/// Automatically selects Type 1 (Standard) or Type 2 (EuVhfContest) based on suffix:
+/// - /R suffix uses Type 1
+/// - /P suffix uses Type 2
+fn parse_cq_message(cq_prefix: &str, callsign_str: &str, grid_str: &str) -> Result<MessageVariant, String> {
+    let callsign = callsign_str.to_uppercase();
+    let grid = grid_str.to_uppercase();
+
+    // Parse suffix to determine message type
+    let (base_callsign, has_suffix, is_p_suffix) = parse_suffix(&callsign);
+
+    // Validate callsign and grid
+    validate_callsign_basic(&base_callsign)?;
+    validate_grid_basic(&grid)?;
+
+    // Use Type 2 for /P suffixes, Type 1 (Standard) for /R or no suffix
+    if is_p_suffix {
+        Ok(MessageVariant::EuVhfContestType2 {
+            call1: cq_prefix.to_string(),
+            call1_suffix: false,
+            call2: base_callsign,
+            call2_suffix: true,
+            r_flag: false,
+            grid_or_report: grid,
+        })
     } else {
-        (callsign.to_string(), false, false)
+        Ok(MessageVariant::Standard {
+            call1: cq_prefix.to_string(),
+            call1_suffix: false,
+            call2: base_callsign,
+            call2_suffix: has_suffix,
+            r_flag: false,
+            grid_or_report: grid,
+        })
     }
 }
 
