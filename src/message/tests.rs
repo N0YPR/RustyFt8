@@ -18,21 +18,9 @@
 //! ./scripts/add_test_case.sh "CQ DX K1ABC FN42"
 //! ```
 //!
-//! ## Wildcard support
-//!
-//! Use any non-'0'/'1' character as a wildcard in `expected_bits` to skip checking those bits.
-//! This lets you test only the fields you've implemented so far.
-//!
-//! Examples:
-//! ```
-//! expected_bits: "0000000000000000000000000010............................xxxxxxxxxxxxxx001",  // CQ + i3
-//! expected_bits: "0000000000000000000000000010............................011111100100011001",  // CQ + grid + i3
-//! expected_bits: "00000000000000000000000000100000010100100110110011100110100001100111110010001",  // All fields
-//! ```
-//!
-//! To generate test cases, use ft8code:
+//! To generate test cases, use the helper script:
 //! ```bash
-//! /workspaces/RustyFt8/wsjtx/wsjtx-2.7.0/build/wsjtx-prefix/src/wsjtx-build/ft8code "MESSAGE TEXT"
+//! ./scripts/add_test_case.sh "MESSAGE TEXT"
 //! ```
 
 // Tests use std
@@ -102,12 +90,12 @@ fn test_encode_decode_roundtrip() {
         
         // Convert our bits to binary string for comparison
         let our_bits = bits_to_string(&storage[0..77]);
-        
-        // Compare against reference (supporting wildcards)
-        assert_bits_match_with_wildcards(
-            &our_bits,
-            &test.expected_bits,
-            &format!("[Case {}] \"{}\"", idx, test.message)
+
+        // Compare against reference
+        assert_eq!(
+            our_bits, test.expected_bits,
+            "\n❌ BIT ENCODING MISMATCH [Case {}] \"{}\"\n   Expected: {}\n   Actual:   {}",
+            idx, test.message, test.expected_bits, our_bits
         );
         
         // Decode and verify the decoded text matches expected
@@ -138,116 +126,6 @@ fn bits_to_string(bits: &BitSlice<u8, Msb0>) -> String {
     s
 }
 
-/// Compare bit strings with wildcard support
-/// 
-/// Any character that is not '0' or '1' in the expected string is treated as a wildcard (don't care).
-/// Common choices: '-', '_', ' ', 'x', '*', '.'
-/// 
-/// # Examples
-/// ```
-/// // Test only the last 3 bits (i3 field) - use whatever character you find readable
-/// assert_bits_match_with_wildcards(
-///     "00000000000000000000000000100000010100100110110011100110100001100111110010001",
-///     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx001",  // x for wildcards
-///     "i3 field"
-/// );
-/// 
-/// assert_bits_match_with_wildcards(
-///     "00000000000000000000000000100000010100100110110011100110100001100111110010001",
-///     "--------------------------------------------------------------------------001",  // or dashes
-///     "i3 field"
-/// );
-/// 
-/// assert_bits_match_with_wildcards(
-///     "00000000000000000000000000100000010100100110110011100110100001100111110010001",
-///     "..........................................................................001",  // or dots
-///     "i3 field"
-/// );
-/// ```
-fn assert_bits_match_with_wildcards(actual: &str, expected: &str, context: &str) {
-    if actual.len() != expected.len() {
-        panic!(
-            "\n❌ BIT LENGTH MISMATCH {}\n   Expected: {} bits\n   Actual:   {} bits\n",
-            context, expected.len(), actual.len()
-        );
-    }
-    
-    let mut mismatches = Vec::new();
-    
-    for (i, (actual_ch, expected_ch)) in actual.chars().zip(expected.chars()).enumerate() {
-        // Any non-0/1 character is a wildcard
-        if expected_ch != '0' && expected_ch != '1' {
-            continue;
-        }
-        
-        if actual_ch != expected_ch {
-            mismatches.push((i, actual_ch, expected_ch));
-        }
-    }
-    
-    if !mismatches.is_empty() {
-        let mut error_msg = format!("\n❌ BIT ENCODING MISMATCH {}\n", context);
-        error_msg.push_str(&format!("\nBit mismatches: {} bit(s) don't match:\n", mismatches.len()));
-        
-        // Show first 10 mismatches to avoid overwhelming output
-        for (bit_pos, actual_bit, expected_bit) in mismatches.iter().take(10) {
-            error_msg.push_str(&format!(
-                "   Bit {:2}: expected '{}', got '{}'\n",
-                bit_pos, expected_bit, actual_bit
-            ));
-        }
-        
-        if mismatches.len() > 10 {
-            error_msg.push_str(&format!("   ... and {} more\n", mismatches.len() - 10));
-        }
-        
-        error_msg.push_str(&format!("\nExpected: {}\n", expected));
-        error_msg.push_str(&format!("Actual:   {}\n", actual));
-        
-        // Show visual diff
-        let mut diff = String::with_capacity(expected.len());
-        for (a, e) in actual.chars().zip(expected.chars()) {
-            if e != '0' && e != '1' {
-                diff.push('.');  // Wildcard position
-            } else if a == e {
-                diff.push(' ');  // Match
-            } else {
-                diff.push('^');  // Mismatch
-            }
-        }
-        error_msg.push_str(&format!("Diff:     {}\n", diff));
-        error_msg.push_str("          (^ = mismatch, . = wildcard)\n");
-        
-        panic!("{}", error_msg);
-    }
-}
-
-/// Assert that a specific bit range matches the expected pattern
-/// 
-/// This is useful for incremental implementation - test only the bits
-/// you've implemented so far.
-/// 
-/// # Example
-/// ```
-/// // Test only the i3 field (bits 74-76)
-/// assert_bits_match(msg.message_bits(), 74..77, "001", "i3 field");
-/// 
-/// // Test grid encoding (bits 59-73)
-/// assert_bits_match(msg.message_bits(), 59..74, "011111100100011", "grid field");
-/// ```
-fn assert_bits_match(
-    actual: &BitSlice<u8, Msb0>,
-    range: core::ops::Range<usize>,
-    expected: &str,
-    field_name: &str,
-) {
-    let actual_str = bits_to_string(&actual[range.clone()]);
-    assert_eq!(
-        actual_str, expected,
-        "\n{} mismatch (bits {}..{}):\nExpected: {}\nGot:      {}\n",
-        field_name, range.start, range.end, expected, actual_str
-    );
-}
 
 #[test]
 fn test_bits_to_string_conversion() {
@@ -255,52 +133,7 @@ fn test_bits_to_string_conversion() {
     bits.set(0, true);
     bits.set(2, true);
     bits.set(4, true);
-    
+
     let s = bits_to_string(&bits[0..5]);
     assert_eq!(s, "10101");
-}
-
-#[test]
-fn test_wildcard_matching() {
-    // All wildcards should pass - any non-0/1 character works
-    assert_bits_match_with_wildcards("10101", "_____", "underscores");
-    assert_bits_match_with_wildcards("10101", "-----", "dashes");
-    assert_bits_match_with_wildcards("10101", "     ", "spaces");
-    assert_bits_match_with_wildcards("10101", "xxxxx", "x's");
-    assert_bits_match_with_wildcards("10101", "*****", "asterisks");
-    assert_bits_match_with_wildcards("10101", ".....", "dots");
-    
-    // Mixed wildcards and exact matches
-    assert_bits_match_with_wildcards("10101", "1xxx1", "first and last");
-    assert_bits_match_with_wildcards("10101", "x0x0x", "even positions");
-    assert_bits_match_with_wildcards("10101", "1-.-1", "mixed wildcards");
-    assert_bits_match_with_wildcards("10101", "10101", "exact match");
-}
-
-#[test]
-#[should_panic(expected = "Bit mismatches")]
-fn test_wildcard_matching_failure() {
-    assert_bits_match_with_wildcards("10101", "1___0", "should fail");
-}
-
-#[test]
-fn test_assert_bits_match() {
-    let mut bits = BitArray::<[u8; 2], Msb0>::ZERO;
-    // Set bits to pattern: 10101
-    bits.set(0, true);
-    bits.set(2, true);
-    bits.set(4, true);
-    
-    // This should pass
-    assert_bits_match(&bits[..], 0..5, "10101", "test pattern");
-    
-    // Test a subset
-    assert_bits_match(&bits[..], 2..5, "101", "subset pattern");
-}
-
-#[test]
-#[should_panic(expected = "mismatch")]
-fn test_assert_bits_match_failure() {
-    let bits = BitArray::<[u8; 1], Msb0>::ZERO;
-    assert_bits_match(&bits[..], 0..3, "111", "wrong pattern");
 }

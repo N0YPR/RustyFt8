@@ -193,7 +193,7 @@ impl Default for CallsignHashCache {
 
 #[cfg(test)]
 mod tests {
-    use std::string::{String, ToString};
+    use std::string::String;
     use super::*;
 
     #[test]
