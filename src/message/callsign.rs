@@ -521,6 +521,10 @@ mod tests {
     #[case::ve3abc("VE3ABC", 0b1110000011100101100111000111)]
     #[case::g4abc("G4ABC", 0b0000100100001100000101100110)]
     #[case::ja1abc("JA1ABC", 0b1000111100000100010111101001)]
+    #[case::w9xyz("W9XYZ", 0b0000110000101001001110111000)]
+    #[case::kk7jxp("KK7JXP", 0b1001011111000101011100011111)]
+    #[case::pa9xyz("PA9XYZ", 0b1011011110111010110001010100)]
+    #[case::g3aaa("G3AAA", 0b0000100100000111010001100110)]
     fn test_callsign_encode_decode(#[case] callsign: &str, #[case] expected_n28: u32) {
         // Test encoding
         let encoded = pack_callsign(callsign)
