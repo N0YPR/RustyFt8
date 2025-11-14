@@ -1,4 +1,4 @@
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use crate::message::types::MessageVariant;
 use super::validators::validate_callsign_basic;
 

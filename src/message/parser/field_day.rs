@@ -1,5 +1,4 @@
-use alloc::string::{String, ToString};
-use alloc::format;
+use alloc::string::String;
 use crate::message::types::MessageVariant;
 use crate::message::lookup_tables::arrl_section_to_index;
 use super::validators::validate_callsign_basic;
