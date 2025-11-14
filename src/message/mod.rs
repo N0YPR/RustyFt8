@@ -6,7 +6,6 @@ mod callsign_cache;
 // Refactored message77 modules
 mod types;
 mod lookup_tables;
-mod validation;
 mod text_encoding;
 mod parser;
 mod encode;
