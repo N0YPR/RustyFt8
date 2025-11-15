@@ -7,6 +7,7 @@
 //! "The CRC is calculated on the source-encoded message, zero-extended from 77 to 82 bits."
 
 use crc::{Algorithm, Crc};
+use bitvec::prelude::*;
 
 /// FT8 CRC-14 polynomial
 const CRC_POLYNOMIAL: u16 = 0x2757;
@@ -41,19 +42,19 @@ const FT8_CRC: Crc<u16> = Crc::<u16>::new(&CRC_FT8);
 ///
 /// # Example
 /// ```
+/// use bitvec::prelude::*;
 /// use rustyft8::crc::crc14;
 ///
 /// // Example: 77-bit message
-/// let mut bits = [0u8; 77];
-/// // ... fill with message bits ...
+/// let bits = bitarr![u8, Msb0; 0; 77];
 /// let crc = crc14(&bits);
 /// assert!(crc < (1 << 14)); // CRC is 14 bits
 /// ```
-pub fn crc14(bits: &[u8]) -> u16 {
+pub fn crc14(bits: &BitSlice<u8, Msb0>) -> u16 {
     // Convert bits to u128 (we only use lower 77 bits)
     let mut msg: u128 = 0;
-    for (i, &bit) in bits.iter().take(77).enumerate() {
-        if bit != 0 {
+    for (i, bit) in bits.iter().take(77).enumerate() {
+        if *bit {
             msg |= 1u128 << (76 - i);
         }
     }
@@ -78,14 +79,14 @@ pub fn crc14(bits: &[u8]) -> u16 {
 ///
 /// # Returns
 /// * `bool` - true if CRC is valid
-pub fn crc14_check(bits: &[u8]) -> bool {
+pub fn crc14_check(bits: &BitSlice<u8, Msb0>) -> bool {
     // Calculate CRC for first 77 bits
     let calculated_crc = crc14(&bits[..77]);
 
     // Extract CRC from bits 77-90
     let mut received_crc: u16 = 0;
-    for i in 0..14 {
-        received_crc = (received_crc << 1) | (bits[77 + i] as u16);
+    for bit in bits[77..91].iter() {
+        received_crc = (received_crc << 1) | (*bit as u16);
     }
 
     calculated_crc == received_crc
@@ -98,7 +99,7 @@ mod tests {
     #[test]
     fn test_crc14_zero_message() {
         // All zeros should produce a specific CRC
-        let bits = [0u8; 77];
+        let bits = bitarr![u8, Msb0; 0; 77];
         let crc = crc14(&bits);
         // Zero message gives zero CRC
         assert_eq!(crc, 0);
@@ -107,9 +108,9 @@ mod tests {
     #[test]
     fn test_crc14_simple_pattern() {
         // Test with a simple pattern
-        let mut bits = [0u8; 77];
+        let mut bits = bitarr![u8, Msb0; 0; 77];
         for i in 0..8 {
-            bits[i] = 1;
+            bits.set(i, true);
         }
         let crc = crc14(&bits);
         // CRC should be non-zero for non-zero input
@@ -120,16 +121,16 @@ mod tests {
     #[test]
     fn test_crc14_check_valid() {
         // Create a message with valid CRC
-        let mut bits = [0u8; 91];
-        bits[0] = 1;
-        bits[10] = 1;
+        let mut bits = bitarr![u8, Msb0; 0; 91];
+        bits.set(0, true);
+        bits.set(10, true);
 
         // Calculate CRC for the message
         let crc = crc14(&bits[..77]);
 
         // Store CRC in last 14 bits
         for i in 0..14 {
-            bits[77 + i] = ((crc >> (13 - i)) & 1) as u8;
+            bits.set(77 + i, ((crc >> (13 - i)) & 1) != 0);
         }
 
         // Check should pass
@@ -140,9 +141,9 @@ mod tests {
     fn test_crc14_bounds() {
         // CRC should always be 14 bits (< 16384)
         for pattern in 0..16u8 {
-            let mut bits = [0u8; 77];
+            let mut bits = bitarr![u8, Msb0; 0; 77];
             for i in 0..77 {
-                bits[i] = (pattern >> (i % 4)) & 1;
+                bits.set(i, ((pattern >> (i % 4)) & 1) != 0);
             }
             let crc = crc14(&bits);
             assert!(crc < 16384, "CRC {} exceeds 14 bits", crc);
@@ -157,11 +158,11 @@ mod tests {
         // Expected CRC: 00001001100101 (binary) = 0b00001001100101
 
         let bits_str = "00000000010111100101100110000000010100100110110011100110110001100111110010001";
-        let mut bits = [0u8; 77];
+        let mut bits = bitarr![u8, Msb0; 0; 77];
 
         // Convert string to bit array
         for (i, c) in bits_str.chars().enumerate() {
-            bits[i] = if c == '1' { 1 } else { 0 };
+            bits.set(i, c == '1');
         }
 
         let crc = crc14(&bits);
