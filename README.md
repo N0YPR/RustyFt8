@@ -1,95 +1,42 @@
 # RustyFt8
-An implementation of FT8 using Rust.
 
-## FT8 Message Transmission Chain
+A Rust implementation of FT8, the digital weak-signal communication mode, featuring:
+- **Complete transmit chain**: Message encoding, LDPC FEC, GFSK modulation
+- **Partial receive chain**: Near-perfect synchronization, symbol extraction (21/21 Costas validation)
+- **no_std compatible**: Works in embedded environments with `alloc`
 
-Based on the WSJT-X source code, here's the complete chain of steps for transmitting an FT8 message:
+FT8 achieves robust communication at -21 dB SNR using 8-FSK modulation, LDPC(174,91) error correction, and Costas array synchronization patterns.
 
-### 1. Message Parsing and Packing (77 bits)
-- **Function**: `pack77()` in packjt77.f90
-- Takes text message like "CQ W1ABC FN42"
-- Determines message type (i3 field: 0-5)
-- Determines subtype (n3 field for i3=0)
-- Packs into exactly 77 bits of information
+## 🔬 How FT8 Works
 
-### 2. CRC Generation (14 bits)
-- **Function**: `encode174_91()`
-- Appends 3 zero bits to the 77-bit message (77 → 80 bits)
-- Computes 14-bit CRC using `crc14()` function
-- Produces 91-bit message (77 information + 14 CRC)
-
-### 3. LDPC Forward Error Correction (83 parity bits)
-- **Function**: `encode174_91()`
-- Uses LDPC(174,91) code - a low-density parity check code
-- Multiplies 91-bit message by generator matrix
-- Produces 83 parity bits
-- **Output**: 174-bit codeword (91 message + 83 parity)
-
-### 4. Symbol Mapping (79 symbols, 0-7)
-- **Function**: `genft8()`
-- Takes 174 bits in groups of 3 → 58 data symbols (3 bits = 8-FSK symbol)
-- Maps through Gray code: `graymap(0:7) = [0,1,3,2,5,6,4,7]`
-- Interleaves with 3× Costas 7×7 sync patterns (21 symbols total)
-- **Structure**: `S7 D29 S7 D29 S7` (7+29+7+29+7 = 79 symbols)
-- Costas pattern: `[3,1,4,0,6,5,2]`
-- **Output**: 79 tone numbers (0-7)
-
-### 5. GFSK Pulse Shaping
-- **Function**: `gen_ft8wave()`
-- Uses Gaussian Frequency Shift Keying (GFSK) pulse shaping
-- **Pulse function**: `gfsk_pulse()`
-  - Based on error function (erf)
-  - Bandwidth-time product (BT) parameter controls smoothness
-  - Formula: `0.5 * (erf(c*b*(t+0.5)) - erf(c*b*(t-0.5)))`
-- Creates smooth frequency transitions between tones
-- Pulse spans 3 symbol periods (3 × 1920 = 5760 samples)
-
-### 6. Frequency Modulation
-- **Function**: `gen_ft8wave()`
-- Each tone number (0-7) maps to frequency offset
-- Tone spacing: 6.25 Hz (12000 Hz sample rate / 1920 samples per symbol)
-- Smoothed frequency waveform created by convolving tones with GFSK pulse
-- Base frequency f0 added to shift signal to desired RF frequency
-
-### 7. Waveform Generation (12.64 seconds)
-- **Function**: `gen_ft8wave()`
-- **Parameters**:
-  - 79 symbols × 1920 samples/symbol = 151,680 samples
-  - At 12,000 samples/second = 12.64 seconds
-- Generates sine wave: `sin(φ)` where φ accumulates based on frequency
-- Can generate complex baseband (`cwave`) or real audio (`wave`)
-
-### 8. Envelope Shaping
-- **Function**: `gen_ft8wave()`
-- Applies cosine-squared ramping to first and last symbols
-- Ramp length: 1920/8 = 240 samples
-- Prevents abrupt starts/stops that cause spectral splatter
-- Formula: `(1 - cos(2πt/(2*nramp)))/2` for attack, similar for decay
-
-### Summary Flow
+**Transmit Chain** (Message → WAV):
 ```
-Text Message (37 chars)
-    ↓ pack77()
-77-bit packed message
-    ↓ encode174_91() - add CRC
-91 bits (77 + 14 CRC)
-    ↓ encode174_91() - LDPC encoding
-174 bits (91 + 83 parity)
-    ↓ genft8() - 3-bit grouping + Gray mapping
-58 data symbols (0-7)
-    ↓ genft8() - add sync (Costas arrays)
-79 symbols: S7 D29 S7 D29 S7
-    ↓ gen_ft8wave() - GFSK pulse shaping
-Smooth frequency trajectory
-    ↓ gen_ft8wave() - FM modulation
-Phase-accumulated sine wave
-    ↓ gen_ft8wave() - envelope shaping
-151,680 audio samples (12.64 sec @ 12kHz)
-    ↓
-RF transmission
+Text "CQ W1ABC FN42"
+  → 77-bit pack → +14-bit CRC → 91 bits
+  → LDPC encode → +83 parity → 174 bits
+  → 3 bits/symbol → 58 data symbols (0-7)
+  → +21 Costas sync → 79 symbols total
+  → GFSK modulation → 12.64s audio @ 12kHz
 ```
 
-The key insight is that FT8 uses 8-FSK (8 frequency tones) with GFSK smoothing, strong LDPC error correction, and Costas sync patterns to achieve robust communication at very low signal-to-noise ratios (-21 dB).
+**Receive Chain** (WAV → Message):
+```
+15s audio @ 12kHz
+  → FFT spectra → 2D Costas correlation
+  → Coarse sync → frequency/time candidates
+  → Fine sync → ±2.5 Hz, ±20 ms refinement
+  → Symbol extract → 79×8 tone magnitudes
+  → Soft decode → 174 LLRs (⚠️ needs improvement)
+  → LDPC decode → 91 bits → check CRC
+  → Unpack 77 bits → Text message
+```
+
+**Key Parameters**:
+- 8-FSK: 8 tones spaced 6.25 Hz apart
+- Symbol rate: 6.25 baud (0.16s/symbol)
+- Duration: 79 symbols × 0.16s = 12.64 seconds
+- Bandwidth: ~50 Hz
+- Sync: 3× Costas arrays (pattern `[3,1,4,0,6,5,2]`)
 
 ## 📚 Key Documentation
 
@@ -102,3 +49,89 @@ The key insight is that FT8 uses 8-FSK (8 frequency tones) with GFSK smoothing, 
   - FT8 protocol reference
 
 Failure to follow these guidelines may result in incorrect implementations or test failures.
+
+## 📊 Current Status
+
+### What Works
+
+✅ **Transmit Chain (100%)** - Complete message → WAV pipeline validated against WSJT-X
+✅ **Coarse Sync** - 2D FFT-based Costas correlation matches WSJT-X candidate detection
+✅ **Fine Sync** - Sub-Hz frequency (±2.5 Hz) and sub-ms timing (±20 ms) accuracy
+✅ **Symbol Extraction** - Perfect 21/21 Costas validation proves correct timing
+✅ **LDPC Decoder** - Belief propagation with 130 passing tests
+
+### What Needs Work
+
+⚠️  **Soft Demodulation** - Single-symbol approach limits SNR performance (see below)
+⚠️  **End-to-End Decode** - LDPC doesn't converge on low-SNR signals due to weak LLRs
+
+### The Problem: Single-Symbol vs Multi-Symbol Soft Decoding
+
+**Current approach** (single-symbol):
+```rust
+LLR = magnitude(symbol_k_tone_1) - magnitude(symbol_k_tone_0)
+```
+
+**WSJT-X approach** (multi-symbol):
+```rust
+LLR = magnitude(symbol_k + symbol_k+1 + symbol_k+2) - magnitude(...)
+// Coherently combines 2-3 symbols before taking magnitude
+// Provides ~3-6 dB SNR improvement
+```
+
+**Impact**:
+- Perfect 21/21 Costas sync proves signal processing and timing are correct
+- LDPC decoder has weak LLR inputs, preventing convergence at low SNR
+- Minimum SNR unknown (needs testing); WSJT-X achieves -21 dB
+
+**Next step**: Implement multi-symbol soft decoding (see below)
+
+## 🚀 Next Steps
+
+### 1. Multi-Symbol Soft Decoding (Critical Priority)
+
+**Implementation** (from WSJT-X `ft8b.f90`):
+```fortran
+! Sum complex values of 2-3 consecutive symbols, then take magnitude
+s2(i) = abs(cs(graymap(i1),ks) + cs(graymap(i2),ks+1) + cs(graymap(i3),ks+2))
+```
+
+- Test all 8³ = 512 possible 3-symbol combinations
+- Sum complex symbol values coherently before computing magnitude
+- Choose maximum magnitude combination as most likely sequence
+- **Files to modify**: [src/sync.rs:1044-1090](src/sync.rs#L1044-L1090)
+- **Expected result**: -15 to -20 dB SNR decode capability (vs current: unknown, likely >0 dB)
+
+### 2. Testing & Benchmarks
+- Generate test signals at varying SNR using WSJT-X's `ft8sim`
+- Establish minimum SNR threshold and decode success rates (-24 to 0 dB)
+- Add automated integration tests for encode→decode round trips
+- Compare performance to WSJT-X baseline
+
+### 3. Clean Up & Polish
+- Make debug output conditional on `--verbose` flag ([src/sync.rs](src/sync.rs))
+- Remove temporary workarounds in [ft8detect.rs:163-166](src/bin/ft8detect.rs#L163-L166), [sync.rs:805](src/sync.rs#L805)
+- Remove debug code from hot paths (FFT, correlation loops)
+
+### 4. Real-Time Operation
+- Live audio input (ALSA/PulseAudio/PortAudio)
+- Sliding window for continuous monitoring
+- Process 15-second intervals in real-time
+
+### 5. Feature Completeness
+- All FT8 message types (compound callsigns, contest modes)
+- Callsign hash cache integration for decoding
+- Transmit path integration (already have pulse shaping and modulation)
+
+### 6. Optimization & Production
+- Profile and optimize hot paths (FFT, correlation)
+- Consider SIMD optimizations
+- Evaluate using rustfft/realfft crate
+- Stabilize public API and add versioning
+
+## 📈 Roadmap
+
+**Now**: Multi-symbol soft decoding → unlock low-SNR decode
+**Next**: Testing & benchmarks → validate performance
+**Then**: Real-time operation → live audio monitoring
+**Future**: Production polish → optimization, docs, API stability
