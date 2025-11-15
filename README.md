@@ -93,17 +93,12 @@ The key insight is that FT8 uses 8-FSK (8 frequency tones) with GFSK smoothing, 
 
 ## 📚 Key Documentation
 
-**For AI Assistants & Developers**, please read these documents:
+**For AI Assistants & Developers**, please read:
 
 - **[`AGENTS.md`](AGENTS.md)** - Comprehensive project guide
   - Project overview and conventions
   - Development workflow and testing strategy
   - WSJT-X reference implementation (build instructions and tool usage)
   - FT8 protocol reference
-
-- **[`TESTING.md`](TESTING.md)** - Testing strategy and workflow
-  - Integration test approach comparing against ft8code
-  - How to add new test cases
-  - Development workflow for implementing encoding logic
 
 Failure to follow these guidelines may result in incorrect implementations or test failures.
