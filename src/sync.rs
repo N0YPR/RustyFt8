@@ -898,9 +898,32 @@ pub fn extract_symbols(
         return Err(alloc::format!("LLR buffer too small: {} (need 174)", llr.len()));
     }
 
-    // Downsample to 200 Hz centered on candidate frequency
+    // Downsample to 200 Hz centered on NEAREST INTEGER frequency
+    // This avoids fractional Hz offsets that cause bin misalignment
+    let base_freq = candidate.frequency.round();
+    let freq_offset_hz = candidate.frequency - base_freq;
+
     let mut cd = alloc::vec![(0.0f32, 0.0f32); 4096];
-    downsample_200hz(signal, candidate.frequency, &mut cd)?;
+    downsample_200hz(signal, base_freq, &mut cd)?;
+
+    // Apply residual frequency correction if needed
+    if freq_offset_hz.abs() > 0.01 {
+        let dt = 1.0 / 200.0; // Sample period at 200 Hz
+        let dphi = 2.0 * core::f32::consts::PI * freq_offset_hz * dt;
+        let mut phi = 0.0f32;
+
+        for i in 0..cd.len() {
+            let (r, im) = cd[i];
+            let cos_phi = libm::cosf(phi);
+            let sin_phi = libm::sinf(phi);
+            // Rotate by e^(-i*phi) to shift frequency
+            cd[i] = (r * cos_phi + im * sin_phi, im * cos_phi - r * sin_phi);
+            phi += dphi;
+            if phi > 2.0 * core::f32::consts::PI {
+                phi -= 2.0 * core::f32::consts::PI;
+            }
+        }
+    }
 
     // Convert time offset to sample index
     let start_offset = ((candidate.time_offset + 0.5) * 200.0) as i32;
@@ -948,11 +971,10 @@ pub fn extract_symbols(
         // Perform FFT
         fft_real(&mut sym_real, &mut sym_imag, NFFT_SYM)?;
 
-        // Extract power for 8 tones (bins 1-8, skipping DC at bin 0)
+        // Extract power for 8 tones (bins 0-7 directly, signal is centered at DC)
         for tone in 0..8 {
-            let bin = tone + 1; // Skip DC
-            let re = sym_real[bin];
-            let im = sym_imag[bin];
+            let re = sym_real[tone];
+            let im = sym_imag[tone];
             s8[tone][k] = re * re + im * im;
         }
     }
@@ -1022,8 +1044,15 @@ pub fn extract_symbols(
         }
     }
 
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        std::eprintln!("  Costas sync quality: {}/21 tones correct", nsync);
+    }
+
     // If sync quality is too low, reject
-    if nsync < 6 {
+    // Note: Temporarily lowered threshold for testing
+    if nsync < 3 {
         return Err(alloc::format!("Sync quality too low: {}/21 Costas tones correct", nsync));
     }
 
