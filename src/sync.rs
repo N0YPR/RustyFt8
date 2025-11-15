@@ -870,6 +870,227 @@ pub fn fine_sync(
     })
 }
 
+/// Extract 79 FT8 symbols and compute log-likelihood ratios (LLRs) for LDPC decoding
+///
+/// This function:
+/// 1. Extracts 79 symbols from the downsampled signal (32 samples per symbol)
+/// 2. Computes power in each of 8 tones (0-7) for each symbol using FFT
+/// 3. Converts tone powers to 174 soft LLRs for LDPC decoder
+///
+/// # Arguments
+/// * `signal` - Input signal (15 seconds at 12 kHz)
+/// * `candidate` - Refined candidate from fine_sync with accurate frequency and time
+/// * `llr` - Output buffer for 174 log-likelihood ratios
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if extraction fails
+pub fn extract_symbols(
+    signal: &[f32],
+    candidate: &Candidate,
+    llr: &mut [f32],
+) -> Result<(), String> {
+    const NN: usize = 79; // Number of FT8 symbols
+    const NSPS_DOWN: usize = 32; // Samples per symbol at 200 Hz
+    const NFFT_SYM: usize = 32; // FFT size for symbol extraction (power of 2)
+
+    if llr.len() < 174 {
+        return Err(alloc::format!("LLR buffer too small: {} (need 174)", llr.len()));
+    }
+
+    // Downsample to 200 Hz centered on candidate frequency
+    let mut cd = alloc::vec![(0.0f32, 0.0f32); 4096];
+    downsample_200hz(signal, candidate.frequency, &mut cd)?;
+
+    // Convert time offset to sample index
+    let start_offset = ((candidate.time_offset + 0.5) * 200.0) as i32;
+
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        std::eprintln!("DEBUG extract_symbols: start_offset={}, candidate time={:.3}s",
+            start_offset, candidate.time_offset);
+        let max_mag = (0..200).fold(0.0f32, |acc, i| {
+            let (r, im) = cd[i];
+            let mag = libm::sqrtf(r*r + im*im);
+            acc.max(mag)
+        });
+        std::eprintln!("  Downsampled buffer (first 200): max magnitude = {:.2e}", max_mag);
+    }
+
+    // Extract symbol powers: s8[tone][symbol] for 8 tones × 79 symbols
+    let mut s8 = alloc::vec![[0.0f32; NN]; 8];
+
+    // FFT buffers
+    let mut sym_real = [0.0f32; NFFT_SYM];
+    let mut sym_imag = [0.0f32; NFFT_SYM];
+
+    for k in 0..NN {
+        // Symbol starts at: start_offset + k * 32 samples
+        let i1 = start_offset + (k as i32) * (NSPS_DOWN as i32);
+
+        // Check bounds
+        if i1 < 0 || (i1 as usize + NSPS_DOWN) > cd.len() {
+            // Symbol is out of bounds, set to zero power
+            for tone in 0..8 {
+                s8[tone][k] = 0.0;
+            }
+            continue;
+        }
+
+        // Copy symbol to FFT buffer
+        for j in 0..NSPS_DOWN {
+            let idx = i1 as usize + j;
+            sym_real[j] = cd[idx].0;
+            sym_imag[j] = cd[idx].1;
+        }
+
+        // Perform FFT
+        fft_real(&mut sym_real, &mut sym_imag, NFFT_SYM)?;
+
+        // Extract power for 8 tones (bins 1-8, skipping DC at bin 0)
+        for tone in 0..8 {
+            let bin = tone + 1; // Skip DC
+            let re = sym_real[bin];
+            let im = sym_imag[bin];
+            s8[tone][k] = re * re + im * im;
+        }
+    }
+
+    // Validate Costas arrays (quality check)
+    let mut nsync = 0;
+
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        std::eprintln!("DEBUG extract_symbols: Costas validation");
+        std::eprintln!("  Symbol 0 powers:");
+        for tone in 0..8 {
+            std::eprintln!("    tone {}: {:.2e}", tone, s8[tone][0]);
+        }
+    }
+
+    for k in 0..7 {
+        // Check all three Costas arrays
+        let expected_tone = COSTAS_PATTERN[k];
+
+        // Costas array 1 (symbols 0-6)
+        let mut max_power = 0.0f32;
+        let mut max_tone = 0;
+        for tone in 0..8 {
+            if s8[tone][k] > max_power {
+                max_power = s8[tone][k];
+                max_tone = tone;
+            }
+        }
+
+        #[cfg(feature = "std")]
+        if k == 0 {
+            extern crate std;
+            std::eprintln!("  Symbol 0: expected tone {}, got tone {} (power {:.2e})",
+                expected_tone, max_tone, max_power);
+        }
+
+        if max_tone == expected_tone as usize {
+            nsync += 1;
+        }
+
+        // Costas array 2 (symbols 36-42)
+        max_power = 0.0;
+        max_tone = 0;
+        for tone in 0..8 {
+            if s8[tone][k + 36] > max_power {
+                max_power = s8[tone][k + 36];
+                max_tone = tone;
+            }
+        }
+        if max_tone == expected_tone as usize {
+            nsync += 1;
+        }
+
+        // Costas array 3 (symbols 72-78)
+        max_power = 0.0;
+        max_tone = 0;
+        for tone in 0..8 {
+            if s8[tone][k + 72] > max_power {
+                max_power = s8[tone][k + 72];
+                max_tone = tone;
+            }
+        }
+        if max_tone == expected_tone as usize {
+            nsync += 1;
+        }
+    }
+
+    // If sync quality is too low, reject
+    if nsync < 6 {
+        return Err(alloc::format!("Sync quality too low: {}/21 Costas tones correct", nsync));
+    }
+
+    // Compute LLRs for 174 bits using single-symbol soft demodulation
+    // FT8 uses 79 symbols × 3 bits/symbol = 237 bits, but only 174 are used
+    // Data symbols: 7-36 (29 symbols) and 43-71 (29 symbols) = 58 symbols × 3 bits = 174 bits
+
+    // Gray code mapping: 0->000, 1->001, 2->011, 3->010, 4->110, 5->111, 6->101, 7->100
+    const GRAY_MAP: [u8; 8] = [0, 1, 3, 2, 6, 7, 5, 4];
+
+    let mut bit_idx = 0;
+
+    // Process two data symbol blocks
+    for block in 0..2 {
+        let start_sym = if block == 0 { 7 } else { 43 };
+        let end_sym = if block == 0 { 36 } else { 72 };
+
+        for k in start_sym..end_sym {
+            if bit_idx >= 174 {
+                break;
+            }
+
+            // Compute soft LLRs for 3 bits of this symbol
+            for bit in 0..3 {
+                if bit_idx >= 174 {
+                    break;
+                }
+
+                // Max-log-MAP: LLR = max(power | bit=1) - max(power | bit=0)
+                let mut max_pow_1 = -1e30f32;
+                let mut max_pow_0 = -1e30f32;
+
+                for tone in 0..8 {
+                    let gray = GRAY_MAP[tone];
+                    let bit_val = (gray >> (2 - bit)) & 1;
+                    let power = s8[tone][k];
+
+                    if bit_val == 1 {
+                        max_pow_1 = max_pow_1.max(power);
+                    } else {
+                        max_pow_0 = max_pow_0.max(power);
+                    }
+                }
+
+                // LLR = ln(P(bit=1) / P(bit=0)) ≈ power difference
+                llr[bit_idx] = max_pow_1 - max_pow_0;
+                bit_idx += 1;
+            }
+        }
+    }
+
+    // Normalize LLRs to reasonable range
+    let mut sum_abs = 0.0f32;
+    for i in 0..174 {
+        sum_abs += llr[i].abs();
+    }
+    if sum_abs > 0.0 {
+        let mean_abs = sum_abs / 174.0;
+        let scale = 2.5 / mean_abs; // Scale to mean abs value of ~2.5
+        for i in 0..174 {
+            llr[i] *= scale;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

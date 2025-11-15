@@ -145,5 +145,59 @@ fn main() {
                 dt
             );
         }
+
+        // Try to extract symbols and decode the best candidate
+        println!();
+        println!("Attempting symbol extraction and decoding...");
+        println!();
+
+        // Sort by sync power to get best candidate
+        let mut best_candidates = refined.clone();
+        best_candidates.sort_by(|a, b| b.sync_power.partial_cmp(&a.sync_power).unwrap_or(std::cmp::Ordering::Equal));
+
+        for (i, cand) in best_candidates.iter().take(3).enumerate() {
+            print!("  {}. Extracting {:7.1} Hz @ {:6.3} s ... ", i+1, cand.frequency, cand.time_offset);
+
+            let mut llr = vec![0.0f32; 174];
+            match sync::extract_symbols(&signal_15s, cand, &mut llr) {
+                Ok(_) => {
+                    println!("OK");
+
+                    // Show LLR statistics
+                    let mean_llr = llr.iter().sum::<f32>() / 174.0;
+                    let mean_abs_llr = llr.iter().map(|x| x.abs()).sum::<f32>() / 174.0;
+                    println!("     LLR stats: mean={:.2}, mean_abs={:.2}", mean_llr, mean_abs_llr);
+
+                    // Try LDPC decoding
+                    print!("     Decoding with LDPC... ");
+                    match rustyft8::ldpc::decode(&llr, 30) {
+                        Some((decoded_bits, iterations)) => {
+                            println!("SUCCESS after {} iterations", iterations);
+
+                            // Convert bits to message (no hash cache available)
+                            match rustyft8::decode(&decoded_bits, None) {
+                                Ok(message) => {
+                                    println!("     Message: \"{}\"", message);
+                                    println!();
+                                    return; // Successfully decoded, exit
+                                }
+                                Err(e) => {
+                                    println!("     Failed to unpack message: {}", e);
+                                }
+                            }
+                        }
+                        None => {
+                            println!("FAILED");
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("FAILED: {}", e);
+                }
+            }
+        }
+
+        println!();
+        println!("No signals successfully decoded.");
     }
 }
