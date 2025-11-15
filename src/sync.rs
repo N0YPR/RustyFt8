@@ -665,18 +665,6 @@ pub fn downsample_200hz(
         output[i] = (out_real[i] * fac, out_imag[i] * fac);
     }
 
-    // Debug: check output
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        let max_mag = (0..3200).fold(0.0f32, |acc, i| {
-            let (r, im) = output[i];
-            let mag = libm::sqrtf(r*r + im*im);
-            acc.max(mag)
-        });
-        std::eprintln!("DEBUG downsample: max magnitude = {:.2e}", max_mag);
-    }
-
     Ok(())
 }
 
@@ -829,8 +817,10 @@ pub fn fine_sync(
     downsample_200hz(signal, candidate.frequency, &mut cd)?;
 
     // Convert time offset to 200 Hz sample index
-    // At 200 Hz: 32 samples/symbol, signal starts at 0.5s (as per jstrt)
-    let initial_offset = (candidate.time_offset * 200.0) as i32 + 100; // Add jstrt equivalent
+    // candidate.time_offset is relative to 0.5s start, but downsampled buffer starts at 0.0
+    // So add 0.5s to convert to absolute time, then multiply by 200 Hz sample rate
+    let initial_offset = ((candidate.time_offset + 0.5) * 200.0) as i32;
+
 
     // Fine time search: ±4 steps of 5 ms each = ±20 ms
     let mut best_time = initial_offset;
@@ -870,8 +860,8 @@ pub fn fine_sync(
         }
     }
 
-    // Convert back to seconds
-    let refined_time = (best_time as f32 - 100.0) / 200.0;
+    // Convert back to seconds (inverse of the initial_offset calculation)
+    let refined_time = (best_time as f32 / 200.0) - 0.5;
 
     Ok(Candidate {
         frequency: best_freq,

@@ -116,7 +116,7 @@ fn main() {
             print!("  {}. Refining {:7.1} Hz @ {:6.3} s ... ", i+1, cand.frequency, cand.time_offset);
             match sync::fine_sync(&signal_15s, cand) {
                 Ok(refined_cand) => {
-                    println!("OK: {:7.1} Hz @ {:6.3} s (sync={:.1})",
+                    println!("OK: {:7.1} Hz @ {:6.3} s (sync={:.2e})",
                         refined_cand.frequency,
                         refined_cand.time_offset,
                         refined_cand.sync_power
@@ -137,7 +137,7 @@ fn main() {
             let coarse_cand = &candidates[i];
             let df = refined_cand.frequency - coarse_cand.frequency;
             let dt = refined_cand.time_offset - coarse_cand.time_offset;
-            println!("  {:9.1}  {:8.3}  {:10.1}  {:+6.2}  {:+8.3}",
+            println!("  {:9.1}  {:8.3}  {:10.2e}  {:+6.2}  {:+8.3}",
                 refined_cand.frequency,
                 refined_cand.time_offset,
                 refined_cand.sync_power,
