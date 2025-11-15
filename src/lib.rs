@@ -7,5 +7,6 @@ pub mod ldpc;
 pub mod message;
 pub mod symbol;
 pub mod pulse;
+pub mod wav;
 
 pub use message::{encode, decode};
