@@ -158,8 +158,15 @@ fn main() {
         for (i, cand) in best_candidates.iter().take(3).enumerate() {
             print!("  {}. Extracting {:7.1} Hz @ {:6.3} s ... ", i+1, cand.frequency, cand.time_offset);
 
+            // TEMP: Also try with COARSE frequency (before fine_sync)
+            let mut test_cand = cand.clone();
+            if (test_cand.frequency - 1500.0).abs() < 1.0 {
+                test_cand.frequency = 1500.0; // Force to 1500.0 Hz for testing
+                eprintln!("    (Testing with forced 1500.0 Hz instead of {:.1} Hz)", cand.frequency);
+            }
+
             let mut llr = vec![0.0f32; 174];
-            match sync::extract_symbols(&signal_15s, cand, &mut llr) {
+            match sync::extract_symbols(&signal_15s, &test_cand, &mut llr) {
                 Ok(_) => {
                     println!("OK");
 
@@ -174,8 +181,12 @@ fn main() {
                         Some((decoded_bits, iterations)) => {
                             println!("SUCCESS after {} iterations", iterations);
 
+                            // LDPC returns 91 bits (77 info + 14 CRC), we need only the first 77
+                            use bitvec::prelude::*;
+                            let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
+
                             // Convert bits to message (no hash cache available)
-                            match rustyft8::decode(&decoded_bits, None) {
+                            match rustyft8::decode(&info_bits, None) {
                                 Ok(message) => {
                                     println!("     Message: \"{}\"", message);
                                     println!();

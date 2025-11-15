@@ -568,21 +568,21 @@ pub fn coarse_sync(
 /// * `output` - Output buffer (3200 complex samples at 200 Hz)
 ///
 /// # Returns
-/// Ok(()) on success
+/// Ok(actual_sample_rate) on success - the actual output sample rate in Hz
 pub fn downsample_200hz(
     signal: &[f32],
     f0: f32,
     output: &mut [(f32, f32)],
-) -> Result<(), String> {
+) -> Result<f32, String> {
     const NFFT_IN: usize = 262144; // Large FFT (2^18) for high resolution
-    const NFFT_OUT: usize = 4096;   // Output size (power of 2)
+    const NFFT_OUT: usize = 4096;   // Power of 2 for FFT
 
     if signal.len() < NMAX {
         return Err(alloc::format!("Signal too short: {}", signal.len()));
     }
 
-    if output.len() < 3200 {
-        return Err(alloc::format!("Output buffer too small: {} (need at least 3200)", output.len()));
+    if output.len() < 4096 {
+        return Err(alloc::format!("Output buffer too small: {} (need at least 4096)", output.len()));
     }
 
     // Allocate FFT buffers
@@ -625,6 +625,20 @@ pub fn downsample_200hz(
         }
     }
 
+    // Calculate actual output sample rate
+    let bandwidth = (it - ib + 1) as f32 * df;
+    let actual_sample_rate = bandwidth * (NFFT_OUT as f32) / (k as f32);
+
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        std::eprintln!("DEBUG downsample_200hz:");
+        std::eprintln!("  f0={:.1} Hz, fb={:.1} Hz, ft={:.1} Hz", f0, fb, ft);
+        std::eprintln!("  df={:.3} Hz, extracted {} bins", df, k);
+        std::eprintln!("  bandwidth={:.1} Hz, NFFT_OUT={}", bandwidth, NFFT_OUT);
+        std::eprintln!("  actual_sample_rate={:.1} Hz (target: 200 Hz)", actual_sample_rate);
+    }
+
     // Apply taper to edges
     let taper_len = 101;
     for i in 0..taper_len {
@@ -665,7 +679,7 @@ pub fn downsample_200hz(
         output[i] = (out_real[i] * fac, out_imag[i] * fac);
     }
 
-    Ok(())
+    Ok(actual_sample_rate)
 }
 
 /// Complex-to-complex FFT (forward)
@@ -812,14 +826,14 @@ pub fn fine_sync(
     signal: &[f32],
     candidate: &Candidate,
 ) -> Result<Candidate, String> {
-    // Downsample to 200 Hz centered on candidate frequency
+    // Downsample centered on candidate frequency
     let mut cd = alloc::vec![(0.0f32, 0.0f32); 4096];
-    downsample_200hz(signal, candidate.frequency, &mut cd)?;
+    let actual_sample_rate = downsample_200hz(signal, candidate.frequency, &mut cd)?;
 
-    // Convert time offset to 200 Hz sample index
+    // Convert time offset to downsampled sample index
     // candidate.time_offset is relative to 0.5s start, but downsampled buffer starts at 0.0
-    // So add 0.5s to convert to absolute time, then multiply by 200 Hz sample rate
-    let initial_offset = ((candidate.time_offset + 0.5) * 200.0) as i32;
+    // So add 0.5s to convert to absolute time, then multiply by actual sample rate
+    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
 
 
     // Fine time search: ±4 steps of 5 ms each = ±20 ms
@@ -861,7 +875,7 @@ pub fn fine_sync(
     }
 
     // Convert back to seconds (inverse of the initial_offset calculation)
-    let refined_time = (best_time as f32 / 200.0) - 0.5;
+    let refined_time = (best_time as f32 / actual_sample_rate) - 0.5;
 
     Ok(Candidate {
         frequency: best_freq,
@@ -891,42 +905,78 @@ pub fn extract_symbols(
     llr: &mut [f32],
 ) -> Result<(), String> {
     const NN: usize = 79; // Number of FT8 symbols
-    const NSPS_DOWN: usize = 32; // Samples per symbol at 200 Hz
+    const SYMBOL_DURATION: f32 = 0.16; // FT8 symbol duration in seconds
     const NFFT_SYM: usize = 32; // FFT size for symbol extraction (power of 2)
 
     if llr.len() < 174 {
         return Err(alloc::format!("LLR buffer too small: {} (need 174)", llr.len()));
     }
 
-    // Downsample to 200 Hz centered on NEAREST INTEGER frequency
-    // This avoids fractional Hz offsets that cause bin misalignment
-    let base_freq = candidate.frequency.round();
-    let freq_offset_hz = candidate.frequency - base_freq;
-
+    // Downsample centered on ROUNDED frequency
+    // TEMPORARY: Testing if fractional Hz is causing issues
+    let test_freq = candidate.frequency.round();
     let mut cd = alloc::vec![(0.0f32, 0.0f32); 4096];
-    downsample_200hz(signal, base_freq, &mut cd)?;
+    let actual_sample_rate = downsample_200hz(signal, test_freq, &mut cd)?;
 
-    // Apply residual frequency correction if needed
-    if freq_offset_hz.abs() > 0.01 {
-        let dt = 1.0 / 200.0; // Sample period at 200 Hz
-        let dphi = 2.0 * core::f32::consts::PI * freq_offset_hz * dt;
-        let mut phi = 0.0f32;
+    // Calculate samples per symbol based on actual sample rate
+    let nsps_down = (actual_sample_rate * SYMBOL_DURATION).round() as usize;
 
-        for i in 0..cd.len() {
-            let (r, im) = cd[i];
-            let cos_phi = libm::cosf(phi);
-            let sin_phi = libm::sinf(phi);
-            // Rotate by e^(-i*phi) to shift frequency
-            cd[i] = (r * cos_phi + im * sin_phi, im * cos_phi - r * sin_phi);
-            phi += dphi;
-            if phi > 2.0 * core::f32::consts::PI {
-                phi -= 2.0 * core::f32::consts::PI;
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        std::eprintln!("DEBUG: Downsampling at {:.1} Hz (candidate was {:.1} Hz)",
+            test_freq, candidate.frequency);
+
+        // Check symbols 0 and 36 specifically (both should be tone 3 = 18.75 Hz)
+        // Use the refined offset that extract_symbols will use
+        let test_start_offset = 98; // This will be refined by extract_symbols
+        for (sym_idx, sym_name) in [(0, "Symbol 0"), (36, "Symbol 36")].iter() {
+            let sym_start = test_start_offset + sym_idx * 32;
+            let mut check_real = [0.0f32; 32];
+            let mut check_imag = [0.0f32; 32];
+            for i in 0..32 {
+                if sym_start + i < cd.len() {
+                    check_real[i] = cd[sym_start + i].0;
+                    check_imag[i] = cd[sym_start + i].1;
+                }
+            }
+            if let Ok(_) = fft_real(&mut check_real, &mut check_imag, 32) {
+                std::eprintln!("  {} FFT (samples {}..{}):", sym_name, sym_start, sym_start + 32);
+                for i in 0..8 {
+                    let power = check_real[i] * check_real[i] + check_imag[i] * check_imag[i];
+                    let freq_hz = i as f32 * 6.25;
+                    std::eprintln!("    bin {} ({:.2} Hz): {:.2e}", i, freq_hz, power);
+                }
             }
         }
     }
 
-    // Convert time offset to sample index
-    let start_offset = ((candidate.time_offset + 0.5) * 200.0) as i32;
+    // Convert time offset to sample index and refine it locally
+    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
+
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        std::eprintln!("DEBUG extract_symbols:");
+        std::eprintln!("  actual_sample_rate={:.1} Hz", actual_sample_rate);
+        std::eprintln!("  nsps_down={} samples/symbol", nsps_down);
+        std::eprintln!("  initial_offset={} samples", initial_offset);
+    }
+
+    // Do a local fine time search to account for any downsampling artifacts
+    let mut best_offset = initial_offset;
+    let mut best_sync = 0.0f32;
+
+    for dt in -2..=2 {
+        let t_offset = initial_offset + dt;
+        let sync = sync_downsampled(&cd, t_offset, None, false);
+        if sync > best_sync {
+            best_sync = sync;
+            best_offset = t_offset;
+        }
+    }
+
+    let start_offset = best_offset;
 
     #[cfg(feature = "std")]
     {
@@ -949,11 +999,17 @@ pub fn extract_symbols(
     let mut sym_imag = [0.0f32; NFFT_SYM];
 
     for k in 0..NN {
-        // Symbol starts at: start_offset + k * 32 samples
-        let i1 = start_offset + (k as i32) * (NSPS_DOWN as i32);
+        // Symbol starts at: start_offset + k * nsps_down samples
+        let i1 = start_offset + (k as i32) * (nsps_down as i32);
+
+        #[cfg(feature = "std")]
+        if k == 0 || k == 36 || k == 72 {
+            extern crate std;
+            std::eprintln!("DEBUG: Symbol {} starts at sample {}", k, i1);
+        }
 
         // Check bounds
-        if i1 < 0 || (i1 as usize + NSPS_DOWN) > cd.len() {
+        if i1 < 0 || (i1 as usize + nsps_down) > cd.len() {
             // Symbol is out of bounds, set to zero power
             for tone in 0..8 {
                 s8[tone][k] = 0.0;
@@ -961,21 +1017,40 @@ pub fn extract_symbols(
             continue;
         }
 
+        // Zero the FFT buffer
+        for j in 0..NFFT_SYM {
+            sym_real[j] = 0.0;
+            sym_imag[j] = 0.0;
+        }
+
         // Copy symbol to FFT buffer
-        for j in 0..NSPS_DOWN {
+        for j in 0..nsps_down {
             let idx = i1 as usize + j;
-            sym_real[j] = cd[idx].0;
-            sym_imag[j] = cd[idx].1;
+            if j < NFFT_SYM {
+                sym_real[j] = cd[idx].0;
+                sym_imag[j] = cd[idx].1;
+            }
         }
 
         // Perform FFT
         fft_real(&mut sym_real, &mut sym_imag, NFFT_SYM)?;
 
-        // Extract power for 8 tones (bins 0-7 directly, signal is centered at DC)
+        // Extract magnitude for 8 tones (match WSJT-X: s8 = abs(csymb))
+        // Use bins 0-7 for DC-centered signal
         for tone in 0..8 {
             let re = sym_real[tone];
             let im = sym_imag[tone];
-            s8[tone][k] = re * re + im * im;
+            s8[tone][k] = libm::sqrtf(re * re + im * im);
+        }
+
+        // DEBUG: Check symbol powers for key Costas positions
+        #[cfg(feature = "std")]
+        if k == 0 || k == 36 || k == 72 {
+            extern crate std;
+            std::eprintln!("  Symbol {} powers (bins 0-7):", k);
+            for tone in 0..8 {
+                std::eprintln!("    tone {}: {:.2e}", tone, s8[tone][k]);
+            }
         }
     }
 
@@ -1007,10 +1082,12 @@ pub fn extract_symbols(
         }
 
         #[cfg(feature = "std")]
-        if k == 0 {
+        {
             extern crate std;
-            std::eprintln!("  Symbol 0: expected tone {}, got tone {} (power {:.2e})",
-                expected_tone, max_tone, max_power);
+            let match1 = if max_tone == expected_tone as usize { "✓" } else { "✗" };
+            if k < 7 {
+                std::eprintln!("  Costas1[{}]: expected {}, got {} {}", k, expected_tone, max_tone, match1);
+            }
         }
 
         if max_tone == expected_tone as usize {
@@ -1026,6 +1103,16 @@ pub fn extract_symbols(
                 max_tone = tone;
             }
         }
+
+        #[cfg(feature = "std")]
+        {
+            extern crate std;
+            let match2 = if max_tone == expected_tone as usize { "✓" } else { "✗" };
+            if k < 7 {
+                std::eprintln!("  Costas2[{}]: expected {}, got {} {}", k, expected_tone, max_tone, match2);
+            }
+        }
+
         if max_tone == expected_tone as usize {
             nsync += 1;
         }
@@ -1039,6 +1126,16 @@ pub fn extract_symbols(
                 max_tone = tone;
             }
         }
+
+        #[cfg(feature = "std")]
+        {
+            extern crate std;
+            let match3 = if max_tone == expected_tone as usize { "✓" } else { "✗" };
+            if k < 7 {
+                std::eprintln!("  Costas3[{}]: expected {}, got {} {}", k, expected_tone, max_tone, match3);
+            }
+        }
+
         if max_tone == expected_tone as usize {
             nsync += 1;
         }
@@ -1097,7 +1194,7 @@ pub fn extract_symbols(
                     }
                 }
 
-                // LLR = ln(P(bit=1) / P(bit=0)) ≈ power difference
+                // LLR ≈ magnitude difference (max-log-MAP approximation)
                 llr[bit_idx] = max_pow_1 - max_pow_0;
                 bit_idx += 1;
             }
@@ -1105,13 +1202,14 @@ pub fn extract_symbols(
     }
 
     // Normalize LLRs to reasonable range
+    // WSJT-X uses apmag=4 for scaling, let's try that
     let mut sum_abs = 0.0f32;
     for i in 0..174 {
         sum_abs += llr[i].abs();
     }
     if sum_abs > 0.0 {
         let mean_abs = sum_abs / 174.0;
-        let scale = 2.5 / mean_abs; // Scale to mean abs value of ~2.5
+        let scale = 4.0 / mean_abs; // WSJT-X uses apmag=4
         for i in 0..174 {
             llr[i] *= scale;
         }
