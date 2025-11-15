@@ -41,9 +41,9 @@ cargo test message::tests::test_encode_decode_roundtrip
 - **Commits**: Must be approved before execution
 - **Commit messages**:
   - Use conventional format
-  - Include "🤖 Generated with Claude Code" footer
-  - Include "Co-Authored-By: Claude <noreply@anthropic.com>"
-
+  - Do not include "🤖 Generated with Claude Code" footer
+  - Do not include "Co-Authored-By: Claude <noreply@anthropic.com>"
+  
 ### Common Commands
 
 ```bash
