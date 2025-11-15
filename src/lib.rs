@@ -6,5 +6,6 @@ pub mod crc;
 pub mod ldpc;
 pub mod message;
 pub mod symbol;
+pub mod pulse;
 
 pub use message::{encode, decode};
