@@ -8,5 +8,6 @@ pub mod message;
 pub mod symbol;
 pub mod pulse;
 pub mod wav;
+pub mod sync;
 
 pub use message::{encode, decode};
