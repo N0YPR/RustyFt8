@@ -16,7 +16,6 @@
 
 extern crate alloc;
 use alloc::vec;
-use alloc::vec::Vec;
 use alloc::string::String;
 
 /// FT8 sample rate in Hz
@@ -54,6 +53,43 @@ fn gfsk_pulse(bt: f32, t: f32) -> f32 {
     0.5 * (libm::erff(arg1) - libm::erff(arg2))
 }
 
+/// Pre-compute the GFSK pulse shape for efficient reuse
+///
+/// Computes the frequency-smoothing pulse that extends 1.5 symbols on each side.
+/// This should be computed once and reused across multiple waveform generations
+/// with the same parameters.
+///
+/// # Arguments
+/// * `pulse` - Output buffer for pulse samples (must be exactly 3 * nsps length)
+/// * `bt` - Bandwidth-time product (typically 2.0 for FT8)
+/// * `nsps` - Samples per symbol
+///
+/// # Example
+/// ```
+/// use rustyft8::pulse;
+///
+/// let mut pulse = vec![0.0f32; 3 * 1920];
+/// pulse::compute_pulse(&mut pulse, 2.0, 1920)?;
+/// // Reuse this pulse buffer for multiple waveform generations
+/// # Ok::<(), String>(())
+/// ```
+pub fn compute_pulse(pulse: &mut [f32], bt: f32, nsps: usize) -> Result<(), String> {
+    let expected_len = 3 * nsps;
+    if pulse.len() != expected_len {
+        return Err(alloc::format!(
+            "Pulse buffer must be exactly {} samples (3 * nsps={}), got {}",
+            expected_len, nsps, pulse.len()
+        ));
+    }
+
+    for (i, p) in pulse.iter_mut().enumerate() {
+        let tt = (i as f32 - 1.5 * nsps as f32) / nsps as f32;
+        *p = gfsk_pulse(bt, tt);
+    }
+
+    Ok(())
+}
+
 /// Generate an FT8 waveform from 79 symbols
 ///
 /// Creates a phase-continuous audio waveform using GFSK pulse shaping.
@@ -62,43 +98,55 @@ fn gfsk_pulse(bt: f32, t: f32) -> f32 {
 ///
 /// # Arguments
 /// * `symbols` - Array of 79 FT8 symbols (tones 0-7)
+/// * `waveform` - Output slice for audio samples (must be exactly nsym * nsps length)
+/// * `pulse` - Pre-computed GFSK pulse (3 * nsps samples, from `compute_pulse`)
 /// * `f0` - Base frequency in Hz (typically 1000-2000 Hz)
 /// * `sample_rate` - Sample rate in Hz (typically 12000)
 /// * `nsps` - Samples per symbol (typically 1920 at 12 kHz)
-///
-/// # Returns
-/// * `Result<Vec<f32>, String>` - Audio samples or error message
 ///
 /// # Example
 /// ```no_run
 /// use rustyft8::pulse;
 ///
-/// let symbols = [0u8; 79]; // 79 FT8 symbols
-/// let waveform = pulse::generate_waveform(&symbols, 1500.0, 12000.0, 1920)?;
-/// // waveform contains 151,680 samples (79 symbols * 1920 samples/symbol)
+/// let symbols = [0u8; 79];
+/// let mut pulse_buf = vec![0.0f32; 3 * 1920];
+/// pulse::compute_pulse(&mut pulse_buf, 2.0, 1920)?;
+///
+/// let mut waveform = vec![0.0f32; 79 * 1920];
+/// pulse::generate_waveform(&symbols, &mut waveform, &pulse_buf, 1500.0, 12000.0, 1920)?;
 /// # Ok::<(), String>(())
 /// ```
 pub fn generate_waveform(
     symbols: &[u8; 79],
+    waveform: &mut [f32],
+    pulse: &[f32],
     f0: f32,
     sample_rate: f32,
     nsps: usize,
-) -> Result<Vec<f32>, String> {
+) -> Result<(), String> {
     use core::f32::consts::PI;
 
     let nsym = symbols.len();
-    let bt = BT;
+    let nwave = nsym * nsps;
+
+    if waveform.len() != nwave {
+        return Err(alloc::format!(
+            "Waveform buffer must be exactly {} samples (nsym={} * nsps={}), got {}",
+            nwave, nsym, nsps, waveform.len()
+        ));
+    }
+
+    let pulse_len = 3 * nsps;
+    if pulse.len() != pulse_len {
+        return Err(alloc::format!(
+            "Pulse buffer must be exactly {} samples (3 * nsps={}), got {}",
+            pulse_len, nsps, pulse.len()
+        ));
+    }
+
     let twopi = 2.0 * PI;
     let dt = 1.0 / sample_rate;
     let hmod = 1.0; // Modulation index
-
-    // Compute the frequency-smoothing pulse (extends 1.5 symbols on each side)
-    let pulse_len = 3 * nsps;
-    let mut pulse = Vec::with_capacity(pulse_len);
-    for i in 0..pulse_len {
-        let tt = (i as f32 - 1.5 * nsps as f32) / nsps as f32;
-        pulse.push(gfsk_pulse(bt, tt));
-    }
 
     // Compute the smoothed frequency waveform
     // Length = (nsym+2)*nsps samples (includes dummy symbols at start/end)
@@ -141,12 +189,11 @@ pub fn generate_waveform(
     }
 
     // Generate the waveform (skip first dummy symbol)
-    let nwave = nsym * nsps;
-    let mut wave = Vec::with_capacity(nwave);
     let mut phi = 0.0f32;
 
-    for j in nsps..(nsps + nwave) {
-        wave.push(libm::sinf(phi));
+    for (k, sample) in waveform.iter_mut().enumerate() {
+        let j = nsps + k;
+        *sample = libm::sinf(phi);
         phi = (phi + dphi[j]) % twopi;
     }
 
@@ -156,65 +203,76 @@ pub fn generate_waveform(
     // Ramp up at start
     for i in 0..nramp {
         let envelope = (1.0 - libm::cosf(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
-        wave[i] *= envelope;
+        waveform[i] *= envelope;
     }
 
     // Ramp down at end
     let k1 = nsym * nsps - nramp;
     for i in 0..nramp {
         let envelope = (1.0 + libm::cosf(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
-        if k1 + i < wave.len() {
-            wave[k1 + i] *= envelope;
+        if k1 + i < waveform.len() {
+            waveform[k1 + i] *= envelope;
         }
     }
 
-    Ok(wave)
+    Ok(())
 }
 
 /// Generate a complex (I/Q) FT8 waveform from 79 symbols
 ///
 /// Similar to `generate_waveform` but produces complex samples for SDR applications.
-/// Uses a lookup table for efficient sin/cos computation.
 ///
 /// # Arguments
 /// * `symbols` - Array of 79 FT8 symbols (tones 0-7)
+/// * `waveform` - Output slice for complex samples (must be exactly nsym * nsps length)
+/// * `pulse` - Pre-computed GFSK pulse (3 * nsps samples, from `compute_pulse`)
 /// * `f0` - Base frequency in Hz
 /// * `sample_rate` - Sample rate in Hz
 /// * `nsps` - Samples per symbol
-///
-/// # Returns
-/// * `Result<Vec<(f32, f32)>, String>` - Complex samples (I, Q) or error
 ///
 /// # Example
 /// ```no_run
 /// use rustyft8::pulse;
 ///
 /// let symbols = [0u8; 79];
-/// let waveform = pulse::generate_complex_waveform(&symbols, 1500.0, 12000.0, 1920)?;
-/// // Each sample is (I, Q) tuple
+/// let mut pulse_buf = vec![0.0f32; 3 * 1920];
+/// pulse::compute_pulse(&mut pulse_buf, 2.0, 1920)?;
+///
+/// let mut waveform = vec![(0.0f32, 0.0f32); 79 * 1920];
+/// pulse::generate_complex_waveform(&symbols, &mut waveform, &pulse_buf, 1500.0, 12000.0, 1920)?;
 /// # Ok::<(), String>(())
 /// ```
 pub fn generate_complex_waveform(
     symbols: &[u8; 79],
+    waveform: &mut [(f32, f32)],
+    pulse: &[f32],
     f0: f32,
     sample_rate: f32,
     nsps: usize,
-) -> Result<Vec<(f32, f32)>, String> {
+) -> Result<(), String> {
     use core::f32::consts::PI;
 
     let nsym = symbols.len();
-    let bt = BT;
+    let nwave = nsym * nsps;
+
+    if waveform.len() != nwave {
+        return Err(alloc::format!(
+            "Waveform buffer must be exactly {} samples (nsym={} * nsps={}), got {}",
+            nwave, nsym, nsps, waveform.len()
+        ));
+    }
+
+    let pulse_len = 3 * nsps;
+    if pulse.len() != pulse_len {
+        return Err(alloc::format!(
+            "Pulse buffer must be exactly {} samples (3 * nsps={}), got {}",
+            pulse_len, nsps, pulse.len()
+        ));
+    }
+
     let twopi = 2.0 * PI;
     let dt = 1.0 / sample_rate;
     let hmod = 1.0;
-
-    // Compute pulse
-    let pulse_len = 3 * nsps;
-    let mut pulse = Vec::with_capacity(pulse_len);
-    for i in 0..pulse_len {
-        let tt = (i as f32 - 1.5 * nsps as f32) / nsps as f32;
-        pulse.push(gfsk_pulse(bt, tt));
-    }
 
     // Compute dphi
     let dphi_len = (nsym + 2) * nsps;
@@ -250,14 +308,13 @@ pub fn generate_complex_waveform(
     }
 
     // Generate complex waveform
-    let nwave = nsym * nsps;
-    let mut cwave = Vec::with_capacity(nwave);
     let mut phi = 0.0f32;
 
-    for j in nsps..(nsps + nwave) {
-        let i_sample = libm::cosf(phi);
-        let q_sample = libm::sinf(phi);
-        cwave.push((i_sample, q_sample));
+    for (k, sample) in waveform.iter_mut().enumerate() {
+        let j = nsps + k;
+        let i_val = libm::cosf(phi);
+        let q_val = libm::sinf(phi);
+        *sample = (i_val, q_val);
         phi = (phi + dphi[j]) % twopi;
     }
 
@@ -266,20 +323,20 @@ pub fn generate_complex_waveform(
 
     for i in 0..nramp {
         let envelope = (1.0 - libm::cosf(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
-        cwave[i].0 *= envelope;
-        cwave[i].1 *= envelope;
+        waveform[i].0 *= envelope;
+        waveform[i].1 *= envelope;
     }
 
     let k1 = nsym * nsps - nramp;
     for i in 0..nramp {
         let envelope = (1.0 + libm::cosf(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
-        if k1 + i < cwave.len() {
-            cwave[k1 + i].0 *= envelope;
-            cwave[k1 + i].1 *= envelope;
+        if k1 + i < waveform.len() {
+            waveform[k1 + i].0 *= envelope;
+            waveform[k1 + i].1 *= envelope;
         }
     }
 
-    Ok(cwave)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -317,11 +374,13 @@ mod tests {
     #[test]
     fn test_generate_waveform_length() {
         let symbols = [0u8; 79];
-        let result = generate_waveform(&symbols, 1500.0, 12000.0, 1920);
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        compute_pulse(&mut pulse, 2.0, 1920).unwrap();
+
+        let mut wave = vec![0.0f32; 79 * 1920];
+        let result = generate_waveform(&symbols, &mut wave, &pulse, 1500.0, 12000.0, 1920);
 
         assert!(result.is_ok());
-        let wave = result.unwrap();
-
         // Should be 79 symbols * 1920 samples/symbol = 151,680 samples
         assert_eq!(wave.len(), 79 * 1920);
     }
@@ -330,10 +389,13 @@ mod tests {
     fn test_generate_waveform_all_zeros() {
         // All zero tones should produce a constant frequency (just f0)
         let symbols = [0u8; 79];
-        let result = generate_waveform(&symbols, 1500.0, 12000.0, 1920);
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        compute_pulse(&mut pulse, 2.0, 1920).unwrap();
+
+        let mut wave = vec![0.0f32; 79 * 1920];
+        let result = generate_waveform(&symbols, &mut wave, &pulse, 1500.0, 12000.0, 1920);
 
         assert!(result.is_ok());
-        let wave = result.unwrap();
 
         // Check that wave is bounded [-1, 1]
         for &sample in &wave {
@@ -344,7 +406,11 @@ mod tests {
     #[test]
     fn test_generate_waveform_envelope() {
         let symbols = [4u8; 79]; // All mid-tone
-        let wave = generate_waveform(&symbols, 1500.0, 12000.0, 1920).unwrap();
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        compute_pulse(&mut pulse, 2.0, 1920).unwrap();
+
+        let mut wave = vec![0.0f32; 79 * 1920];
+        generate_waveform(&symbols, &mut wave, &pulse, 1500.0, 12000.0, 1920).unwrap();
 
         // First sample should be near zero (envelope starts at 0)
         assert!(wave[0].abs() < 0.1, "First sample should be small due to envelope, got {}", wave[0]);
@@ -364,17 +430,24 @@ mod tests {
     #[test]
     fn test_generate_complex_waveform_length() {
         let symbols = [0u8; 79];
-        let result = generate_complex_waveform(&symbols, 1500.0, 12000.0, 1920);
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        compute_pulse(&mut pulse, 2.0, 1920).unwrap();
+
+        let mut cwave = vec![(0.0f32, 0.0f32); 79 * 1920];
+        let result = generate_complex_waveform(&symbols, &mut cwave, &pulse, 1500.0, 12000.0, 1920);
 
         assert!(result.is_ok());
-        let cwave = result.unwrap();
         assert_eq!(cwave.len(), 79 * 1920);
     }
 
     #[test]
     fn test_generate_complex_waveform_unit_magnitude() {
         let symbols = [4u8; 79];
-        let cwave = generate_complex_waveform(&symbols, 1500.0, 12000.0, 1920).unwrap();
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        compute_pulse(&mut pulse, 2.0, 1920).unwrap();
+
+        let mut cwave = vec![(0.0f32, 0.0f32); 79 * 1920];
+        generate_complex_waveform(&symbols, &mut cwave, &pulse, 1500.0, 12000.0, 1920).unwrap();
 
         // Skip envelope regions and check middle samples
         let start = 1920; // After first symbol
@@ -395,8 +468,13 @@ mod tests {
         let symbols_low = [0u8; 79];  // All tone 0
         let symbols_high = [7u8; 79]; // All tone 7
 
-        let wave_low = generate_waveform(&symbols_low, 1500.0, 12000.0, 1920).unwrap();
-        let wave_high = generate_waveform(&symbols_high, 1500.0, 12000.0, 1920).unwrap();
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        compute_pulse(&mut pulse, 2.0, 1920).unwrap();
+
+        let mut wave_low = vec![0.0f32; 79 * 1920];
+        let mut wave_high = vec![0.0f32; 79 * 1920];
+        generate_waveform(&symbols_low, &mut wave_low, &pulse, 1500.0, 12000.0, 1920).unwrap();
+        generate_waveform(&symbols_high, &mut wave_high, &pulse, 1500.0, 12000.0, 1920).unwrap();
 
         // Waveforms should be different (different frequencies)
         let mut differences = 0;
@@ -407,5 +485,95 @@ mod tests {
         }
 
         assert!(differences > 50, "Different tones should produce different waveforms");
+    }
+
+    #[test]
+    fn test_invalid_waveform_length() {
+        let symbols = [0u8; 79];
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        compute_pulse(&mut pulse, 2.0, 1920).unwrap();
+
+        let mut wave = vec![0.0f32; 1000]; // Wrong size
+        let result = generate_waveform(&symbols, &mut wave, &pulse, 1500.0, 12000.0, 1920);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Waveform buffer must be exactly"));
+    }
+
+    #[test]
+    fn test_invalid_complex_waveform_length() {
+        let symbols = [0u8; 79];
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        compute_pulse(&mut pulse, 2.0, 1920).unwrap();
+
+        let mut cwave = vec![(0.0f32, 0.0f32); 1000]; // Wrong size
+        let result = generate_complex_waveform(&symbols, &mut cwave, &pulse, 1500.0, 12000.0, 1920);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Waveform buffer must be exactly"));
+    }
+
+    #[test]
+    fn test_compute_pulse_length() {
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        let result = compute_pulse(&mut pulse, 2.0, 1920);
+
+        assert!(result.is_ok());
+        assert_eq!(pulse.len(), 3 * 1920);
+    }
+
+    #[test]
+    fn test_compute_pulse_properties() {
+        let mut pulse = vec![0.0f32; 3 * 1920];
+        compute_pulse(&mut pulse, 2.0, 1920).unwrap();
+
+        // Check that pulse values are reasonable (all positive, peak near center)
+        for &p in &pulse {
+            assert!(p >= 0.0 && p <= 1.0, "Pulse value out of range: {}", p);
+        }
+
+        // Check that pulse is symmetric around center
+        let mid = pulse.len() / 2;
+        for i in 1..100 {
+            let left = pulse[mid - i];
+            let right = pulse[mid + i];
+            assert!((left - right).abs() < 1e-5,
+                "Pulse should be symmetric, mismatch at offset {}: {} vs {}", i, left, right);
+        }
+    }
+
+    #[test]
+    fn test_compute_pulse_invalid_length() {
+        let mut pulse = vec![0.0f32; 1000]; // Wrong size
+        let result = compute_pulse(&mut pulse, 2.0, 1920);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Pulse buffer must be exactly"));
+    }
+
+    #[test]
+    fn test_invalid_pulse_length_in_generate_waveform() {
+        let symbols = [0u8; 79];
+        let mut pulse = vec![0.0f32; 999]; // 3 * 333 = 999
+        compute_pulse(&mut pulse, 2.0, 333).unwrap(); // This will work for 333 nsps
+
+        let mut wave = vec![0.0f32; 79 * 1920];
+        let result = generate_waveform(&symbols, &mut wave, &pulse, 1500.0, 12000.0, 1920);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Pulse buffer must be exactly"));
+    }
+
+    #[test]
+    fn test_invalid_pulse_length_in_generate_complex_waveform() {
+        let symbols = [0u8; 79];
+        let mut pulse = vec![0.0f32; 999]; // 3 * 333 = 999
+        compute_pulse(&mut pulse, 2.0, 333).unwrap(); // This will work for 333 nsps
+
+        let mut cwave = vec![(0.0f32, 0.0f32); 79 * 1920];
+        let result = generate_complex_waveform(&symbols, &mut cwave, &pulse, 1500.0, 12000.0, 1920);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Pulse buffer must be exactly"));
     }
 }
