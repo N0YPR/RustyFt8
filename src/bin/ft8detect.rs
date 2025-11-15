@@ -103,15 +103,46 @@ fn main() {
     if candidates.is_empty() {
         println!("No signals detected.");
     } else {
-        println!("Detected {} candidate signal(s):", candidates.len());
+        println!("Detected {} candidate signal(s) (coarse sync)", candidates.len());
         println!();
-        println!("  Freq (Hz)  Time (s)  Sync Power");
-        println!("  ---------  --------  ----------");
-        for cand in &candidates {
-            println!("  {:9.1}  {:8.3}  {:10.2}",
-                cand.frequency,
-                cand.time_offset,
-                cand.sync_power
+
+        // Apply fine sync to top 5 candidates
+        let num_fine = 5.min(candidates.len());
+        println!("Applying fine synchronization to top {} candidates...", num_fine);
+        println!();
+
+        let mut refined = Vec::new();
+        for (i, cand) in candidates.iter().take(num_fine).enumerate() {
+            print!("  {}. Refining {:7.1} Hz @ {:6.3} s ... ", i+1, cand.frequency, cand.time_offset);
+            match sync::fine_sync(&signal_15s, cand) {
+                Ok(refined_cand) => {
+                    println!("OK: {:7.1} Hz @ {:6.3} s (sync={:.1})",
+                        refined_cand.frequency,
+                        refined_cand.time_offset,
+                        refined_cand.sync_power
+                    );
+                    refined.push(refined_cand);
+                }
+                Err(e) => {
+                    println!("FAILED: {}", e);
+                }
+            }
+        }
+
+        println!();
+        println!("Fine-sync results:");
+        println!("  Freq (Hz)  Time (s)  Sync Power  dFreq    dTime");
+        println!("  ---------  --------  ----------  ------  --------");
+        for (i, refined_cand) in refined.iter().enumerate() {
+            let coarse_cand = &candidates[i];
+            let df = refined_cand.frequency - coarse_cand.frequency;
+            let dt = refined_cand.time_offset - coarse_cand.time_offset;
+            println!("  {:9.1}  {:8.3}  {:10.1}  {:+6.2}  {:+8.3}",
+                refined_cand.frequency,
+                refined_cand.time_offset,
+                refined_cand.sync_power,
+                df,
+                dt
             );
         }
     }

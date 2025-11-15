@@ -558,6 +558,328 @@ pub fn coarse_sync(
     Ok(candidates)
 }
 
+/// Downsample signal to 200 Hz (32 samples/symbol) centered on frequency f0
+///
+/// Uses FFT-based downsampling: FFT → extract bandwidth → IFFT
+///
+/// # Arguments
+/// * `signal` - Input signal (15 seconds at 12 kHz = 180,000 samples)
+/// * `f0` - Center frequency in Hz
+/// * `output` - Output buffer (3200 complex samples at 200 Hz)
+///
+/// # Returns
+/// Ok(()) on success
+pub fn downsample_200hz(
+    signal: &[f32],
+    f0: f32,
+    output: &mut [(f32, f32)],
+) -> Result<(), String> {
+    const NFFT_IN: usize = 262144; // Large FFT (2^18) for high resolution
+    const NFFT_OUT: usize = 4096;   // Output size (power of 2)
+
+    if signal.len() < NMAX {
+        return Err(alloc::format!("Signal too short: {}", signal.len()));
+    }
+
+    if output.len() < 3200 {
+        return Err(alloc::format!("Output buffer too small: {} (need at least 3200)", output.len()));
+    }
+
+    // Allocate FFT buffers
+    let mut x_real = alloc::vec![0.0f32; NFFT_IN];
+    let mut x_imag = alloc::vec![0.0f32; NFFT_IN];
+
+    // Copy signal and zero-pad
+    for i in 0..NMAX {
+        x_real[i] = signal[i];
+        x_imag[i] = 0.0;
+    }
+
+    // Forward FFT
+    fft_complex(&mut x_real, &mut x_imag, NFFT_IN)?;
+
+    // Extract bandwidth around f0
+    // FT8 bandwidth: 8 * baud = 8 * 6.25 = 50 Hz
+    // Extract f0 ± 5 Hz (10 Hz total) at 200 Hz sampling = 62.5 bins
+    let df = SAMPLE_RATE / NFFT_IN as f32;
+    let baud = SAMPLE_RATE / NSPS as f32; // 6.25 Hz
+
+    // Frequency range to extract: [f0 - 1.5*baud, f0 + 8.5*baud]
+    let fb = (f0 - 1.5 * baud).max(0.0);
+    let ft = (f0 + 8.5 * baud).min(SAMPLE_RATE / 2.0);
+
+    let ib = (fb / df) as usize;
+    let it = (ft / df).min((NFFT_IN / 2) as f32) as usize;
+    let i0 = (f0 / df) as usize;
+
+    // Copy selected frequency bins to output FFT buffer
+    let mut out_real = alloc::vec![0.0f32; NFFT_OUT];
+    let mut out_imag = alloc::vec![0.0f32; NFFT_OUT];
+
+    let mut k = 0;
+    for i in ib..=it {
+        if k < NFFT_OUT {
+            out_real[k] = x_real[i];
+            out_imag[k] = x_imag[i];
+            k += 1;
+        }
+    }
+
+    // Apply taper to edges
+    let taper_len = 101;
+    for i in 0..taper_len {
+        let taper_val = 0.5 * (1.0 + libm::cosf(core::f32::consts::PI * i as f32 / 100.0));
+        if i < k {
+            out_real[i] *= taper_val;
+            out_imag[i] *= taper_val;
+        }
+        let j = k - 1 - i;
+        if j < k {
+            out_real[j] *= taper_val;
+            out_imag[j] *= taper_val;
+        }
+    }
+
+    // Circular shift to center at DC
+    let shift = (i0 as i32 - ib as i32).max(0) as usize;
+    if shift > 0 && shift < k {
+        // Rotate array left by 'shift' positions
+        let mut temp_real = alloc::vec![0.0f32; NFFT_OUT];
+        let mut temp_imag = alloc::vec![0.0f32; NFFT_OUT];
+        temp_real.copy_from_slice(&out_real);
+        temp_imag.copy_from_slice(&out_imag);
+
+        for i in 0..k {
+            let src = (i + shift) % k;
+            out_real[i] = temp_real[src];
+            out_imag[i] = temp_imag[src];
+        }
+    }
+
+    // Inverse FFT
+    fft_complex_inverse(&mut out_real, &mut out_imag, NFFT_OUT)?;
+
+    // Normalize and copy to output
+    let fac = 1.0 / libm::sqrtf((NFFT_IN * NFFT_OUT) as f32);
+    for i in 0..NFFT_OUT {
+        output[i] = (out_real[i] * fac, out_imag[i] * fac);
+    }
+
+    // Debug: check output
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        let max_mag = (0..3200).fold(0.0f32, |acc, i| {
+            let (r, im) = output[i];
+            let mag = libm::sqrtf(r*r + im*im);
+            acc.max(mag)
+        });
+        std::eprintln!("DEBUG downsample: max magnitude = {:.2e}", max_mag);
+    }
+
+    Ok(())
+}
+
+/// Complex-to-complex FFT (forward)
+fn fft_complex(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(), String> {
+    fft_real(real, imag, n)
+}
+
+/// Complex-to-complex inverse FFT
+fn fft_complex_inverse(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(), String> {
+    // Conjugate input
+    for i in 0..n {
+        imag[i] = -imag[i];
+    }
+
+    // Forward FFT
+    fft_real(real, imag, n)?;
+
+    // Conjugate output and scale
+    for i in 0..n {
+        imag[i] = -imag[i] / n as f32;
+        real[i] /= n as f32;
+    }
+
+    Ok(())
+}
+
+/// Compute sync power on downsampled signal using Costas correlation
+///
+/// This is the fine sync equivalent of compute_sync2d, operating on
+/// downsampled data at 200 Hz (32 samples/symbol).
+///
+/// # Arguments
+/// * `cd` - Downsampled complex signal (3200 samples at 200 Hz)
+/// * `time_offset` - Time offset in samples (at 200 Hz rate)
+/// * `freq_tweak` - Optional frequency correction phasors (32 per symbol)
+/// * `apply_tweak` - Whether to apply frequency correction
+///
+/// # Returns
+/// Sync power metric
+pub fn sync_downsampled(
+    cd: &[(f32, f32)],
+    time_offset: i32,
+    freq_tweak: Option<&[(f32, f32)]>,
+    apply_tweak: bool,
+) -> f32 {
+    const NSPS_DOWN: usize = 32; // Samples per symbol at 200 Hz
+
+    // Precompute Costas waveforms at 200 Hz
+    let mut costas_wave = [[(0.0f32, 0.0f32); NSPS_DOWN]; 7];
+
+    for (i, &tone) in COSTAS_PATTERN.iter().enumerate() {
+        let dphi = 2.0 * core::f32::consts::PI * tone as f32 / NSPS_DOWN as f32;
+        let mut phi = 0.0f32;
+
+        for j in 0..NSPS_DOWN {
+            costas_wave[i][j] = (libm::cosf(phi), libm::sinf(phi));
+            phi = phi + dphi;
+            if phi > 2.0 * core::f32::consts::PI {
+                phi -= 2.0 * core::f32::consts::PI;
+            }
+        }
+    }
+
+    let mut sync = 0.0f32;
+
+    // Sum over 7 Costas tones and 3 Costas arrays
+    for i in 0..7 {
+        // Costas array 1 (symbols 0-6)
+        let i1 = time_offset + (i as i32) * (NSPS_DOWN as i32);
+        // Costas array 2 (symbols 36-42)
+        let i2 = i1 + 36 * (NSPS_DOWN as i32);
+        // Costas array 3 (symbols 72-78)
+        let i3 = i1 + 72 * (NSPS_DOWN as i32);
+
+        let mut wave = costas_wave[i as usize];
+
+        // Apply frequency tweak if requested
+        if apply_tweak && freq_tweak.is_some() {
+            let tweak = freq_tweak.unwrap();
+            for j in 0..NSPS_DOWN {
+                let (wr, wi) = wave[j];
+                let (tr, ti) = tweak[j];
+                // Complex multiply: wave * tweak
+                wave[j] = (wr * tr - wi * ti, wr * ti + wi * tr);
+            }
+        }
+
+        // Correlate with signal at three Costas positions
+        let mut z1 = (0.0f32, 0.0f32);
+        let mut z2 = (0.0f32, 0.0f32);
+        let mut z3 = (0.0f32, 0.0f32);
+
+        if i1 >= 0 && (i1 as usize + NSPS_DOWN - 1) < cd.len() {
+            for j in 0..NSPS_DOWN {
+                let idx = i1 as usize + j;
+                let (sr, si) = cd[idx];
+                let (wr, wi) = wave[j];
+                // Complex conjugate multiply: signal * conj(wave)
+                z1.0 += sr * wr + si * wi;
+                z1.1 += si * wr - sr * wi;
+            }
+        }
+
+        if i2 >= 0 && (i2 as usize + NSPS_DOWN - 1) < cd.len() {
+            for j in 0..NSPS_DOWN {
+                let idx = i2 as usize + j;
+                let (sr, si) = cd[idx];
+                let (wr, wi) = wave[j];
+                z2.0 += sr * wr + si * wi;
+                z2.1 += si * wr - sr * wi;
+            }
+        }
+
+        if i3 >= 0 && (i3 as usize + NSPS_DOWN - 1) < cd.len() {
+            for j in 0..NSPS_DOWN {
+                let idx = i3 as usize + j;
+                let (sr, si) = cd[idx];
+                let (wr, wi) = wave[j];
+                z3.0 += sr * wr + si * wi;
+                z3.1 += si * wr - sr * wi;
+            }
+        }
+
+        // Add power from all three Costas arrays
+        sync += z1.0 * z1.0 + z1.1 * z1.1;
+        sync += z2.0 * z2.0 + z2.1 * z2.1;
+        sync += z3.0 * z3.0 + z3.1 * z3.1;
+    }
+
+    sync
+}
+
+/// Refine candidate frequency and time using fine synchronization
+///
+/// Downsamples to 200 Hz and searches ±2.5 Hz and ±20 ms for peak sync.
+///
+/// # Arguments
+/// * `signal` - Input signal (15 seconds at 12 kHz)
+/// * `candidate` - Coarse sync candidate to refine
+///
+/// # Returns
+/// Refined candidate with updated frequency, time offset, and sync power
+pub fn fine_sync(
+    signal: &[f32],
+    candidate: &Candidate,
+) -> Result<Candidate, String> {
+    // Downsample to 200 Hz centered on candidate frequency
+    let mut cd = alloc::vec![(0.0f32, 0.0f32); 4096];
+    downsample_200hz(signal, candidate.frequency, &mut cd)?;
+
+    // Convert time offset to 200 Hz sample index
+    // At 200 Hz: 32 samples/symbol, signal starts at 0.5s (as per jstrt)
+    let initial_offset = (candidate.time_offset * 200.0) as i32 + 100; // Add jstrt equivalent
+
+    // Fine time search: ±4 steps of 5 ms each = ±20 ms
+    let mut best_time = initial_offset;
+    let mut best_sync = 0.0f32;
+
+    for dt in -4..=4 {
+        let t_offset = initial_offset + dt;
+        let sync = sync_downsampled(&cd, t_offset, None, false);
+
+        if sync > best_sync {
+            best_sync = sync;
+            best_time = t_offset;
+        }
+    }
+
+    // Fine frequency search: ±5 steps of 0.5 Hz = ±2.5 Hz
+    let mut best_freq = candidate.frequency;
+    let dt2 = 1.0 / 200.0; // Sample period at 200 Hz
+
+    for df in -5..=5 {
+        let freq_offset = df as f32 * 0.5; // 0.5 Hz steps
+        let dphi = 2.0 * core::f32::consts::PI * freq_offset * dt2;
+
+        // Generate frequency correction phasors
+        let mut tweak = [(0.0f32, 0.0f32); 32];
+        let mut phi = 0.0f32;
+        for i in 0..32 {
+            tweak[i] = (libm::cosf(phi), libm::sinf(phi));
+            phi += dphi;
+        }
+
+        let sync = sync_downsampled(&cd, best_time, Some(&tweak), true);
+
+        if sync > best_sync {
+            best_sync = sync;
+            best_freq = candidate.frequency + freq_offset;
+        }
+    }
+
+    // Convert back to seconds
+    let refined_time = (best_time as f32 - 100.0) / 200.0;
+
+    Ok(Candidate {
+        frequency: best_freq,
+        time_offset: refined_time,
+        sync_power: best_sync,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
