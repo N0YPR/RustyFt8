@@ -1,9 +1,10 @@
 ///! FFT utilities for FT8 signal processing
 ///!
-///! Provides custom FFT implementations optimized for no_std environments.
+///! Provides FFT implementations using RustFFT for high performance.
 
+use rustfft::{FftPlanner, num_complex::Complex};
 
-/// In-place real-to-complex FFT using Cooley-Tukey radix-2 algorithm
+/// In-place real-to-complex FFT using RustFFT
 ///
 /// # Arguments
 /// * `real` - Real part (input/output)
@@ -23,42 +24,20 @@ pub(crate) fn fft_real(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(
         ));
     }
 
-    // Bit-reversal permutation
-    let mut j = 0;
-    for i in 0..n - 1 {
-        if i < j {
-            real.swap(i, j);
-            imag.swap(i, j);
-        }
-        let mut k = n / 2;
-        while k <= j {
-            j -= k;
-            k /= 2;
-        }
-        j += k;
-    }
+    // Convert separate real/imag arrays to Complex
+    let mut buffer: Vec<Complex<f32>> = (0..n)
+        .map(|i| Complex::new(real[i], imag[i]))
+        .collect();
 
-    // Cooley-Tukey decimation-in-time FFT
-    let mut len = 2;
-    while len <= n {
-        let half_len = len / 2;
-        let angle = -2.0 * core::f32::consts::PI / len as f32;
-        for i in (0..n).step_by(len) {
-            let mut k = 0;
-            for j in i..i + half_len {
-                let theta = angle * k as f32;
-                let wr = f32::cos(theta);
-                let wi = f32::sin(theta);
-                let t_real = wr * real[j + half_len] - wi * imag[j + half_len];
-                let t_imag = wr * imag[j + half_len] + wi * real[j + half_len];
-                real[j + half_len] = real[j] - t_real;
-                imag[j + half_len] = imag[j] - t_imag;
-                real[j] += t_real;
-                imag[j] += t_imag;
-                k += 1;
-            }
-        }
-        len *= 2;
+    // Perform FFT
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(n);
+    fft.process(&mut buffer);
+
+    // Convert back to separate arrays
+    for i in 0..n {
+        real[i] = buffer[i].re;
+        imag[i] = buffer[i].im;
     }
 
     Ok(())
@@ -86,19 +65,21 @@ pub(crate) fn fft_complex_inverse(real: &mut [f32], imag: &mut [f32], n: usize) 
         ));
     }
 
-    // Conjugate input
-    for i in 0..n {
-        imag[i] = -imag[i];
-    }
+    // Convert separate real/imag arrays to Complex
+    let mut buffer: Vec<Complex<f32>> = (0..n)
+        .map(|i| Complex::new(real[i], imag[i]))
+        .collect();
 
-    // Forward FFT
-    fft_real(real, imag, n)?;
+    // Perform inverse FFT
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_inverse(n);
+    fft.process(&mut buffer);
 
-    // Conjugate and scale output
+    // Scale and convert back to separate arrays
     let scale = 1.0 / n as f32;
     for i in 0..n {
-        real[i] *= scale;
-        imag[i] *= -scale;
+        real[i] = buffer[i].re * scale;
+        imag[i] = buffer[i].im * scale;
     }
 
     Ok(())
@@ -128,7 +109,7 @@ mod tests {
         // Generate sine wave at bin 5
         let freq = 5.0;
         for i in 0..n {
-            let phase = 2.0 * core::f32::consts::PI * freq * i as f32 / n as f32;
+            let phase = 2.0 * std::f32::consts::PI * freq * i as f32 / n as f32;
             real[i] = f32::sin(phase);
         }
 
@@ -182,5 +163,28 @@ mod tests {
                 original_real[i]
             );
         }
+    }
+
+    #[test]
+    fn test_large_fft_262144() {
+        // Test the critical 262,144-point FFT size
+        let n = 262144;
+        let mut real = vec![0.0f32; n];
+        let mut imag = vec![0.0f32; n];
+
+        // Simple DC signal
+        for i in 0..n {
+            real[i] = 1.0;
+        }
+
+        fft_real(&mut real, &mut imag, n).unwrap();
+
+        // DC component should be n
+        assert!(
+            (real[0] - n as f32).abs() < 1.0,
+            "DC component: {}, expected {}",
+            real[0],
+            n
+        );
     }
 }

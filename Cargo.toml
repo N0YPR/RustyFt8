@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 bitvec = "1.0.1"
 crc = "3.2"
+rustfft = "6.2"
+num-complex = "0.4"
 
 [dev-dependencies]
 rstest = "0.23"
