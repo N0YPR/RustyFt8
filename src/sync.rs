@@ -80,14 +80,6 @@ pub fn compute_spectra(signal: &[f32], spectra: &mut [[f32; NHSYM]]) -> Result<V
         return Err(alloc::format!("Spectra buffer wrong size: {} (need {})", spectra.len(), NH1));
     }
 
-    // Debug: check signal level
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        let max_sample = signal.iter().take(NMAX).fold(0.0f32, |acc, &x| acc.max(x.abs()));
-        std::eprintln!("DEBUG compute_spectra: max signal = {:.6}", max_sample);
-    }
-
     let mut avg_spectrum = alloc::vec![0.0f32; NH1];
     let fac = 1.0 / 300.0;
 
@@ -103,14 +95,6 @@ pub fn compute_spectra(signal: &[f32], spectra: &mut [[f32; NHSYM]]) -> Result<V
             break;
         }
 
-        // Debug: check signal slice
-        #[cfg(feature = "std")]
-        if j == 0 {
-            extern crate std;
-            let slice_max = signal[ia..ib].iter().fold(0.0f32, |acc, &x| acc.max(x.abs()));
-            std::eprintln!("DEBUG: Signal slice [{}..{}] max = {:.6}", ia, ib, slice_max);
-        }
-
         // Copy and scale input (real part only - clear imaginary)
         for (i, &sample) in signal[ia..ib].iter().enumerate() {
             x_real[i] = fac * sample;
@@ -122,44 +106,14 @@ pub fn compute_spectra(signal: &[f32], spectra: &mut [[f32; NHSYM]]) -> Result<V
             x_imag[i] = 0.0;
         }
 
-        // Debug: check FFT input
-        #[cfg(feature = "std")]
-        if j == 0 {
-            extern crate std;
-            std::eprintln!("DEBUG: Before FFT: real[0]={:.2e} real[100]={:.2e} real[1000]={:.2e}",
-                x_real[0], x_real[100], x_real[1000]);
-            let max_input = x_real.iter().take(NSPS).fold(0.0f32, |acc, &x| acc.max(x.abs()));
-            std::eprintln!("DEBUG: Max input sample = {:.2e}", max_input);
-        }
-
         // Perform FFT
         fft_real(&mut x_real, &mut x_imag, NFFT1)?;
-
-        // Debug: check FFT output
-        #[cfg(feature = "std")]
-        if j == 0 {
-            extern crate std;
-            std::eprintln!("DEBUG: After FFT: real[0]={:.2e} real[100]={:.2e} real[1000]={:.2e}",
-                x_real[0], x_real[100], x_real[1000]);
-            std::eprintln!("DEBUG: After FFT: imag[0]={:.2e} imag[100]={:.2e} imag[1000]={:.2e}",
-                x_imag[0], x_imag[100], x_imag[1000]);
-        }
 
         // Compute power spectrum
         for i in 0..NH1 {
             let power = x_real[i] * x_real[i] + x_imag[i] * x_imag[i];
             spectra[i][j] = power;
             avg_spectrum[i] += power;
-        }
-
-        // Debug: check for inf/nan
-        #[cfg(feature = "std")]
-        if j < 3 {
-            extern crate std;
-            let max_in_spectrum = (0..NH1).fold(0.0f32, |acc, i| acc.max(spectra[i][j]));
-            let min_in_spectrum = (0..NH1).fold(f32::INFINITY, |acc, i| acc.min(spectra[i][j]));
-            std::eprintln!("DEBUG: Spectrum {} range: {:.2e} to {:.2e}",
-                j, min_in_spectrum, max_in_spectrum);
         }
     }
 
@@ -257,22 +211,6 @@ pub fn compute_sync2d(
     let nfos = NFFT1 / NSPS;  // Frequency oversampling = 2
     let jstrt = (0.5 / (NSTEP as f32 / SAMPLE_RATE)) as i32; // Start at 0.5s
 
-    // Debug: check if spectra has any energy
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        let mut max_power = 0.0f32;
-        for i in ia..=ib {
-            for j in 0..NHSYM {
-                if spectra[i][j] > max_power {
-                    max_power = spectra[i][j];
-                }
-            }
-        }
-        std::eprintln!("DEBUG compute_sync2d: max spectra power = {:.2e}, freq range {} - {} (bins {} - {})",
-            max_power, freq_min, freq_max, ia, ib);
-    }
-
     // For each frequency bin
     for i in ia..=ib {
         // For each time lag
@@ -288,20 +226,6 @@ pub fn compute_sync2d(
             for n in 0..7 {
                 let m = j + jstrt + (nssy as i32) * (n as i32);
                 let tone = COSTAS_PATTERN[n] as i32;
-
-                // Debug first iteration
-                #[cfg(feature = "std")]
-                if i == 512 && j == 0 && n == 0 {
-                    extern crate std;
-                    std::eprintln!("DEBUG: n={} tone={} m={} freq_idx={}",
-                        n, tone, m, (i as i32 + nfos as i32 * tone));
-                    if m >= 0 && (m as usize) < NHSYM {
-                        let freq_idx = (i as i32 + nfos as i32 * tone) as usize;
-                        if freq_idx < NH1 {
-                            std::eprintln!("  Accessing spectra[{}][{}] = {:.2e}", freq_idx, m, spectra[freq_idx][m as usize]);
-                        }
-                    }
-                }
 
                 // Costas array 1 (at symbol 0)
                 if m >= 0 && (m as usize) < NHSYM {
@@ -364,16 +288,6 @@ pub fn compute_sync2d(
             // Take the better of the two metrics
             let sync_idx = (j + MAX_LAG) as usize;
             sync2d[i][sync_idx] = sync_abc.max(sync_bc);
-
-            // Debug: log a sample correlation at expected signal frequency
-            #[cfg(feature = "std")]
-            if i == 512 && j == 0 { // Around 1500 Hz, lag 0
-                extern crate std;
-                std::eprintln!("DEBUG sync2d[{}][lag={}]: ta={:.2e} tb={:.2e} tc={:.2e} t0a={:.2e} t0b={:.2e} t0c={:.2e}",
-                    i, j, ta, tb, tc, t0a, t0b, t0c);
-                std::eprintln!("  sync_abc={:.2e} sync_bc={:.2e} final={:.2e}", sync_abc, sync_bc, sync2d[i][sync_idx]);
-                std::eprintln!("  nssy={} nfos={} jstrt={}", nssy, nfos, jstrt);
-            }
         }
     }
 
@@ -454,24 +368,6 @@ pub fn find_candidates(
         }
     }
 
-    // Debug: check if we have any candidates at all
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        if candidates.is_empty() {
-            std::eprintln!("DEBUG: No candidates found before normalization");
-        } else {
-            std::eprintln!("DEBUG: Found {} raw candidates before normalization", candidates.len());
-            // Show top 5
-            let mut sorted = candidates.clone();
-            sorted.sort_by(|a, b| b.sync_power.partial_cmp(&a.sync_power).unwrap_or(core::cmp::Ordering::Equal));
-            for (i, cand) in sorted.iter().take(5).enumerate() {
-                std::eprintln!("  {}. freq={:.1} Hz, time={:.3} s, sync={:.2}",
-                    i+1, cand.frequency, cand.time_offset, cand.sync_power);
-            }
-        }
-    }
-
     // Normalize sync powers to relative scale
     if !candidates.is_empty() {
         // Find 40th percentile for baseline
@@ -479,12 +375,6 @@ pub fn find_candidates(
         sync_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
         let percentile_idx = (sync_values.len() as f32 * 0.4) as usize;
         let baseline = sync_values[percentile_idx];
-
-        #[cfg(feature = "std")]
-        {
-            extern crate std;
-            std::eprintln!("DEBUG: Normalizing by baseline = {:.2}", baseline);
-        }
 
         if baseline > 0.0 {
             for cand in &mut candidates {
@@ -652,19 +542,6 @@ pub fn downsample_200hz(
     // Circular shift to center at DC (matching WSJT-X cshift operation)
     let shift = (i0 as i32 - ib as i32).max(0) as usize;
 
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        if (f0 - 1500.0).abs() < 2.0 {  // Debug for signals near 1500 Hz
-            std::eprintln!("DEBUG downsample @ {:.1} Hz:", f0);
-            std::eprintln!("  df={:.6} Hz/bin, NFFT_IN={}", df, NFFT_IN);
-            std::eprintln!("  f0={:.1} → i0={} ({:.3} Hz)", f0, i0, i0 as f32 * df);
-            std::eprintln!("  fb={:.1} → ib={} ({:.3} Hz)", fb, ib, ib as f32 * df);
-            std::eprintln!("  ft={:.1} → it={} ({:.3} Hz)", ft, it, it as f32 * df);
-            std::eprintln!("  shift={}, k={}", shift, k);
-        }
-    }
-
     if shift > 0 && shift < k {
         // Rotate array left by 'shift' positions
         let mut temp_real = alloc::vec![0.0f32; NFFT_OUT];
@@ -686,34 +563,6 @@ pub fn downsample_200hz(
     let fac = 1.0 / libm::sqrtf((NFFT_IN * NFFT_OUT) as f32);
     for i in 0..NFFT_OUT {
         output[i] = (out_real[i] * fac, out_imag[i] * fac);
-    }
-
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        if (f0 - 1500.0).abs() < 2.0 {
-            // Check spectrum of downsampled signal to verify centering
-            let mut test_real = alloc::vec![0.0f32; 32];
-            let mut test_imag = alloc::vec![0.0f32; 32];
-            for i in 0..32 {
-                test_real[i] = output[100 + i].0;  // Sample from middle of buffer
-                test_imag[i] = output[100 + i].1;
-            }
-            if fft_real(&mut test_real, &mut test_imag, 32).is_ok() {
-                let mut max_bin = 0;
-                let mut max_power = 0.0f32;
-                for i in 0..8 {
-                    let power = test_real[i] * test_real[i] + test_imag[i] * test_imag[i];
-                    if power > max_power {
-                        max_power = power;
-                        max_bin = i;
-                    }
-                }
-                let peak_freq_hz = max_bin as f32 * 6.25; // 187.5 Hz / 32 samples ≈ 5.86 Hz/bin
-                std::eprintln!("  Downsampled spectrum peak: bin {} ({:.1} Hz from DC), power={:.3e}",
-                    max_bin, peak_freq_hz, max_power);
-            }
-        }
     }
 
     Ok(actual_sample_rate)
@@ -1091,13 +940,6 @@ pub fn extract_symbols(
         // Apply best correction to working buffer
         if best_correction.abs() > 0.001 {
             apply_phase_correction(&mut cd, best_correction, actual_sample_rate);
-
-            #[cfg(feature = "std")]
-            {
-                extern crate std;
-                std::eprintln!("DEBUG: Phase correction for nsym={}: {:.3} Hz (sync improved {:.1}% from {:.3} to {:.3})",
-                    nsym, best_correction, 100.0 * (best_sync - initial_sync) / initial_sync, initial_sync, best_sync);
-            }
         }
     }
 
@@ -1156,12 +998,6 @@ pub fn extract_symbols(
         // Symbol starts at: start_offset + k * nsps_down samples
         let i1 = start_offset + (k as i32) * (nsps_down as i32);
 
-        #[cfg(feature = "std")]
-        if k == 0 || k == 36 || k == 72 {
-            extern crate std;
-            std::eprintln!("DEBUG: Symbol {} starts at sample {}", k, i1);
-        }
-
         // Check bounds
         if i1 < 0 || (i1 as usize + nsps_down) > cd.len() {
             // Symbol is out of bounds, set to zero
@@ -1199,30 +1035,10 @@ pub fn extract_symbols(
             cs[tone][k] = (re, im);
             s8[tone][k] = libm::sqrtf(re * re + im * im);
         }
-
-        // DEBUG: Check symbol powers for key Costas positions
-        #[cfg(feature = "std")]
-        if k == 0 || k == 36 || k == 72 {
-            extern crate std;
-            std::eprintln!("  Symbol {} powers (bins 0-7):", k);
-            for tone in 0..8 {
-                std::eprintln!("    tone {}: {:.2e}", tone, s8[tone][k]);
-            }
-        }
     }
 
     // Validate Costas arrays (quality check)
     let mut nsync = 0;
-
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        std::eprintln!("DEBUG extract_symbols: Costas validation");
-        std::eprintln!("  Symbol 0 powers:");
-        for tone in 0..8 {
-            std::eprintln!("    tone {}: {:.2e}", tone, s8[tone][0]);
-        }
-    }
 
     for k in 0..7 {
         // Check all three Costas arrays
@@ -1235,15 +1051,6 @@ pub fn extract_symbols(
             if s8[tone][k] > max_power {
                 max_power = s8[tone][k];
                 max_tone = tone;
-            }
-        }
-
-        #[cfg(feature = "std")]
-        {
-            extern crate std;
-            let match1 = if max_tone == expected_tone as usize { "✓" } else { "✗" };
-            if k < 7 {
-                std::eprintln!("  Costas1[{}]: expected {}, got {} {}", k, expected_tone, max_tone, match1);
             }
         }
 
@@ -1261,15 +1068,6 @@ pub fn extract_symbols(
             }
         }
 
-        #[cfg(feature = "std")]
-        {
-            extern crate std;
-            let match2 = if max_tone == expected_tone as usize { "✓" } else { "✗" };
-            if k < 7 {
-                std::eprintln!("  Costas2[{}]: expected {}, got {} {}", k, expected_tone, max_tone, match2);
-            }
-        }
-
         if max_tone == expected_tone as usize {
             nsync += 1;
         }
@@ -1284,24 +1082,9 @@ pub fn extract_symbols(
             }
         }
 
-        #[cfg(feature = "std")]
-        {
-            extern crate std;
-            let match3 = if max_tone == expected_tone as usize { "✓" } else { "✗" };
-            if k < 7 {
-                std::eprintln!("  Costas3[{}]: expected {}, got {} {}", k, expected_tone, max_tone, match3);
-            }
-        }
-
         if max_tone == expected_tone as usize {
             nsync += 1;
         }
-    }
-
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        std::eprintln!("  Costas sync quality: {}/21 tones correct", nsync);
     }
 
     // If sync quality is too low, reject
@@ -1567,55 +1350,6 @@ pub fn extract_symbols(
     // Then scale by WSJT-X scalefac=2.83
     for i in 0..174 {
         llr[i] *= 2.83;
-    }
-
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        std::eprintln!("DEBUG: Multi-symbol soft decoding completed (nsym={})", nsym);
-        std::eprintln!("  Extracted {} bits total", bit_idx);
-        std::eprintln!("  First 10 LLRs: {:?}", &llr[0..10.min(bit_idx)]);
-        std::eprintln!("  Last 10 LLRs: {:?}", &llr[164.min(bit_idx)..174.min(bit_idx)]);
-
-        // Show detected tones for all data symbols
-        std::eprintln!("  Data symbols 7-35 (detected tones):");
-        for k in 7..36 {
-            let mut max_pow = 0.0f32;
-            let mut max_tone = 0;
-            for tone in 0..8 {
-                if s8[tone][k] > max_pow {
-                    max_pow = s8[tone][k];
-                    max_tone = tone;
-                }
-            }
-            std::eprint!("{}", max_tone);
-        }
-        std::eprintln!();
-        std::eprintln!("  Data symbols 43-71 (detected tones):");
-        for k in 43..72 {
-            let mut max_pow = 0.0f32;
-            let mut max_tone = 0;
-            for tone in 0..8 {
-                if s8[tone][k] > max_pow {
-                    max_pow = s8[tone][k];
-                    max_tone = tone;
-                }
-            }
-            std::eprint!("{}", max_tone);
-        }
-        std::eprintln!();
-
-        // Show hard-decision bits (from LLR signs)
-        std::eprint!("  Hard decision bits (first 90): ");
-        for i in 0..90.min(bit_idx) {
-            std::eprint!("{}", if llr[i] > 0.0 { 1 } else { 0 });
-        }
-        std::eprintln!();
-        std::eprint!("  Hard decision bits (last 84): ");
-        for i in 90..bit_idx {
-            std::eprint!("{}", if llr[i] > 0.0 { 1 } else { 0 });
-        }
-        std::eprintln!();
     }
 
     Ok(())

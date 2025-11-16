@@ -52,19 +52,44 @@ fn read_wav(path: &str) -> Result<Vec<f32>, String> {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
-        eprintln!("Usage: {} <input.wav>", args[0]);
-        eprintln!();
-        eprintln!("Detects FT8 signals in a 15-second WAV file (12 kHz, mono).");
-        std::process::exit(1);
+    // Parse command line arguments
+    let mut input_path: Option<String> = None;
+    let mut verbose = false;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-v" | "--verbose" => {
+                verbose = true;
+            }
+            arg if !arg.starts_with('-') => {
+                input_path = Some(arg.to_string());
+            }
+            _ => {
+                eprintln!("Unknown option: {}", args[i]);
+                std::process::exit(1);
+            }
+        }
+        i += 1;
     }
 
-    let input_path = &args[1];
+    let input_path = match input_path {
+        Some(path) => path,
+        None => {
+            eprintln!("Usage: {} [OPTIONS] <input.wav>", args[0]);
+            eprintln!();
+            eprintln!("Detects FT8 signals in a 15-second WAV file (12 kHz, mono).");
+            eprintln!();
+            eprintln!("Options:");
+            eprintln!("  -v, --verbose    Enable verbose debug output");
+            std::process::exit(1);
+        }
+    };
 
     println!("Reading WAV file: {}", input_path);
 
     // Read WAV file
-    let signal = match read_wav(input_path) {
+    let signal = match read_wav(&input_path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error reading WAV: {}", e);
@@ -158,13 +183,6 @@ fn main() {
         for (i, cand) in best_candidates.iter().take(3).enumerate() {
             print!("  {}. Extracting {:7.1} Hz @ {:6.3} s ... ", i+1, cand.frequency, cand.time_offset);
 
-            // TEMP: Also try with COARSE frequency (before fine_sync)
-            let mut test_cand = cand.clone();
-            if (test_cand.frequency - 1500.0).abs() < 1.0 {
-                test_cand.frequency = 1500.0; // Force to 1500.0 Hz for testing
-                eprintln!("    (Testing with forced 1500.0 Hz instead of {:.1} Hz)", cand.frequency);
-            }
-
             // Multi-pass decoding: try each scale with nsym=1,2,3 before moving to next scale
             // This allows nsym=2/3 to potentially help at lower scales
             let scaling_factors = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
@@ -177,12 +195,14 @@ fn main() {
             let mut llr_cache: HashMap<usize, Vec<f32>> = HashMap::new();
             for &nsym in &nsym_values {
                 let mut llr = vec![0.0f32; 174];
-                match sync::extract_symbols(&signal_15s, &test_cand, nsym, &mut llr) {
+                match sync::extract_symbols(&signal_15s, cand, nsym, &mut llr) {
                     Ok(_) => {
                         llr_cache.insert(nsym, llr);
                     }
                     Err(e) => {
-                        eprintln!("     Warning: nsym={} extraction failed: {}", nsym, e);
+                        if verbose {
+                            eprintln!("     Warning: nsym={} extraction failed: {}", nsym, e);
+                        }
                     }
                 }
             }
