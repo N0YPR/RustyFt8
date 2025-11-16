@@ -2,7 +2,7 @@
 //!
 //! Tests the complete pipeline at various SNR levels to verify end-to-end functionality
 
-use rustyft8::{crc, encode, ldpc, pulse, symbol, sync, wav};
+use rustyft8::{crc, encode, ldpc, pulse, symbol, sync};
 use rustyft8::message::CallsignHashCache;
 use bitvec::prelude::*;
 use std::f32;
@@ -145,35 +145,47 @@ fn decode_signal(signal: &[f32]) -> Option<String> {
         return None;
     }
 
-    // Fine sync on best candidate
-    let refined = sync::fine_sync(signal, &candidates[0]).ok()?;
-    eprintln!("Refined: {:.1} Hz @ {:.3} s", refined.frequency, refined.time_offset);
-
-    // Try multi-pass decoding - simplified without HashMap
+    // Try multiple candidates (like ft8detect does)
     let scaling_factors = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
     let nsym_values = [1, 2, 3];
 
-    for &nsym in &nsym_values {
-        let mut llr = vec![0.0f32; 174];
-        if sync::extract_symbols(signal, &refined, nsym, &mut llr).is_err() {
-            continue;
+    for (cand_idx, candidate) in candidates.iter().take(5).enumerate() {
+        // Fine sync on this candidate
+        let refined = match sync::fine_sync(signal, candidate) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        if cand_idx == 0 {
+            eprintln!("Best candidate: {:.1} Hz @ {:.3} s", refined.frequency, refined.time_offset);
         }
 
-        eprintln!("Trying nsym={}", nsym);
-
-        for &scale in &scaling_factors {
-            let mut scaled_llr = llr.clone();
-            for v in scaled_llr.iter_mut() {
-                *v *= scale;
+        // Try multi-pass decoding
+        for &nsym in &nsym_values {
+            let mut llr = vec![0.0f32; 174];
+            if sync::extract_symbols(signal, &refined, nsym, &mut llr).is_err() {
+                continue;
             }
 
-            if let Some((decoded_bits, iters)) = ldpc::decode(&scaled_llr, 100) {
-                eprintln!("✓ LDPC SUCCESS: scale={}, nsym={}, iters={}", scale, nsym, iters);
-                let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
+            for &scale in &scaling_factors {
+                let mut scaled_llr = llr.clone();
+                for v in scaled_llr.iter_mut() {
+                    *v *= scale;
+                }
 
-                if let Ok(message) = rustyft8::decode(&info_bits, None) {
-                    eprintln!("✓ Message decoded: \"{}\"", message);
-                    return Some(message);
+                if let Some((decoded_bits, iters)) = ldpc::decode(&scaled_llr, 100) {
+                    eprintln!("✓ LDPC SUCCESS: candidate #{}, scale={}, nsym={}, iters={}",
+                             cand_idx + 1, scale, nsym, iters);
+                    let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
+
+                    if let Ok(message) = rustyft8::decode(&info_bits, None) {
+                        if !message.is_empty() {
+                            eprintln!("✓ Decoded: \"{}\"", message);
+                            return Some(message);
+                        } else {
+                            eprintln!("  (empty message, continuing...)");
+                        }
+                    }
                 }
             }
         }
@@ -184,9 +196,8 @@ fn decode_signal(signal: &[f32]) -> Option<String> {
 
 /// Test encode→decode round trip at a specific SNR
 ///
-/// NOTE: In-process decoding currently fails in test environment due to unresolved issues with
-/// LDPC decoder, even though the same code works fine in the ft8detect binary. The generated
-/// signals are correct (verified by external decoders). This needs further investigation.
+/// Tests complete FT8 pipeline from message encoding through decoding at specified SNR.
+/// Uses multi-candidate decoding to handle spurious sync peaks.
 fn test_roundtrip(message: &str, snr_db: f32, should_succeed: bool) {
     eprintln!("\n=== Testing \"{}\" at SNR = {} dB ===", message, snr_db);
 
@@ -197,18 +208,15 @@ fn test_roundtrip(message: &str, snr_db: f32, should_succeed: bool) {
     assert_eq!(signal.len(), NMAX, "Signal length should be 15 seconds");
     let has_signal = signal.iter().any(|&x| x.abs() > 1e-6);
     assert!(has_signal, "Signal should contain non-zero samples");
-
-    // TODO: Fix in-process decoding
-    // For now, just verify signal generation works
     eprintln!("✓ Signal generated successfully");
 
-    // Attempt decode (will fail due to test environment issues)
+    // Attempt decode
     if let Some(decoded) = decode_signal(&signal) {
         eprintln!("✓ Decoded: \"{}\"", decoded);
         assert_eq!(decoded, message);
     } else {
         if should_succeed {
-            eprintln!("⚠ Decode failed (known test environment issue)");
+            panic!("Decode failed unexpectedly at {} dB SNR", snr_db);
         } else {
             eprintln!("✓ Expected failure at {} dB SNR", snr_db);
         }
@@ -222,7 +230,7 @@ fn test_ldpc_constants() {
     eprintln!("Testing LDPC encoder directly...");
 
     // Create a known-good 91-bit message (all zeros)
-    let mut msg = bitvec::vec::BitVec::<u8, bitvec::order::Msb0>::repeat(false, 91);
+    let msg = bitvec::vec::BitVec::<u8, bitvec::order::Msb0>::repeat(false, 91);
     let mut codeword = bitvec::vec::BitVec::<u8, bitvec::order::Msb0>::repeat(false, 174);
 
     // This should not panic
