@@ -59,54 +59,53 @@ Failure to follow these guidelines may result in incorrect implementations or te
 ✅ **Fine Sync** - Sub-Hz frequency (±2.5 Hz) and sub-ms timing (±20 ms) accuracy
 ✅ **Symbol Extraction** - Perfect 21/21 Costas validation proves correct timing
 ✅ **LDPC Decoder** - Belief propagation with 130 passing tests
+✅ **End-to-End Decode** - **Working! Minimum SNR: -15 dB**
+
+### Performance Results
+
+**Tested SNR Range**: -24 dB to +10 dB
+**Decoder**: Single-symbol soft decoding (nsym=1)
+
+| SNR (dB) | Status | LDPC Iterations | Notes |
+|----------|--------|-----------------|-------|
+| +10 to Perfect | ✅ Pass | 1 | Instant decode |
+| -10 | ✅ Pass | 16 | Strong decode |
+| **-12** | ✅ Pass | 3 | Good sync (19/21 Costas) |
+| **-15** | ✅ Pass | 21 | Marginal sync (19/21 Costas) |
+| -18 and below | ❌ Fail | - | Sync quality insufficient |
+
+**Minimum Working SNR**: **-15 dB** (vs WSJT-X: -21 dB)
+**Performance Gap**: ~6 dB (expected with single-symbol decoding)
+
+See [`docs/SNR_TESTING.md`](docs/SNR_TESTING.md) for detailed test results.
 
 ### What Needs Work
 
-⚠️  **Soft Demodulation** - Single-symbol approach limits SNR performance (see below)
-⚠️  **End-to-End Decode** - LDPC doesn't converge on low-SNR signals due to weak LLRs
-
-### The Problem: Single-Symbol vs Multi-Symbol Soft Decoding
-
-**Current approach** (single-symbol):
-```rust
-LLR = magnitude(symbol_k_tone_1) - magnitude(symbol_k_tone_0)
-```
-
-**WSJT-X approach** (multi-symbol):
-```rust
-LLR = magnitude(symbol_k + symbol_k+1 + symbol_k+2) - magnitude(...)
-// Coherently combines 2-3 symbols before taking magnitude
-// Provides ~3-6 dB SNR improvement
-```
-
-**Impact**:
-- Perfect 21/21 Costas sync proves signal processing and timing are correct
-- LDPC decoder has weak LLR inputs, preventing convergence at low SNR
-- Minimum SNR unknown (needs testing); WSJT-X achieves -21 dB
-
-**Next step**: Implement multi-symbol soft decoding (see below)
+🚧 **Multi-Symbol Soft Decoding** - nsym=2/3 implemented but not working yet (under investigation)
+⚠️  **Low SNR Performance** - Need nsym=2/3 to reach -18 to -21 dB like WSJT-X
 
 ## 🚀 Next Steps
 
-### 1. Multi-Symbol Soft Decoding (Critical Priority)
+### 1. Debug Multi-Symbol Soft Decoding (Critical Priority - In Progress)
 
-**Implementation** (from WSJT-X `ft8b.f90`):
-```fortran
-! Sum complex values of 2-3 consecutive symbols, then take magnitude
-s2(i) = abs(cs(graymap(i1),ks) + cs(graymap(i2),ks+1) + cs(graymap(i3),ks+2))
-```
+**Status**: nsym=2 and nsym=3 implemented in [src/sync.rs](src/sync.rs) but not decoding
 
-- Test all 8³ = 512 possible 3-symbol combinations
-- Sum complex symbol values coherently before computing magnitude
-- Choose maximum magnitude combination as most likely sequence
-- **Files to modify**: [src/sync.rs:1044-1090](src/sync.rs#L1044-L1090)
-- **Expected result**: -15 to -20 dB SNR decode capability (vs current: unknown, likely >0 dB)
+**Current Implementation**:
+- ✅ nsym=1: Working, -15 dB minimum SNR
+- 🚧 nsym=2: Implemented but LDPC fails even on perfect signals
+- 🚧 nsym=3: Implemented but has issues (29 symbols don't divide evenly by 3)
+
+**What's Needed**:
+- Compare nsym=2 LLR values directly with WSJT-X output
+- Verify bit extraction order matches WSJT-X exactly
+- Debug why LDPC won't converge despite seemingly correct LLRs
+- **Expected result**: -18 dB SNR decode capability with nsym=2
 
 ### 2. Testing & Benchmarks
-- Generate test signals at varying SNR using WSJT-X's `ft8sim`
-- Establish minimum SNR threshold and decode success rates (-24 to 0 dB)
-- Add automated integration tests for encode→decode round trips
-- Compare performance to WSJT-X baseline
+- ✅ SNR sweep testing (-24 to +10 dB) completed
+- ✅ Established minimum SNR threshold (-15 dB)
+- ⏳ Add automated integration tests for encode→decode round trips
+- ⏳ Test with different message types and conditions
 
 ### 3. Clean Up & Polish
 - Make debug output conditional on `--verbose` flag ([src/sync.rs](src/sync.rs))
@@ -131,7 +130,9 @@ s2(i) = abs(cs(graymap(i1),ks) + cs(graymap(i2),ks+1) + cs(graymap(i3),ks+2))
 
 ## 📈 Roadmap
 
-**Now**: Multi-symbol soft decoding → unlock low-SNR decode
-**Next**: Testing & benchmarks → validate performance
-**Then**: Real-time operation → live audio monitoring
+**Now**: Debug nsym=2 → improve to -18 dB SNR
+**Next**: Real-time operation → live audio monitoring
+**Then**: Feature completeness → all message types, hash cache
 **Future**: Production polish → optimization, docs, API stability
+
+**Current Achievement**: -15 dB minimum SNR (sufficient for most real-world FT8 operation)

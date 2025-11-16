@@ -175,31 +175,57 @@ fn main() {
                     let mean_abs_llr = llr.iter().map(|x| x.abs()).sum::<f32>() / 174.0;
                     println!("     LLR stats: mean={:.2}, mean_abs={:.2}", mean_llr, mean_abs_llr);
 
-                    // Try LDPC decoding
-                    print!("     Decoding with LDPC... ");
-                    match rustyft8::ldpc::decode(&llr, 30) {
-                        Some((decoded_bits, iterations)) => {
-                            println!("SUCCESS after {} iterations", iterations);
+                    // Try multiple decoding passes with different LLR scalings (like WSJT-X)
+                    let scaling_factors = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+                    let mut decode_success = false;
 
-                            // LDPC returns 91 bits (77 info + 14 CRC), we need only the first 77
-                            use bitvec::prelude::*;
-                            let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
+                    for (pass, &scale) in scaling_factors.iter().enumerate() {
+                        if decode_success {
+                            break;
+                        }
 
-                            // Convert bits to message (no hash cache available)
-                            match rustyft8::decode(&info_bits, None) {
-                                Ok(message) => {
-                                    println!("     Message: \"{}\"", message);
+                        // Scale LLRs
+                        let mut scaled_llr = llr.clone();
+                        for i in 0..174 {
+                            scaled_llr[i] *= scale;
+                        }
+
+                        if pass == 0 {
+                            print!("     Decoding with LDPC (trying {} scaling factors)... ", scaling_factors.len());
+                        }
+
+                        match rustyft8::ldpc::decode(&scaled_llr, 100) {
+                            Some((decoded_bits, iterations)) => {
+                                if pass == 0 {
+                                    print!("SUCCESS (pass {}, scale={:.1}, {} iters)", pass + 1, scale, iterations);
+                                } else {
                                     println!();
-                                    return; // Successfully decoded, exit
+                                    print!("     SUCCESS on pass {} (scale={:.1}, {} iters)", pass + 1, scale, iterations);
                                 }
-                                Err(e) => {
-                                    println!("     Failed to unpack message: {}", e);
+
+                                // LDPC returns 91 bits (77 info + 14 CRC), we need only the first 77
+                                use bitvec::prelude::*;
+                                let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
+
+                                // Convert bits to message (no hash cache available)
+                                match rustyft8::decode(&info_bits, None) {
+                                    Ok(message) => {
+                                        println!(" → \"{}\"", message);
+                                        decode_success = true;
+                                    }
+                                    Err(e) => {
+                                        println!(" → Failed to unpack: {}", e);
+                                    }
                                 }
                             }
+                            None => {
+                                // Continue to next scaling factor
+                            }
                         }
-                        None => {
-                            println!("FAILED");
-                        }
+                    }
+
+                    if !decode_success {
+                        println!("FAILED (all {} passes)", scaling_factors.len());
                     }
                 }
                 Err(e) => {

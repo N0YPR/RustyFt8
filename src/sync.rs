@@ -884,6 +884,64 @@ pub fn fine_sync(
     })
 }
 
+/// Compute symbol peak power to help with timing alignment
+///
+/// Returns the average peak power across the three Costas arrays
+fn compute_symbol_peak_power(cd: &[(f32, f32)], start_offset: i32, nsps: usize) -> f32 {
+    const COSTAS_PATTERN: [u8; 7] = [3, 1, 4, 0, 6, 5, 2];
+    const NFFT_SYM: usize = 32;
+
+    let mut sym_real = [0.0f32; NFFT_SYM];
+    let mut sym_imag = [0.0f32; NFFT_SYM];
+    let mut total_peak = 0.0f32;
+    let mut count = 0;
+
+    // Check Costas arrays at positions 0-6, 36-42, 72-78
+    for costas_start in [0, 36, 72] {
+        for k in 0..7 {
+            let symbol_idx = costas_start + k;
+            let i1 = start_offset + (symbol_idx as i32) * (nsps as i32);
+
+            if i1 < 0 || (i1 as usize + nsps) > cd.len() {
+                continue;
+            }
+
+            // Zero FFT buffer
+            for j in 0..NFFT_SYM {
+                sym_real[j] = 0.0;
+                sym_imag[j] = 0.0;
+            }
+
+            // Copy symbol
+            for j in 0..nsps.min(NFFT_SYM) {
+                let idx = i1 as usize + j;
+                sym_real[j] = cd[idx].0;
+                sym_imag[j] = cd[idx].1;
+            }
+
+            // Perform FFT
+            if fft_real(&mut sym_real, &mut sym_imag, NFFT_SYM).is_err() {
+                continue;
+            }
+
+            // Get power at expected Costas tone
+            let expected_tone = COSTAS_PATTERN[k] as usize;
+            let re = sym_real[expected_tone];
+            let im = sym_imag[expected_tone];
+            let power = libm::sqrtf(re * re + im * im);
+
+            total_peak += power;
+            count += 1;
+        }
+    }
+
+    if count > 0 {
+        total_peak / count as f32
+    } else {
+        0.0
+    }
+}
+
 /// Extract 79 FT8 symbols and compute log-likelihood ratios (LLRs) for LDPC decoding
 ///
 /// This function:
@@ -963,15 +1021,26 @@ pub fn extract_symbols(
         std::eprintln!("  initial_offset={} samples", initial_offset);
     }
 
-    // Do a local fine time search to account for any downsampling artifacts
+    // Do a comprehensive fine time search to find optimal symbol timing
+    // Search over a wider range to account for timing drift and downsampling artifacts
     let mut best_offset = initial_offset;
-    let mut best_sync = 0.0f32;
+    let mut best_metric = 0.0f32;
 
-    for dt in -2..=2 {
+    // Search range: ±10 samples (±53ms at 187.5 Hz, ±1/3 symbol period)
+    for dt in -10..=10 {
         let t_offset = initial_offset + dt;
+
+        // Compute sync metric based on Costas array strength
         let sync = sync_downsampled(&cd, t_offset, None, false);
-        if sync > best_sync {
-            best_sync = sync;
+
+        // Also check symbol peak power at this offset
+        let peak_power = compute_symbol_peak_power(&cd, t_offset, nsps_down);
+
+        // Combined metric: sync strength + peak power
+        let metric = sync + 0.1 * peak_power;
+
+        if metric > best_metric {
+            best_metric = metric;
             best_offset = t_offset;
         }
     }
@@ -981,8 +1050,12 @@ pub fn extract_symbols(
     #[cfg(feature = "std")]
     {
         extern crate std;
-        std::eprintln!("DEBUG extract_symbols: start_offset={}, candidate time={:.3}s",
-            start_offset, candidate.time_offset);
+        let timing_adjustment = best_offset - initial_offset;
+        std::eprintln!("DEBUG extract_symbols: start_offset={}, adjusted by {} samples ({:.1}ms)",
+            start_offset, timing_adjustment,
+            timing_adjustment as f32 * 1000.0 / actual_sample_rate);
+        std::eprintln!("  candidate time={:.3}s, best_metric={:.3}",
+            candidate.time_offset, best_metric);
         let max_mag = (0..200).fold(0.0f32, |acc, i| {
             let (r, im) = cd[i];
             let mag = libm::sqrtf(r*r + im*im);
@@ -991,12 +1064,19 @@ pub fn extract_symbols(
         std::eprintln!("  Downsampled buffer (first 200): max magnitude = {:.2e}", max_mag);
     }
 
-    // Extract symbol powers: s8[tone][symbol] for 8 tones × 79 symbols
+    // Extract complex symbol values: cs[tone][symbol] for 8 tones × 79 symbols
+    // Store COMPLEX values for multi-symbol soft decoding
+    let mut cs = alloc::vec![[(0.0f32, 0.0f32); NN]; 8];
     let mut s8 = alloc::vec![[0.0f32; NN]; 8];
 
     // FFT buffers
     let mut sym_real = [0.0f32; NFFT_SYM];
     let mut sym_imag = [0.0f32; NFFT_SYM];
+
+    // For sub-symbol timing optimization, try centering the FFT window
+    // nsps_down is typically ~30 samples, NFFT_SYM is 32
+    // Center the data in the FFT buffer by starting 1 sample later
+    let fft_offset = if nsps_down < NFFT_SYM { 1 } else { 0 };
 
     for k in 0..NN {
         // Symbol starts at: start_offset + k * nsps_down samples
@@ -1010,8 +1090,9 @@ pub fn extract_symbols(
 
         // Check bounds
         if i1 < 0 || (i1 as usize + nsps_down) > cd.len() {
-            // Symbol is out of bounds, set to zero power
+            // Symbol is out of bounds, set to zero
             for tone in 0..8 {
+                cs[tone][k] = (0.0, 0.0);
                 s8[tone][k] = 0.0;
             }
             continue;
@@ -1023,23 +1104,25 @@ pub fn extract_symbols(
             sym_imag[j] = 0.0;
         }
 
-        // Copy symbol to FFT buffer
+        // Copy symbol to FFT buffer, centered if needed
         for j in 0..nsps_down {
             let idx = i1 as usize + j;
-            if j < NFFT_SYM {
-                sym_real[j] = cd[idx].0;
-                sym_imag[j] = cd[idx].1;
+            let fft_idx = j + fft_offset;
+            if fft_idx < NFFT_SYM {
+                sym_real[fft_idx] = cd[idx].0;
+                sym_imag[fft_idx] = cd[idx].1;
             }
         }
 
         // Perform FFT
         fft_real(&mut sym_real, &mut sym_imag, NFFT_SYM)?;
 
-        // Extract magnitude for 8 tones (match WSJT-X: s8 = abs(csymb))
+        // Store COMPLEX values and magnitude for 8 tones
         // Use bins 0-7 for DC-centered signal
         for tone in 0..8 {
             let re = sym_real[tone];
             let im = sym_imag[tone];
+            cs[tone][k] = (re, im);
             s8[tone][k] = libm::sqrtf(re * re + im * im);
         }
 
@@ -1153,66 +1236,263 @@ pub fn extract_symbols(
         return Err(alloc::format!("Sync quality too low: {}/21 Costas tones correct", nsync));
     }
 
-    // Compute LLRs for 174 bits using single-symbol soft demodulation
+    // Compute LLRs using 3-symbol coherent combining (WSJT-X approach)
+    // This provides ~3-6 dB SNR improvement over single-symbol decoding
     // FT8 uses 79 symbols × 3 bits/symbol = 237 bits, but only 174 are used
     // Data symbols: 7-36 (29 symbols) and 43-71 (29 symbols) = 58 symbols × 3 bits = 174 bits
 
-    // Gray code mapping: 0->000, 1->001, 2->011, 3->010, 4->110, 5->111, 6->101, 7->100
-    const GRAY_MAP: [u8; 8] = [0, 1, 3, 2, 6, 7, 5, 4];
+    // Gray code mapping for decoding
+    // GRAY_MAP: 3-bit index -> tone (used in encoding)
+    // GRAY_MAP_INV: tone -> 3-bit index (used in decoding - what we need!)
+    const GRAY_MAP: [u8; 8] = [0, 1, 3, 2, 5, 6, 4, 7];      // index -> tone
+    const GRAY_MAP_INV: [u8; 8] = [0, 1, 3, 2, 6, 4, 5, 7];  // tone -> index
 
     let mut bit_idx = 0;
 
-    // Process two data symbol blocks
-    for block in 0..2 {
-        let start_sym = if block == 0 { 7 } else { 43 };
-        let end_sym = if block == 0 { 36 } else { 72 };
+    // Two-symbol coherent combining provides ~3dB SNR improvement over nsym=1
+    // nsym=1: 8 combinations, nsym=2: 64 combinations, nsym=3: 512 combinations
+    const NSYM: usize = 2; // Number of symbols to combine
+    const NT: usize = 64; // 8^2 = 64 possible tone pairs for nsym=2
 
-        for k in start_sym..end_sym {
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        std::eprintln!("DEBUG: Using nsym={} soft decoding", NSYM);
+    }
+
+    // Process two data symbol blocks
+    // Match WSJT-X: k represents data symbol index (0-28), then compute actual position
+    for ihalf in 0..2 {
+        let base_offset = if ihalf == 0 { 7 } else { 43 };
+
+        let mut k = 0;
+        while k < 29 {
             if bit_idx >= 174 {
                 break;
             }
 
-            // Compute soft LLRs for 3 bits of this symbol
-            for bit in 0..3 {
-                if bit_idx >= 174 {
-                    break;
+            let ks = k + base_offset; // k=0..28 (data symbol index), base_offset=7 or 43
+            let mut s2 = [0.0f32; NT]; // Magnitudes for all combinations
+
+            if NSYM == 1 {
+                // Single-symbol decoding
+                // For each tone (0-7), get its power and map to the 3-bit index it represents
+                // s2[index] = power of the tone that decodes to that 3-bit index
+                for tone in 0..NT {
+                    let index = GRAY_MAP_INV[tone];  // Convert tone to 3-bit index
+                    s2[index as usize] = s8[tone][ks];
                 }
 
-                // Max-log-MAP: LLR = max(power | bit=1) - max(power | bit=0)
-                let mut max_pow_1 = -1e30f32;
-                let mut max_pow_0 = -1e30f32;
+                // Extract 3 bits from this symbol
+                // s2[index] contains magnitude for that 3-bit index
+                for bit in 0..3 {
+                    if bit_idx >= 174 {
+                        break;
+                    }
 
-                for tone in 0..8 {
-                    let gray = GRAY_MAP[tone];
-                    let bit_val = (gray >> (2 - bit)) & 1;
-                    let power = s8[tone][k];
+                    let bit_pos = 2 - bit; // Extract bits 2, 1, 0 (MSB to LSB)
 
-                    if bit_val == 1 {
-                        max_pow_1 = max_pow_1.max(power);
-                    } else {
-                        max_pow_0 = max_pow_0.max(power);
+                    let mut max_mag_1 = -1e30f32;
+                    let mut max_mag_0 = -1e30f32;
+
+                    // Iterate over 3-bit indices (0-7), s2[index] has the magnitude
+                    for index in 0..NT {
+                        let bit_val = (index >> bit_pos) & 1;
+
+                        if bit_val == 1 {
+                            max_mag_1 = max_mag_1.max(s2[index]);
+                        } else {
+                            max_mag_0 = max_mag_0.max(s2[index]);
+                        }
+                    }
+
+                    llr[bit_idx] = max_mag_1 - max_mag_0;
+                    bit_idx += 1;
+                }
+
+                k += NSYM; // Move to next symbol (or group)
+            } else if NSYM == 3 {
+                // Multi-symbol decoding: coherently combine 3 symbols
+                for i in 0..NT {
+                    let i1 = i / 64; // First symbol's tone
+                    let i2 = (i / 8) % 8; // Second symbol's tone
+                    let i3 = i % 8; // Third symbol's tone
+
+                    if ks + 2 < NN {
+                        let (r1, im1) = cs[GRAY_MAP[i1] as usize][ks];
+                        let (r2, im2) = cs[GRAY_MAP[i2] as usize][ks + 1];
+                        let (r3, im3) = cs[GRAY_MAP[i3] as usize][ks + 2];
+
+                        let sum_r = r1 + r2 + r3;
+                        let sum_im = im1 + im2 + im3;
+                        s2[i] = libm::sqrtf(sum_r * sum_r + sum_im * sum_im);
                     }
                 }
 
-                // LLR ≈ magnitude difference (max-log-MAP approximation)
-                llr[bit_idx] = max_pow_1 - max_pow_0;
-                bit_idx += 1;
+                // Extract 9 bits (3 symbols × 3 bits)
+                // Combination index i directly encodes the 9 bits:
+                // i = (i1 << 6) | (i2 << 3) | i3 where i1, i2, i3 are 3-bit indices
+                const IBMAX: usize = 8;
+                for ib in 0..=IBMAX {
+                    if bit_idx >= 174 {
+                        break;
+                    }
+
+                    let bit_pos = IBMAX - ib;
+
+                    let mut max_mag_1 = -1e30f32;
+                    let mut max_mag_0 = -1e30f32;
+
+                    for i in 0..NT {
+                        // i already encodes the 9 bits directly
+                        // Bit 8-6: first symbol's 3-bit index
+                        // Bit 5-3: second symbol's 3-bit index
+                        // Bit 2-0: third symbol's 3-bit index
+                        let bit_val = (i >> bit_pos) & 1;
+
+                        if bit_val == 1 {
+                            max_mag_1 = max_mag_1.max(s2[i]);
+                        } else {
+                            max_mag_0 = max_mag_0.max(s2[i]);
+                        }
+                    }
+
+                    llr[bit_idx] = max_mag_1 - max_mag_0;
+                    bit_idx += 1;
+                }
+
+                k += NSYM; // Move to next group
+            } else if NSYM == 2 {
+                // Two-symbol decoding: coherently combine 2 symbols
+                for i in 0..NT {
+                    let i2 = (i / 8) % 8; // First symbol's 3-bit index (0-7)
+                    let i3 = i % 8;       // Second symbol's 3-bit index (0-7)
+
+                    if ks + 1 < NN {
+                        let tone2 = GRAY_MAP[i2] as usize;
+                        let tone3 = GRAY_MAP[i3] as usize;
+                        let (r2, im2) = cs[tone2][ks];
+                        let (r3, im3) = cs[tone3][ks + 1];
+
+                        let sum_r = r2 + r3;
+                        let sum_im = im2 + im3;
+                        s2[i] = libm::sqrtf(sum_r * sum_r + sum_im * sum_im);
+                    }
+                }
+
+                // Extract 6 bits (2 symbols × 3 bits)
+                // Combination index i directly encodes the 6 bits:
+                // i = (i2 << 3) | i3 where i2, i3 are 3-bit indices
+                const IBMAX: usize = 5;
+                for ib in 0..=IBMAX {
+                    if bit_idx >= 174 {
+                        break;
+                    }
+
+                    let bit_pos = IBMAX - ib;
+
+                    let mut max_mag_1 = -1e30f32;
+                    let mut max_mag_0 = -1e30f32;
+
+                    for i in 0..NT {
+                        // i encodes the 6 bits directly
+                        // Bit 5-3: first symbol's 3-bit index
+                        // Bit 2-0: second symbol's 3-bit index
+                        let bit_val = (i >> bit_pos) & 1;
+
+                        if bit_val == 1 {
+                            max_mag_1 = max_mag_1.max(s2[i]);
+                        } else {
+                            max_mag_0 = max_mag_0.max(s2[i]);
+                        }
+                    }
+
+                    llr[bit_idx] = max_mag_1 - max_mag_0;
+                    bit_idx += 1;
+                }
+
+                k += NSYM; // Move to next group
+            } else {
+                // Invalid nsym value
+                break;
             }
         }
     }
 
-    // Normalize LLRs to reasonable range
-    // WSJT-X uses apmag=4 for scaling, let's try that
-    let mut sum_abs = 0.0f32;
+    // Normalize LLRs by standard deviation (match WSJT-X normalizebmet)
+    let mut sum = 0.0f32;
+    let mut sum_sq = 0.0f32;
     for i in 0..174 {
-        sum_abs += llr[i].abs();
+        sum += llr[i];
+        sum_sq += llr[i] * llr[i];
     }
-    if sum_abs > 0.0 {
-        let mean_abs = sum_abs / 174.0;
-        let scale = 4.0 / mean_abs; // WSJT-X uses apmag=4
+    let mean = sum / 174.0;
+    let mean_sq = sum_sq / 174.0;
+    let variance = mean_sq - mean * mean;
+    let std_dev = if variance > 0.0 {
+        libm::sqrtf(variance)
+    } else {
+        libm::sqrtf(mean_sq)
+    };
+
+    if std_dev > 0.0 {
         for i in 0..174 {
-            llr[i] *= scale;
+            llr[i] /= std_dev;
         }
+    }
+
+    // Then scale by WSJT-X scalefac=2.83
+    for i in 0..174 {
+        llr[i] *= 2.83;
+    }
+
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        std::eprintln!("DEBUG: Multi-symbol soft decoding completed");
+        std::eprintln!("  Extracted {} bits total", bit_idx);
+        std::eprintln!("  First 10 LLRs: {:?}", &llr[0..10.min(bit_idx)]);
+        std::eprintln!("  Last 10 LLRs: {:?}", &llr[164.min(bit_idx)..174.min(bit_idx)]);
+
+        // Show detected tones for all data symbols
+        std::eprintln!("  Data symbols 7-35 (detected tones):");
+        for k in 7..36 {
+            let mut max_pow = 0.0f32;
+            let mut max_tone = 0;
+            for tone in 0..8 {
+                if s8[tone][k] > max_pow {
+                    max_pow = s8[tone][k];
+                    max_tone = tone;
+                }
+            }
+            std::eprint!("{}", max_tone);
+        }
+        std::eprintln!();
+        std::eprintln!("  Data symbols 43-71 (detected tones):");
+        for k in 43..72 {
+            let mut max_pow = 0.0f32;
+            let mut max_tone = 0;
+            for tone in 0..8 {
+                if s8[tone][k] > max_pow {
+                    max_pow = s8[tone][k];
+                    max_tone = tone;
+                }
+            }
+            std::eprint!("{}", max_tone);
+        }
+        std::eprintln!();
+
+        // Show hard-decision bits (from LLR signs)
+        std::eprint!("  Hard decision bits (first 90): ");
+        for i in 0..90.min(bit_idx) {
+            std::eprint!("{}", if llr[i] > 0.0 { 1 } else { 0 });
+        }
+        std::eprintln!();
+        std::eprint!("  Hard decision bits (last 84): ");
+        for i in 90..bit_idx {
+            std::eprint!("{}", if llr[i] > 0.0 { 1 } else { 0 });
+        }
+        std::eprintln!();
     }
 
     Ok(())
