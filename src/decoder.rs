@@ -5,6 +5,7 @@
 
 use crate::{ldpc, sync};
 use bitvec::prelude::*;
+use rayon::prelude::*;
 
 /// Decoded FT8 message with metadata
 #[derive(Debug, Clone)]
@@ -25,6 +26,13 @@ pub struct DecodedMessage {
     pub llr_scale: f32,
     /// Number of symbols used for demodulation (1, 2, or 3)
     pub nsym: usize,
+}
+
+/// Internal struct to track decode results with candidate ordering
+#[derive(Debug, Clone)]
+struct DecodeResult {
+    candidate_idx: usize,
+    message: DecodedMessage,
 }
 
 /// Configuration for the FT8 decoder
@@ -87,71 +95,87 @@ where
         return Ok(0);
     }
 
-    // Track decoded messages for deduplication
-    let mut decoded_messages: Vec<String> = Vec::new();
-    let mut decode_count = 0;
-
     // LLR scaling factors to try (optimized order - most common values first)
     let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 2.5, 3.0, 4.0, 5.0, 1.25];
     let nsym_values = [1, 2, 3];
 
-    // Process candidates in order of sync quality
-    'candidate_loop: for candidate in candidates.iter().take(config.decode_top_n) {
-        // Fine sync on this candidate
-        let refined = match sync::fine_sync(signal, candidate) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
+    // Process all candidates in parallel, collecting successful decodes
+    let decode_results: Vec<DecodeResult> = candidates
+        .iter()
+        .take(config.decode_top_n)
+        .enumerate()
+        .par_bridge()
+        .filter_map(|(candidate_idx, candidate)| {
+            // Fine sync on this candidate
+            let refined = sync::fine_sync(signal, candidate).ok()?;
 
-        // Try multi-pass decoding (different nsym and LLR scales)
-        for &nsym in &nsym_values {
-            let mut llr = vec![0.0f32; 174];
-            if sync::extract_symbols(signal, &refined, nsym, &mut llr).is_err() {
-                continue;
-            }
-
-            for &scale in &scaling_factors {
-                let mut scaled_llr = llr.clone();
-                for v in scaled_llr.iter_mut() {
-                    *v *= scale;
+            // Try multi-pass decoding (different nsym and LLR scales)
+            for &nsym in &nsym_values {
+                let mut llr = vec![0.0f32; 174];
+                if sync::extract_symbols(signal, &refined, nsym, &mut llr).is_err() {
+                    continue;
                 }
 
-                if let Some((decoded_bits, iters)) = ldpc::decode(&scaled_llr, 100) {
-                    let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
+                for &scale in &scaling_factors {
+                    let mut scaled_llr = llr.clone();
+                    for v in scaled_llr.iter_mut() {
+                        *v *= scale;
+                    }
 
-                    if let Ok(message) = crate::decode(&info_bits, None) {
-                        if !message.is_empty() {
-                            // Check for duplicate
-                            if !decoded_messages.contains(&message) {
-                                decoded_messages.push(message.clone());
-                                decode_count += 1;
+                    if let Some((decoded_bits, iters)) = ldpc::decode(&scaled_llr, 100) {
+                        let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
 
+                        if let Ok(message) = crate::decode(&info_bits, None) {
+                            if !message.is_empty() {
                                 // Estimate SNR from sync power (rough approximation)
                                 let snr_db = (refined.sync_power.log10() * 10.0 - 30.0) as i32;
 
-                                // Report immediately via callback
-                                let should_continue = callback(DecodedMessage {
-                                    message,
-                                    frequency: refined.frequency,
-                                    time_offset: refined.time_offset,
-                                    sync_power: refined.sync_power,
-                                    snr_db,
-                                    ldpc_iterations: iters,
-                                    llr_scale: scale,
-                                    nsym,
+                                // Return the first successful decode for this candidate
+                                return Some(DecodeResult {
+                                    candidate_idx,
+                                    message: DecodedMessage {
+                                        message,
+                                        frequency: refined.frequency,
+                                        time_offset: refined.time_offset,
+                                        sync_power: refined.sync_power,
+                                        snr_db,
+                                        ldpc_iterations: iters,
+                                        llr_scale: scale,
+                                        nsym,
+                                    },
                                 });
-
-                                // Stop decoding if callback returns false
-                                if !should_continue {
-                                    return Ok(decode_count);
-                                }
-
-                                // Move to next candidate after successful decode
-                                continue 'candidate_loop;
                             }
                         }
                     }
                 }
+            }
+
+            None
+        })
+        .collect();
+
+    // Sort by candidate index to maintain deterministic ordering
+    let mut sorted_results = decode_results;
+    sorted_results.sort_by_key(|r| r.candidate_idx);
+
+    // Apply deduplication and call callbacks sequentially
+    let mut decoded_messages: Vec<String> = Vec::new();
+    let mut decode_count = 0;
+
+    for result in sorted_results {
+        let message_text = &result.message.message;
+
+        // Check for duplicate
+        if !decoded_messages.contains(message_text) {
+            decoded_messages.push(message_text.clone());
+            decode_count += 1;
+
+            // Report immediately via callback
+            let should_continue = callback(result.message);
+
+            // Stop decoding if callback returns false
+            if !should_continue {
+                return Ok(decode_count);
             }
         }
     }
