@@ -1,5 +1,3 @@
-use alloc::string::String;
-use alloc::format;
 use bitvec::prelude::*;
 use crate::message::types::MessageVariant;
 use crate::message::callsign::pack_callsign;

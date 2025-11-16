@@ -8,9 +8,6 @@ mod helpers;
 mod field_day;
 mod rtty;
 
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
-use alloc::format;
 use crate::message::types::MessageVariant;
 use crate::message::constants::CHARSET_BASE42;
 

@@ -14,9 +14,6 @@
 //! 2. Generate phase-continuous waveform
 //! 3. Apply envelope shaping to first and last symbols (cosine ramp)
 
-extern crate alloc;
-use alloc::vec;
-use alloc::string::String;
 
 /// FT8 sample rate in Hz
 pub const SAMPLE_RATE: f32 = 12000.0;
@@ -46,11 +43,23 @@ pub const TONE_SPACING: f32 = 6.25;
 fn gfsk_pulse(bt: f32, t: f32) -> f32 {
     use core::f32::consts::PI;
 
-    let c = PI * libm::sqrtf(2.0 / libm::logf(2.0));
+    let c = PI * (2.0 / f32::ln(2.0)).sqrt();
     let arg1 = c * bt * (t + 0.5);
     let arg2 = c * bt * (t - 0.5);
 
-    0.5 * (libm::erff(arg1) - libm::erff(arg2))
+    // Approximate erf using a simple polynomial approximation
+    // erf(x) ≈ sign(x) * sqrt(1 - exp(-x^2 * (4/π + ax^2) / (1 + ax^2)))
+    // where a = 0.140012
+    fn erf_approx(x: f32) -> f32 {
+        const A: f32 = 0.140012;
+        let x2 = x * x;
+        let num = x2 * (4.0 / core::f32::consts::PI + A * x2);
+        let den = 1.0 + A * x2;
+        let sign = if x >= 0.0 { 1.0 } else { -1.0 };
+        sign * (1.0 - (-num / den).exp()).sqrt()
+    }
+
+    0.5 * (erf_approx(arg1) - erf_approx(arg2))
 }
 
 /// Pre-compute the GFSK pulse shape for efficient reuse
@@ -76,7 +85,7 @@ fn gfsk_pulse(bt: f32, t: f32) -> f32 {
 pub fn compute_pulse(pulse: &mut [f32], bt: f32, nsps: usize) -> Result<(), String> {
     let expected_len = 3 * nsps;
     if pulse.len() != expected_len {
-        return Err(alloc::format!(
+        return Err(format!(
             "Pulse buffer must be exactly {} samples (3 * nsps={}), got {}",
             expected_len, nsps, pulse.len()
         ));
@@ -130,7 +139,7 @@ pub fn generate_waveform(
     let nwave = nsym * nsps;
 
     if waveform.len() != nwave {
-        return Err(alloc::format!(
+        return Err(format!(
             "Waveform buffer must be exactly {} samples (nsym={} * nsps={}), got {}",
             nwave, nsym, nsps, waveform.len()
         ));
@@ -138,7 +147,7 @@ pub fn generate_waveform(
 
     let pulse_len = 3 * nsps;
     if pulse.len() != pulse_len {
-        return Err(alloc::format!(
+        return Err(format!(
             "Pulse buffer must be exactly {} samples (3 * nsps={}), got {}",
             pulse_len, nsps, pulse.len()
         ));
@@ -193,7 +202,7 @@ pub fn generate_waveform(
 
     for (k, sample) in waveform.iter_mut().enumerate() {
         let j = nsps + k;
-        *sample = libm::sinf(phi);
+        *sample = f32::sin(phi);
         phi = (phi + dphi[j]) % twopi;
     }
 
@@ -202,14 +211,14 @@ pub fn generate_waveform(
 
     // Ramp up at start
     for i in 0..nramp {
-        let envelope = (1.0 - libm::cosf(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
+        let envelope = (1.0 - f32::cos(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
         waveform[i] *= envelope;
     }
 
     // Ramp down at end
     let k1 = nsym * nsps - nramp;
     for i in 0..nramp {
-        let envelope = (1.0 + libm::cosf(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
+        let envelope = (1.0 + f32::cos(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
         if k1 + i < waveform.len() {
             waveform[k1 + i] *= envelope;
         }
@@ -256,7 +265,7 @@ pub fn generate_complex_waveform(
     let nwave = nsym * nsps;
 
     if waveform.len() != nwave {
-        return Err(alloc::format!(
+        return Err(format!(
             "Waveform buffer must be exactly {} samples (nsym={} * nsps={}), got {}",
             nwave, nsym, nsps, waveform.len()
         ));
@@ -264,7 +273,7 @@ pub fn generate_complex_waveform(
 
     let pulse_len = 3 * nsps;
     if pulse.len() != pulse_len {
-        return Err(alloc::format!(
+        return Err(format!(
             "Pulse buffer must be exactly {} samples (3 * nsps={}), got {}",
             pulse_len, nsps, pulse.len()
         ));
@@ -312,8 +321,8 @@ pub fn generate_complex_waveform(
 
     for (k, sample) in waveform.iter_mut().enumerate() {
         let j = nsps + k;
-        let i_val = libm::cosf(phi);
-        let q_val = libm::sinf(phi);
+        let i_val = f32::cos(phi);
+        let q_val = f32::sin(phi);
         *sample = (i_val, q_val);
         phi = (phi + dphi[j]) % twopi;
     }
@@ -322,14 +331,14 @@ pub fn generate_complex_waveform(
     let nramp = (nsps as f32 / 8.0) as usize;
 
     for i in 0..nramp {
-        let envelope = (1.0 - libm::cosf(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
+        let envelope = (1.0 - f32::cos(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
         waveform[i].0 *= envelope;
         waveform[i].1 *= envelope;
     }
 
     let k1 = nsym * nsps - nramp;
     for i in 0..nramp {
-        let envelope = (1.0 + libm::cosf(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
+        let envelope = (1.0 + f32::cos(twopi * i as f32 / (2.0 * nramp as f32))) / 2.0;
         if k1 + i < waveform.len() {
             waveform[k1 + i].0 *= envelope;
             waveform[k1 + i].1 *= envelope;
@@ -455,7 +464,7 @@ mod tests {
 
         for i in start..end.min(start + 100) {
             let (i_val, q_val) = cwave[i];
-            let magnitude = libm::sqrtf(i_val * i_val + q_val * q_val);
+            let magnitude = i_val * i_val + q_val * q_val;
 
             // Should be close to 1.0 (unit circle)
             assert!((magnitude - 1.0).abs() < 0.1,

@@ -5,8 +5,6 @@
 
 use crate::{ldpc, sync};
 use bitvec::prelude::*;
-use alloc::vec::Vec;
-use alloc::string::String;
 
 /// Decoded FT8 message with metadata
 #[derive(Debug, Clone)]
@@ -107,7 +105,7 @@ where
 
         // Try multi-pass decoding (different nsym and LLR scales)
         for &nsym in &nsym_values {
-            let mut llr = alloc::vec![0.0f32; 174];
+            let mut llr = vec![0.0f32; 174];
             if sync::extract_symbols(signal, &refined, nsym, &mut llr).is_err() {
                 continue;
             }

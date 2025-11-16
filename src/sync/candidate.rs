@@ -2,9 +2,6 @@
 ///!
 ///! Identifies potential FT8 signals from sync correlation data.
 
-extern crate alloc;
-use alloc::vec::Vec;
-use alloc::string::String;
 use super::{SAMPLE_RATE, NFFT1, NSTEP, MAX_LAG, COARSE_LAG};
 use super::spectra::{compute_spectra, compute_sync2d};
 
@@ -160,7 +157,7 @@ pub fn coarse_sync(
     max_candidates: usize,
 ) -> Result<Vec<Candidate>, String> {
     // Allocate spectra buffer
-    let mut spectra = alloc::vec![[0.0f32; super::NHSYM]; super::NH1];
+    let mut spectra = vec![[0.0f32; super::NHSYM]; super::NH1];
 
     // Compute power spectra
     compute_spectra(signal, &mut spectra)?;

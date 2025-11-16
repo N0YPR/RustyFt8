@@ -12,9 +12,6 @@
 //! - With `std`: Write directly to files using `write_wav_file`
 //! - Without `std`: Generate WAV bytes using `generate_wav_bytes`
 
-extern crate alloc;
-use alloc::vec::Vec;
-use alloc::string::String;
 
 /// WAV file header structure (44 bytes for 16-bit PCM mono)
 struct WavHeader {
@@ -131,19 +128,17 @@ pub fn generate_wav_bytes(samples: &[f32], sample_rate: u32) -> Vec<u8> {
 /// wav::write_wav_file("output.wav", &samples, 12000)?;
 /// # Ok::<(), String>(())
 /// ```
-#[cfg(any(feature = "std", test))]
 pub fn write_wav_file(path: &str, samples: &[f32], sample_rate: u32) -> Result<(), String> {
-    extern crate std;
     use std::fs::File;
     use std::io::Write;
 
     let wav_bytes = generate_wav_bytes(samples, sample_rate);
 
     let mut file = File::create(path)
-        .map_err(|e| alloc::format!("Failed to create file '{}': {}", path, e))?;
+        .map_err(|e| format!("Failed to create file '{}': {}", path, e))?;
 
     file.write_all(&wav_bytes)
-        .map_err(|e| alloc::format!("Failed to write to file '{}': {}", path, e))?;
+        .map_err(|e| format!("Failed to write to file '{}': {}", path, e))?;
 
     Ok(())
 }
@@ -289,10 +284,8 @@ mod tests {
         assert_eq!(wav_bytes.len(), 44 + (151680 * 2));
     }
 
-    #[cfg(any(feature = "std", test))]
     #[test]
     fn test_write_wav_file() {
-        extern crate std;
         use std::fs;
 
         let samples = vec![0.5f32; 1000];

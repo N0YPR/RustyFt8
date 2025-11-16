@@ -3,16 +3,9 @@ name = "rustyft8"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-default = ["std"]
-std = []
-
 [dependencies]
-bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
-hashbrown = { version = "0.15", default-features = false, features = ["inline-more"] }
-ahash = { version = "0.8", default-features = false }
-crc = { version = "3.2", default-features = false }
-libm = "0.2"
+bitvec = "1.0.1"
+crc = "3.2"
 
 [dev-dependencies]
 rstest = "0.23"

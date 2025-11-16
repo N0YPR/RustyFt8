@@ -2,9 +2,6 @@
 ///!
 ///! Downsamples the signal to ~200 Hz centered on a specific frequency.
 
-extern crate alloc;
-use alloc::vec;
-use alloc::string::String;
 use super::fft::{fft_complex, fft_complex_inverse};
 use super::{SAMPLE_RATE, NMAX, NSPS};
 
@@ -28,11 +25,11 @@ pub fn downsample_200hz(
     const NFFT_OUT: usize = 4096;   // Power of 2 for FFT
 
     if signal.len() < NMAX {
-        return Err(alloc::format!("Signal too short: {}", signal.len()));
+        return Err(format!("Signal too short: {}", signal.len()));
     }
 
     if output.len() < 4096 {
-        return Err(alloc::format!("Output buffer too small: {} (need at least 4096)", output.len()));
+        return Err(format!("Output buffer too small: {} (need at least 4096)", output.len()));
     }
 
     // Allocate FFT buffers
@@ -89,7 +86,7 @@ pub fn downsample_200hz(
     // Apply taper to edges
     let taper_len = 101;
     for i in 0..taper_len {
-        let taper_val = 0.5 * (1.0 + libm::cosf(core::f32::consts::PI * i as f32 / 100.0));
+        let taper_val = 0.5 * (1.0 + f32::cos(core::f32::consts::PI * i as f32 / 100.0));
         if i < k {
             out_real[i] *= taper_val;
             out_imag[i] *= taper_val;
@@ -122,7 +119,7 @@ pub fn downsample_200hz(
     fft_complex_inverse(&mut out_real, &mut out_imag, NFFT_OUT)?;
 
     // Normalize and copy to output
-    let fac = 1.0 / libm::sqrtf((NFFT_IN * NFFT_OUT) as f32);
+    let fac = 1.0 / ((NFFT_IN * NFFT_OUT) as f32).sqrt();
     for i in 0..NFFT_OUT {
         output[i] = (out_real[i] * fac, out_imag[i] * fac);
     }

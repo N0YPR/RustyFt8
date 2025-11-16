@@ -72,7 +72,6 @@ pub const NHSYM: usize = NMAX / NSTEP - 3; // 372
 #[cfg(test)]
 mod tests {
     use super::*;
-    extern crate alloc;
 
     #[test]
     fn test_costas_pattern() {
@@ -91,8 +90,8 @@ mod tests {
         assert_eq!(NHSYM, 372);
 
         // Also test actual compute_spectra function
-        let signal = alloc::vec![0.0f32; NMAX];
-        let mut spectra = alloc::vec![[0.0f32; NHSYM]; NH1];
+        let signal = vec![0.0f32; NMAX];
+        let mut spectra = vec![[0.0f32; NHSYM]; NH1];
 
         let result = compute_spectra(&signal, &mut spectra);
         assert!(result.is_ok());
@@ -103,8 +102,8 @@ mod tests {
 
     #[test]
     fn test_compute_spectra_too_short() {
-        let signal = alloc::vec![0.0f32; 1000]; // Too short
-        let mut spectra = alloc::vec![[0.0f32; NHSYM]; NH1];
+        let signal = vec![0.0f32; 1000]; // Too short
+        let mut spectra = vec![[0.0f32; NHSYM]; NH1];
 
         let result = compute_spectra(&signal, &mut spectra);
         assert!(result.is_err());

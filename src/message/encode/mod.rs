@@ -1,4 +1,3 @@
-use alloc::string::String;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::types::MessageVariant;

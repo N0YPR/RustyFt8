@@ -1,7 +1,5 @@
 //! LDPC decoder using belief propagation (sum-product algorithm)
 
-extern crate alloc;
-use alloc::vec;
 use bitvec::prelude::*;
 use bitvec::vec::BitVec;
 use crate::crc::crc14_check;
@@ -12,7 +10,7 @@ use super::constants::*;
 fn atanh_safe(x: f32) -> f32 {
     // Clip x to valid range (-1, 1) with small margin
     let x_clipped = x.clamp(-0.999999, 0.999999);
-    0.5 * libm::logf((1.0 + x_clipped) / (1.0 - x_clipped))
+    0.5 * f32::ln((1.0 + x_clipped) / (1.0 - x_clipped))
 }
 
 /// Decode a 174-bit codeword using LDPC(174,91) belief propagation
@@ -121,7 +119,7 @@ pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, u
                 for k in 0..NRW[check_idx] {
                     let bit_k = NM[check_idx][k];
                     if bit_k != j {
-                        product *= libm::tanhf(-toc[check_idx][k] / 2.0);
+                        product *= f32::tanh(-toc[check_idx][k] / 2.0);
                     }
                 }
 

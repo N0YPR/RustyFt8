@@ -1,5 +1,3 @@
-use alloc::string::{String, ToString};
-use alloc::format;
 use bitvec::prelude::*;
 use crate::message::callsign::unpack_callsign;
 use crate::message::lookup_tables::rtty_state_from_index;

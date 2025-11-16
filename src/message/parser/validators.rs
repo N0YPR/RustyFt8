@@ -4,9 +4,6 @@
 //! used throughout the FT8 message parsing system. It handles both standard and non-standard
 //! callsign formats, including hash callsigns and portable/rover suffixes.
 
-use alloc::string::String;
-use alloc::vec::Vec;
-use alloc::format;
 
 /// Basic validation for callsigns
 ///

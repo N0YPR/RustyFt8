@@ -1,5 +1,3 @@
-use alloc::string::{String, ToString};
-use alloc::format;
 use crate::message::constants::{CHARSET_BASE42, CHARSET_BASE38};
 
 /// Encode compound callsign for Type 4 NonStandardCall (up to 11 characters) into 58 bits

@@ -2,8 +2,6 @@
 ///!
 ///! Provides custom FFT implementations optimized for no_std environments.
 
-extern crate alloc;
-use alloc::string::String;
 
 /// In-place real-to-complex FFT using Cooley-Tukey radix-2 algorithm
 ///
@@ -13,11 +11,11 @@ use alloc::string::String;
 /// * `n` - FFT size (must be power of 2)
 pub(crate) fn fft_real(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(), String> {
     if n & (n - 1) != 0 {
-        return Err(alloc::format!("FFT size must be power of 2, got {}", n));
+        return Err(format!("FFT size must be power of 2, got {}", n));
     }
 
     if real.len() < n || imag.len() < n {
-        return Err(alloc::format!(
+        return Err(format!(
             "Buffers too small: real={}, imag={}, need={}",
             real.len(),
             imag.len(),
@@ -49,8 +47,8 @@ pub(crate) fn fft_real(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(
             let mut k = 0;
             for j in i..i + half_len {
                 let theta = angle * k as f32;
-                let wr = libm::cosf(theta);
-                let wi = libm::sinf(theta);
+                let wr = f32::cos(theta);
+                let wi = f32::sin(theta);
                 let t_real = wr * real[j + half_len] - wi * imag[j + half_len];
                 let t_imag = wr * imag[j + half_len] + wi * real[j + half_len];
                 real[j + half_len] = real[j] - t_real;
@@ -76,11 +74,11 @@ pub(crate) fn fft_complex(real: &mut [f32], imag: &mut [f32], n: usize) -> Resul
 /// Complex-to-complex inverse FFT
 pub(crate) fn fft_complex_inverse(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(), String> {
     if n & (n - 1) != 0 {
-        return Err(alloc::format!("FFT size must be power of 2, got {}", n));
+        return Err(format!("FFT size must be power of 2, got {}", n));
     }
 
     if real.len() < n || imag.len() < n {
-        return Err(alloc::format!(
+        return Err(format!(
             "Buffers too small: real={}, imag={}, need={}",
             real.len(),
             imag.len(),
@@ -109,12 +107,11 @@ pub(crate) fn fft_complex_inverse(real: &mut [f32], imag: &mut [f32], n: usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    extern crate alloc;
 
     #[test]
     fn test_fft_real_dc() {
-        let mut real = alloc::vec![1.0f32; 32];
-        let mut imag = alloc::vec![0.0f32; 32];
+        let mut real = vec![1.0f32; 32];
+        let mut imag = vec![0.0f32; 32];
 
         fft_real(&mut real, &mut imag, 32).unwrap();
 
@@ -125,14 +122,14 @@ mod tests {
     #[test]
     fn test_fft_real_sine() {
         let n = 32;
-        let mut real = alloc::vec![0.0f32; n];
-        let mut imag = alloc::vec![0.0f32; n];
+        let mut real = vec![0.0f32; n];
+        let mut imag = vec![0.0f32; n];
 
         // Generate sine wave at bin 5
         let freq = 5.0;
         for i in 0..n {
             let phase = 2.0 * core::f32::consts::PI * freq * i as f32 / n as f32;
-            real[i] = libm::sinf(phase);
+            real[i] = f32::sin(phase);
         }
 
         fft_real(&mut real, &mut imag, n).unwrap();
@@ -141,7 +138,7 @@ mod tests {
         let mut max_mag = 0.0f32;
         let mut max_bin = 0;
         for i in 0..n {
-            let mag = libm::sqrtf(real[i] * real[i] + imag[i] * imag[i]);
+            let mag = (real[i] * real[i] + imag[i] * imag[i]).sqrt();
             if mag > max_mag {
                 max_mag = mag;
                 max_bin = i;
@@ -159,8 +156,8 @@ mod tests {
     #[test]
     fn test_ifft_roundtrip() {
         let n = 32;
-        let mut real = alloc::vec![0.0f32; n];
-        let mut imag = alloc::vec![0.0f32; n];
+        let mut real = vec![0.0f32; n];
+        let mut imag = vec![0.0f32; n];
 
         // Create a simple signal
         for i in 0..n {

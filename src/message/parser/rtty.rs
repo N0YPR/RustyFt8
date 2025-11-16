@@ -6,7 +6,6 @@
 //! RTTY messages use a specific RST format (5X9 where X is 2-9) and include either
 //! a US state/province code or a 4-digit serial number. This is a Type 1 message variant.
 
-use alloc::string::String;
 use crate::message::types::MessageVariant;
 use super::validators::validate_callsign_basic;
 

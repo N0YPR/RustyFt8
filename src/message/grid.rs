@@ -2,9 +2,6 @@
 /// 
 /// Implements WSJT-X grid square and signal report encoding into 15-bit integers.
 
-use alloc::vec::Vec;
-use alloc::format;
-use alloc::string::{String, ToString};
 use crate::message::constants::MAXGRID4;
 
 /// Special code offsets (added to MAXGRID4)

@@ -6,7 +6,6 @@
 //! Field Day messages encode the number of transmitters (1-32), operating class (A-F),
 //! and ARRL section code. This is a Type 1 message variant in the FT8 protocol.
 
-use alloc::string::String;
 use crate::message::types::MessageVariant;
 use crate::message::lookup_tables::arrl_section_to_index;
 use super::validators::validate_callsign_basic;

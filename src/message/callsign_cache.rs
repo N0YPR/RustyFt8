@@ -6,13 +6,7 @@
 ///
 /// Implementation follows WSJT-X behavior with bounded caches and FIFO eviction.
 
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
-use hashbrown::HashMap;
-use ahash::AHasher;
-use core::hash::BuildHasherDefault;
-
-type AHashMap<K, V> = HashMap<K, V, BuildHasherDefault<AHasher>>;
+use std::collections::HashMap;
 
 /// Maximum capacity for 22-bit hash cache (from WSJT-X MAXHASH constant)
 pub const MAX_22BIT_CAPACITY: usize = 1000;
@@ -33,17 +27,17 @@ pub const MAX_22BIT_CAPACITY: usize = 1000;
 #[derive(Debug, Clone)]
 pub struct CallsignHashCache {
     /// 10-bit hash cache (for DXpedition mode Type 0.1 messages)
-    cache_10bit: AHashMap<u16, String>,
+    cache_10bit: HashMap<u16, String>,
 
     /// 12-bit hash cache (for Type 2 messages)
-    cache_12bit: AHashMap<u16, String>,
+    cache_12bit: HashMap<u16, String>,
 
     /// 22-bit hash cache with FIFO ordering (for Type 1 hash references)
     /// Stores (hash, callsign) pairs in insertion order (newest at index 0)
     cache_22bit: Vec<(u32, String)>,
 
     /// Quick lookup index for 22-bit hashes: maps hash to position in Vec
-    cache_22bit_index: AHashMap<u32, usize>,
+    cache_22bit_index: HashMap<u32, usize>,
 
     /// Maximum capacity for 22-bit cache
     max_22bit_capacity: usize,
@@ -53,10 +47,10 @@ impl CallsignHashCache {
     /// Create a new empty hash cache with default WSJTX capacity limits
     pub fn new() -> Self {
         Self {
-            cache_10bit: AHashMap::default(),
-            cache_12bit: AHashMap::default(),
+            cache_10bit: HashMap::default(),
+            cache_12bit: HashMap::default(),
             cache_22bit: Vec::with_capacity(MAX_22BIT_CAPACITY),
-            cache_22bit_index: AHashMap::default(),
+            cache_22bit_index: HashMap::default(),
             max_22bit_capacity: MAX_22BIT_CAPACITY,
         }
     }
@@ -71,10 +65,10 @@ impl CallsignHashCache {
     #[cfg(test)]
     pub(crate) fn with_capacity(max_22bit_capacity: usize) -> Self {
         Self {
-            cache_10bit: AHashMap::default(),
-            cache_12bit: AHashMap::default(),
+            cache_10bit: HashMap::default(),
+            cache_12bit: HashMap::default(),
             cache_22bit: Vec::with_capacity(max_22bit_capacity),
-            cache_22bit_index: AHashMap::default(),
+            cache_22bit_index: HashMap::default(),
             max_22bit_capacity,
         }
     }

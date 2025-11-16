@@ -2,9 +2,6 @@
 ///!
 ///! Computes power spectra and 2D sync correlation matrices for FT8 signals.
 
-extern crate alloc;
-use alloc::vec::Vec;
-use alloc::string::String;
 use super::fft::fft_real;
 use super::{COSTAS_PATTERN, SAMPLE_RATE, NMAX, NSPS, NSTEP, NFFT1, NH1, NHSYM, MAX_LAG};
 
@@ -20,19 +17,19 @@ use super::{COSTAS_PATTERN, SAMPLE_RATE, NMAX, NSPS, NSTEP, NFFT1, NH1, NHSYM, M
 /// Average spectrum across all time steps
 pub fn compute_spectra(signal: &[f32], spectra: &mut [[f32; NHSYM]]) -> Result<Vec<f32>, String> {
     if signal.len() < NMAX {
-        return Err(alloc::format!("Signal too short: {} samples (need {})", signal.len(), NMAX));
+        return Err(format!("Signal too short: {} samples (need {})", signal.len(), NMAX));
     }
 
     if spectra.len() != NH1 {
-        return Err(alloc::format!("Spectra buffer wrong size: {} (need {})", spectra.len(), NH1));
+        return Err(format!("Spectra buffer wrong size: {} (need {})", spectra.len(), NH1));
     }
 
-    let mut avg_spectrum = alloc::vec![0.0f32; NH1];
+    let mut avg_spectrum = vec![0.0f32; NH1];
     let fac = 1.0 / 300.0;
 
     // Buffers for FFT
-    let mut x_real = alloc::vec![0.0f32; NFFT1];
-    let mut x_imag = alloc::vec![0.0f32; NFFT1];
+    let mut x_real = vec![0.0f32; NFFT1];
+    let mut x_imag = vec![0.0f32; NFFT1];
 
     for j in 0..NHSYM {
         let ia = j * NSTEP;
@@ -90,12 +87,12 @@ pub fn compute_sync2d(
     let ib = (freq_max / df).min(NH1 as f32 - 1.0) as usize;
 
     if ia >= ib {
-        return Err(alloc::format!("Invalid frequency range: {} - {} Hz", freq_min, freq_max));
+        return Err(format!("Invalid frequency range: {} - {} Hz", freq_min, freq_max));
     }
 
     // Allocate sync2d if needed
     if sync2d.len() != NH1 {
-        *sync2d = alloc::vec![alloc::vec![0.0f32; (2 * MAX_LAG + 1) as usize]; NH1];
+        *sync2d = vec![vec![0.0f32; (2 * MAX_LAG + 1) as usize]; NH1];
     }
 
     let nssy = NSPS / NSTEP; // Steps per symbol = 4

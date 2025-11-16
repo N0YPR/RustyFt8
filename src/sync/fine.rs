@@ -2,9 +2,6 @@
 ///!
 ///! Refines frequency and timing estimates from coarse sync.
 
-extern crate alloc;
-use alloc::vec;
-use alloc::string::String;
 use super::candidate::Candidate;
 use super::downsample::downsample_200hz;
 use super::COSTAS_PATTERN;
@@ -45,7 +42,7 @@ pub fn sync_downsampled(
         let mut phi = 0.0f32;
 
         for j in 0..NSPS_DOWN {
-            costas_wave[i][j] = (libm::cosf(phi), libm::sinf(phi));
+            costas_wave[i][j] = (f32::cos(phi), f32::sin(phi));
             phi = phi + dphi;
             if phi > 2.0 * core::f32::consts::PI {
                 phi -= 2.0 * core::f32::consts::PI;

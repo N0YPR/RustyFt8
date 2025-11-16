@@ -1,5 +1,3 @@
-use alloc::string::{String, ToString};
-use alloc::format;
 use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::constants::CHARSET_BASE38;

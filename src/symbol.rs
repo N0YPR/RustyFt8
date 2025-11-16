@@ -11,8 +11,6 @@
 //! **Mapping**: Each 3 bits from the 174-bit codeword map to one data symbol
 //! using Gray coding to minimize bit errors between adjacent tones (0-7).
 
-extern crate alloc;
-use alloc::string::String;
 
 /// Number of data symbols (174 bits / 3 bits per symbol)
 pub const ND: usize = 58;
@@ -67,7 +65,7 @@ const GRAY_MAP_INV: [u8; 8] = [0, 1, 3, 2, 6, 4, 5, 7];
 /// ```
 pub fn map(codeword: &bitvec::slice::BitSlice<u8, bitvec::order::Msb0>, symbols: &mut [u8; NN]) -> Result<(), String> {
     if codeword.len() != 174 {
-        return Err(alloc::format!("Codeword must be exactly 174 bits, got {}", codeword.len()));
+        return Err(format!("Codeword must be exactly 174 bits, got {}", codeword.len()));
     }
 
     // Insert sync patterns at positions: 0-6, 36-42, 72-78
@@ -122,7 +120,7 @@ pub fn map(codeword: &bitvec::slice::BitSlice<u8, bitvec::order::Msb0>, symbols:
 /// ```
 pub fn demap(symbols: &[u8; NN], codeword: &mut bitvec::slice::BitSlice<u8, bitvec::order::Msb0>) -> Result<(), String> {
     if codeword.len() != 174 {
-        return Err(alloc::format!("Codeword must be exactly 174 bits, got {}", codeword.len()));
+        return Err(format!("Codeword must be exactly 174 bits, got {}", codeword.len()));
     }
 
     // Extract data symbols from positions: 7-35 (29 symbols), 43-71 (29 symbols)

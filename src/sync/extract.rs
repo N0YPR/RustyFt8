@@ -2,9 +2,6 @@
 ///!
 ///! Extracts FT8 symbols from downsampled signal and computes log-likelihood ratios.
 
-extern crate alloc;
-use alloc::vec;
-use alloc::string::String;
 use super::candidate::Candidate;
 use super::downsample::downsample_200hz;
 use super::fine::sync_downsampled;
@@ -55,7 +52,7 @@ fn compute_symbol_peak_power(cd: &[(f32, f32)], start_offset: i32, nsps: usize) 
             let expected_tone = COSTAS_PATTERN[k] as usize;
             let re = sym_real[expected_tone];
             let im = sym_imag[expected_tone];
-            let power = libm::sqrtf(re * re + im * im);
+            let power = (re * re + im * im).sqrt();
 
             total_peak += power;
             count += 1;
@@ -77,8 +74,8 @@ fn apply_phase_correction(cd: &mut [(f32, f32)], freq_offset_hz: f32, sample_rat
     let mut phi = 0.0f32;
 
     for i in 0..cd.len() {
-        let cos_phi = libm::cosf(phi);
-        let sin_phi = libm::sinf(phi);
+        let cos_phi = f32::cos(phi);
+        let sin_phi = f32::sin(phi);
 
         // Complex multiplication: cd[i] *= exp(j*phi)
         let (re, im) = cd[i];
@@ -118,10 +115,10 @@ pub fn extract_symbols(
     llr: &mut [f32],
 ) -> Result<(), String> {
     if llr.len() < 174 {
-        return Err(alloc::format!("LLR buffer too small"));
+        return Err(format!("LLR buffer too small"));
     }
     if nsym < 1 || nsym > 3 {
-        return Err(alloc::format!("nsym must be 1, 2, or 3"));
+        return Err(format!("nsym must be 1, 2, or 3"));
     }
     const NN: usize = 79; // Number of FT8 symbols
     const SYMBOL_DURATION: f32 = 0.16; // FT8 symbol duration in seconds
@@ -259,7 +256,7 @@ pub fn extract_symbols(
             let re = sym_real[tone];
             let im = sym_imag[tone];
             cs[tone][k] = (re, im);
-            s8[tone][k] = libm::sqrtf(re * re + im * im);
+            s8[tone][k] = (re * re + im * im).sqrt();
         }
     }
 
@@ -316,7 +313,7 @@ pub fn extract_symbols(
     // If sync quality is too low, reject
     // Note: Temporarily lowered threshold for testing
     if nsync < 3 {
-        return Err(alloc::format!("Sync quality too low: {}/21 Costas tones correct", nsync));
+        return Err(format!("Sync quality too low: {}/21 Costas tones correct", nsync));
     }
 
     // Compute LLRs using 3-symbol coherent combining (WSJT-X approach)
@@ -405,7 +402,7 @@ pub fn extract_symbols(
 
                         let sum_r = r1 + r2 + r3;
                         let sum_im = im1 + im2 + im3;
-                        s2[i] = libm::sqrtf(sum_r * sum_r + sum_im * sum_im);
+                        s2[i] = (sum_r * sum_r + sum_im * sum_im).sqrt();
                     }
                 }
 
@@ -495,7 +492,7 @@ pub fn extract_symbols(
 
                     let sum_r = r2 + r3;
                     let sum_im = im2 + im3;
-                    s2[i] = libm::sqrtf(sum_r * sum_r + sum_im * sum_im);
+                    s2[i] = (sum_r * sum_r + sum_im * sum_im).sqrt();
                 }
 
                 // Extract 6 bits (2 symbols × 3 bits)
@@ -548,9 +545,9 @@ pub fn extract_symbols(
     let mean_sq = sum_sq / 174.0;
     let variance = mean_sq - mean * mean;
     let std_dev = if variance > 0.0 {
-        libm::sqrtf(variance)
+        variance.sqrt()
     } else {
-        libm::sqrtf(mean_sq)
+        mean_sq.sqrt()
     };
 
     if std_dev > 0.0 {

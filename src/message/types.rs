@@ -1,4 +1,3 @@
-use alloc::string::String;
 
 /// Internal representation of parsed message components
 #[derive(Debug, Clone, PartialEq)]

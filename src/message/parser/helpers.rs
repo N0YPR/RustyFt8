@@ -4,7 +4,6 @@
 //! callsign suffix handling (/R and /P) and CQ message parsing. These utilities are
 //! used by the main parser orchestration to process different message formats.
 
-use alloc::string::{String, ToString};
 use crate::message::types::MessageVariant;
 use super::validators::{validate_callsign_basic, validate_grid_basic};
 

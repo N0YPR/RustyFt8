@@ -21,7 +21,6 @@ use encode::encode_variant;
 use decode::decode_message_bits;
 use parser::parse_message_variant;
 
-use alloc::string::String;
 use bitvec::prelude::*;
 
 /// Encode a text message into a 77-bit FT8 message
@@ -50,7 +49,7 @@ use bitvec::prelude::*;
 /// ```
 pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>, cache: &mut CallsignHashCache) -> Result<(), String> {
     if output.len() != 77 {
-        return Err(alloc::format!("Output buffer must be exactly 77 bits, got {}", output.len()));
+        return Err(format!("Output buffer must be exactly 77 bits, got {}", output.len()));
     }
 
     // 1. Parse text into MessageVariant (internal detail)
@@ -91,7 +90,7 @@ pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>, cache: &mut CallsignH
 /// ```
 pub fn decode(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
     if bits.len() != 77 {
-        return Err(alloc::format!("Input must be exactly 77 bits, got {}", bits.len()));
+        return Err(format!("Input must be exactly 77 bits, got {}", bits.len()));
     }
 
     decode_message_bits(bits, cache)

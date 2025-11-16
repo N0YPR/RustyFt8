@@ -3,9 +3,6 @@
 /// Implements the WSJT-X pack28/unpack28 algorithm for encoding callsigns
 /// into 28-bit integers.
 
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
-use alloc::format;
 use crate::message::constants::{NTOKENS, MAX22, CHARSET_A1, CHARSET_A2, CHARSET_A3, CHARSET_A4, CHARSET_BASE38};
 
 /// Unpack a 28-bit value to a callsign using WSJT-X protocol
