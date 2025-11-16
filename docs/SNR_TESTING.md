@@ -56,8 +56,25 @@ Below -18 dB:
 
 **Implementation Status**:
 - ✅ nsym=1: Working, -15 dB minimum SNR
-- 🚧 nsym=2: Implemented but not decoding (under investigation)
+- 🚧 nsym=2: Implemented correctly but sensitive to frequency errors
 - ⚠️  nsym=3: Implemented but has symbol boundary issues (29 symbols don't divide evenly by 3)
+
+### nsym=2 Debug Findings
+
+**Root Cause**: Fine frequency synchronization has ~1.5 Hz systematic error, causing tone detection errors.
+
+**Impact**:
+- Signal at 1500 Hz detected at 1501.5 Hz (+1.5 Hz error)
+- With 6.25 Hz tone spacing, 1.5 Hz error causes FFT bins to mix adjacent tones
+- **nsym=1**: Produces ~10-11 bit errors → LDPC can correct → decode SUCCESS
+- **nsym=2**: Produces ~20+ bit errors → exceeds LDPC correction → decode FAIL
+
+**Why nsym=2 is more sensitive**:
+- Coherent combining amplifies frequency errors across symbol pairs
+- If one symbol in a pair has wrong tone detected, the combined magnitude pulls toward incorrect result
+- nsym=1 treats each symbol independently, limiting error propagation
+
+**Solution**: Improve fine frequency synchronization to sub-Hz accuracy (currently ±1-2 Hz)
 
 ## Test Signal Details
 
