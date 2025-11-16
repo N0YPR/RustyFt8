@@ -2,7 +2,46 @@
 ///!
 ///! Provides FFT implementations using RustFFT for high performance.
 
-use rustfft::{FftPlanner, num_complex::Complex};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use once_cell::sync::Lazy;
+
+/// Cache of forward FFT plans
+static FFT_FORWARD_CACHE: Lazy<Mutex<HashMap<usize, Arc<dyn Fft<f32>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Cache of inverse FFT plans
+static FFT_INVERSE_CACHE: Lazy<Mutex<HashMap<usize, Arc<dyn Fft<f32>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Get or create a forward FFT plan for the given size
+fn get_forward_plan(n: usize) -> Arc<dyn Fft<f32>> {
+    let mut cache = FFT_FORWARD_CACHE.lock().unwrap();
+
+    if let Some(plan) = cache.get(&n) {
+        return Arc::clone(plan);
+    }
+
+    let mut planner = FftPlanner::new();
+    let plan = planner.plan_fft_forward(n);
+    cache.insert(n, Arc::clone(&plan));
+    plan
+}
+
+/// Get or create an inverse FFT plan for the given size
+fn get_inverse_plan(n: usize) -> Arc<dyn Fft<f32>> {
+    let mut cache = FFT_INVERSE_CACHE.lock().unwrap();
+
+    if let Some(plan) = cache.get(&n) {
+        return Arc::clone(plan);
+    }
+
+    let mut planner = FftPlanner::new();
+    let plan = planner.plan_fft_inverse(n);
+    cache.insert(n, Arc::clone(&plan));
+    plan
+}
 
 /// In-place real-to-complex FFT using RustFFT
 ///
@@ -29,9 +68,8 @@ pub(crate) fn fft_real(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(
         .map(|i| Complex::new(real[i], imag[i]))
         .collect();
 
-    // Perform FFT
-    let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_forward(n);
+    // Perform FFT using cached plan
+    let fft = get_forward_plan(n);
     fft.process(&mut buffer);
 
     // Convert back to separate arrays
@@ -70,9 +108,8 @@ pub(crate) fn fft_complex_inverse(real: &mut [f32], imag: &mut [f32], n: usize) 
         .map(|i| Complex::new(real[i], imag[i]))
         .collect();
 
-    // Perform inverse FFT
-    let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_inverse(n);
+    // Perform inverse FFT using cached plan
+    let fft = get_inverse_plan(n);
     fft.process(&mut buffer);
 
     // Scale and convert back to separate arrays
