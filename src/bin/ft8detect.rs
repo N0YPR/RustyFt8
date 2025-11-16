@@ -121,6 +121,7 @@ fn main() {
             msg.snr_db,
             msg.message
         );
+        true // Continue decoding to find all signals
     }) {
         Ok(total) => {
             println!();

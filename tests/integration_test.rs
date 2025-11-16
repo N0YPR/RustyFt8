@@ -137,9 +137,9 @@ fn generate_test_signal(message: &str, snr_db: f32, freq_hz: f32, time_delay: f3
     signal
 }
 
-/// Decode all FT8 signals in the recording using the multi-signal decoder
+/// Decode FT8 signals, stopping after finding the expected count
 /// Returns all decoded messages
-fn decode_all_signals(signal: &[f32]) -> Vec<String> {
+fn decode_signals(signal: &[f32], expected_count: usize) -> Vec<String> {
     // Use optimized config for fast testing (decode top 5 candidates only)
     // This is sufficient for single-signal tests and much faster
     let config = DecoderConfig {
@@ -151,6 +151,8 @@ fn decode_all_signals(signal: &[f32]) -> Vec<String> {
     match decode_ft8(signal, &config, |msg| {
         eprintln!("✓ Decoded: {:.1} Hz @ {:.3} s - \"{}\"", msg.frequency, msg.time_offset, msg.message);
         messages.push(msg.message);
+        // Stop decoding once we have the expected number of signals
+        messages.len() < expected_count
     }) {
         Ok(_) => messages,
         Err(_) => Vec::new(),
@@ -173,8 +175,8 @@ fn test_roundtrip(message: &str, snr_db: f32, should_succeed: bool) {
     assert!(has_signal, "Signal should contain non-zero samples");
     eprintln!("✓ Signal generated successfully");
 
-    // Attempt decode using the multi-signal decoder
-    let decoded_messages = decode_all_signals(&signal);
+    // Attempt decode using the multi-signal decoder (stop after finding 1 signal)
+    let decoded_messages = decode_signals(&signal, 1);
 
     if !decoded_messages.is_empty() {
         // For single-signal tests, we expect exactly one message
@@ -308,7 +310,7 @@ fn test_multi_signal_decode() {
     eprintln!("  Signal 2: 2000 Hz - \"K1ABC W9XYZ RR73\"");
     eprintln!();
 
-    // Decode using the multi-signal decoder
+    // Decode using the multi-signal decoder (stop after finding 2 signals)
     let config = DecoderConfig {
         decode_top_n: 10, // Only decode top 10 candidates for faster testing
         ..DecoderConfig::default()
@@ -318,6 +320,8 @@ fn test_multi_signal_decode() {
     let count = decode_ft8(&mixed_signal, &config, |msg| {
         eprintln!("Decoded: {:.1} Hz - \"{}\"", msg.frequency, msg.message);
         decoded_messages.push((msg.frequency, msg.message.clone()));
+        // Stop after finding 2 signals
+        decoded_messages.len() < 2
     }).expect("Decode failed");
 
     eprintln!();

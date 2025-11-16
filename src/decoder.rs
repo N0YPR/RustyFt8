@@ -61,18 +61,20 @@ impl Default for DecoderConfig {
 /// This follows the WSJT-X pattern: messages are reported immediately as found, not batched.
 /// Duplicate messages (same text from same candidate) are automatically filtered.
 ///
+/// The callback can return `false` to stop decoding early (e.g., after finding expected signals).
+///
 /// # Arguments
 ///
 /// * `signal` - 15-second audio recording at 12 kHz sample rate
 /// * `config` - Decoder configuration
-/// * `callback` - Called immediately for each decoded message
+/// * `callback` - Called immediately for each decoded message. Returns `true` to continue, `false` to stop.
 ///
 /// # Returns
 ///
 /// Total number of unique messages decoded
 pub fn decode_ft8<F>(signal: &[f32], config: &DecoderConfig, mut callback: F) -> Result<usize, &'static str>
 where
-    F: FnMut(DecodedMessage),
+    F: FnMut(DecodedMessage) -> bool,
 {
     // Coarse sync to find candidates
     let candidates = sync::coarse_sync(
@@ -130,7 +132,7 @@ where
                                 let snr_db = (refined.sync_power.log10() * 10.0 - 30.0) as i32;
 
                                 // Report immediately via callback
-                                callback(DecodedMessage {
+                                let should_continue = callback(DecodedMessage {
                                     message,
                                     frequency: refined.frequency,
                                     time_offset: refined.time_offset,
@@ -140,6 +142,11 @@ where
                                     llr_scale: scale,
                                     nsym,
                                 });
+
+                                // Stop decoding if callback returns false
+                                if !should_continue {
+                                    return Ok(decode_count);
+                                }
 
                                 // Move to next candidate after successful decode
                                 continue 'candidate_loop;
