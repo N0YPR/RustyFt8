@@ -850,12 +850,12 @@ pub fn fine_sync(
         }
     }
 
-    // Fine frequency search: ±5 steps of 0.5 Hz = ±2.5 Hz
+    // Fine frequency search: ±10 steps of 0.25 Hz = ±2.5 Hz (improved accuracy)
     let mut best_freq = candidate.frequency;
     let dt2 = 1.0 / 200.0; // Sample period at 200 Hz
 
-    for df in -5..=5 {
-        let freq_offset = df as f32 * 0.5; // 0.5 Hz steps
+    for df in -10..=10 {
+        let freq_offset = df as f32 * 0.25; // 0.25 Hz steps for better accuracy
         let dphi = 2.0 * core::f32::consts::PI * freq_offset * dt2;
 
         // Generate frequency correction phasors
@@ -1251,8 +1251,8 @@ pub fn extract_symbols(
 
     // Two-symbol coherent combining provides ~3dB SNR improvement over nsym=1
     // nsym=1: 8 combinations, nsym=2: 64 combinations, nsym=3: 512 combinations
-    const NSYM: usize = 2; // Number of symbols to combine
-    const NT: usize = 64; // 8^2 = 64 possible tone pairs for nsym=2
+    const NSYM: usize = 1; // Number of symbols to combine
+    const NT: usize = 8; // 8^2 = 64 possible tone pairs for nsym=2
 
     #[cfg(feature = "std")]
     {

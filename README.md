@@ -95,11 +95,17 @@ See [`docs/SNR_TESTING.md`](docs/SNR_TESTING.md) for detailed test results.
 - 🚧 nsym=2: Implemented but LDPC fails even on perfect signals
 - 🚧 nsym=3: Implemented but has issues (29 symbols don't divide evenly by 3)
 
-**What's Needed**:
-- Compare nsym=2 LLR values directly with WSJT-X output
-- Verify bit extraction order matches WSJT-X exactly
-- Debug why LDPC won't converge despite seemingly correct LLRs
-- **Expected result**: -18 dB SNR decode capability with nsym=2
+**Root Cause Found**: Fine frequency synchronization has ~1.5 Hz systematic error
+- Signal at 1500 Hz detected at 1501.5 Hz (+1.5 Hz error)
+- With 6.25 Hz tone spacing, this causes tone detection errors
+- nsym=1 tolerates ~10 bit errors (LDPC corrects) ✅
+- nsym=2 produces ~20+ bit errors (exceeds LDPC) ❌
+- Coherent combining amplifies frequency errors across symbol pairs
+
+**Solution**: Improve fine sync to sub-Hz accuracy
+- Current: ±2.5 Hz range with 0.25 Hz steps
+- Needed: Better frequency estimation algorithm
+- **Expected result**: -18 dB SNR with nsym=2, -21 dB with nsym=3
 
 ### 2. Testing & Benchmarks
 - ✅ SNR sweep testing (-24 to +10 dB) completed
