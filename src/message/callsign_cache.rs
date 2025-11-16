@@ -17,12 +17,6 @@ type AHashMap<K, V> = HashMap<K, V, BuildHasherDefault<AHasher>>;
 /// Maximum capacity for 22-bit hash cache (from WSJT-X MAXHASH constant)
 pub const MAX_22BIT_CAPACITY: usize = 1000;
 
-/// Maximum capacity for 10-bit hash cache (implicitly bounded by 10 bits = 1024 entries)
-pub const MAX_10BIT_CAPACITY: usize = 1024;
-
-/// Maximum capacity for 12-bit hash cache (implicitly bounded by 12 bits = 4096 entries)
-pub const MAX_12BIT_CAPACITY: usize = 4096;
-
 /// Callsign hash cache for resolving non-standard callsigns
 ///
 /// In FT8, non-standard callsigns (those that don't fit pack28) are handled
@@ -419,10 +413,8 @@ mod tests {
 
     #[test]
     fn test_wsjtx_compatible_capacity_limits() {
-        // Verify capacity constants match WSJT-X
+        // Verify 22-bit hash cache capacity constant matches WSJT-X MAXHASH
         assert_eq!(MAX_22BIT_CAPACITY, 1000, "MAXHASH = 1000");
-        assert_eq!(MAX_10BIT_CAPACITY, 1024, "10-bit = 2^10");
-        assert_eq!(MAX_12BIT_CAPACITY, 4096, "12-bit = 2^12");
     }
 
     #[test]

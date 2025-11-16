@@ -903,7 +903,6 @@ pub fn extract_symbols(
     let time_offset_samples = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
 
     let mut best_correction = 0.0f32;
-    let mut best_sync = 0.0f32;
 
     // Only do fine phase correction for nsym=2/3 (nsym=1 doesn't need phase coherence)
     if nsym >= 2 {
@@ -911,7 +910,7 @@ pub fn extract_symbols(
 
         // Initial sync without correction
         let initial_sync = sync_downsampled(&cd, time_offset_samples, None, false, Some(actual_sample_rate));
-        best_sync = initial_sync;
+        let mut best_sync = initial_sync;
 
         for correction_idx in -6..=6 {
             let freq_correction = correction_idx as f32 * 0.05; // ±0.3 Hz in 0.05 Hz steps
