@@ -608,9 +608,10 @@ pub fn downsample_200hz(
     let fb = (f0 - 1.5 * baud).max(0.0);
     let ft = (f0 + 8.5 * baud).min(SAMPLE_RATE / 2.0);
 
-    let ib = (fb / df) as usize;
-    let it = (ft / df).min((NFFT_IN / 2) as f32) as usize;
-    let i0 = (f0 / df) as usize;
+    // Use rounding (not truncation) to match WSJT-X nint()
+    let ib = (fb / df).round().max(1.0) as usize;
+    let it = (ft / df).round().min((NFFT_IN / 2) as f32) as usize;
+    let i0 = (f0 / df).round() as usize;
 
     // Copy selected frequency bins to output FFT buffer
     let mut out_real = alloc::vec![0.0f32; NFFT_OUT];
@@ -630,14 +631,8 @@ pub fn downsample_200hz(
     let actual_sample_rate = bandwidth * (NFFT_OUT as f32) / (k as f32);
 
     #[cfg(feature = "std")]
-    {
-        extern crate std;
-        std::eprintln!("DEBUG downsample_200hz:");
-        std::eprintln!("  f0={:.1} Hz, fb={:.1} Hz, ft={:.1} Hz", f0, fb, ft);
-        std::eprintln!("  df={:.3} Hz, extracted {} bins", df, k);
-        std::eprintln!("  bandwidth={:.1} Hz, NFFT_OUT={}", bandwidth, NFFT_OUT);
-        std::eprintln!("  actual_sample_rate={:.1} Hz (target: 200 Hz)", actual_sample_rate);
-    }
+    let _unused = (f0, fb, ft, df, k, bandwidth, NFFT_OUT, actual_sample_rate);
+    // Debug output disabled to reduce clutter
 
     // Apply taper to edges
     let taper_len = 101;
@@ -654,8 +649,22 @@ pub fn downsample_200hz(
         }
     }
 
-    // Circular shift to center at DC
+    // Circular shift to center at DC (matching WSJT-X cshift operation)
     let shift = (i0 as i32 - ib as i32).max(0) as usize;
+
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        if (f0 - 1500.0).abs() < 2.0 {  // Debug for signals near 1500 Hz
+            std::eprintln!("DEBUG downsample @ {:.1} Hz:", f0);
+            std::eprintln!("  df={:.6} Hz/bin, NFFT_IN={}", df, NFFT_IN);
+            std::eprintln!("  f0={:.1} → i0={} ({:.3} Hz)", f0, i0, i0 as f32 * df);
+            std::eprintln!("  fb={:.1} → ib={} ({:.3} Hz)", fb, ib, ib as f32 * df);
+            std::eprintln!("  ft={:.1} → it={} ({:.3} Hz)", ft, it, it as f32 * df);
+            std::eprintln!("  shift={}, k={}", shift, k);
+        }
+    }
+
     if shift > 0 && shift < k {
         // Rotate array left by 'shift' positions
         let mut temp_real = alloc::vec![0.0f32; NFFT_OUT];
@@ -677,6 +686,34 @@ pub fn downsample_200hz(
     let fac = 1.0 / libm::sqrtf((NFFT_IN * NFFT_OUT) as f32);
     for i in 0..NFFT_OUT {
         output[i] = (out_real[i] * fac, out_imag[i] * fac);
+    }
+
+    #[cfg(feature = "std")]
+    {
+        extern crate std;
+        if (f0 - 1500.0).abs() < 2.0 {
+            // Check spectrum of downsampled signal to verify centering
+            let mut test_real = alloc::vec![0.0f32; 32];
+            let mut test_imag = alloc::vec![0.0f32; 32];
+            for i in 0..32 {
+                test_real[i] = output[100 + i].0;  // Sample from middle of buffer
+                test_imag[i] = output[100 + i].1;
+            }
+            if fft_real(&mut test_real, &mut test_imag, 32).is_ok() {
+                let mut max_bin = 0;
+                let mut max_power = 0.0f32;
+                for i in 0..8 {
+                    let power = test_real[i] * test_real[i] + test_imag[i] * test_imag[i];
+                    if power > max_power {
+                        max_power = power;
+                        max_bin = i;
+                    }
+                }
+                let peak_freq_hz = max_bin as f32 * 6.25; // 187.5 Hz / 32 samples ≈ 5.86 Hz/bin
+                std::eprintln!("  Downsampled spectrum peak: bin {} ({:.1} Hz from DC), power={:.3e}",
+                    max_bin, peak_freq_hz, max_power);
+            }
+        }
     }
 
     Ok(actual_sample_rate)
@@ -712,10 +749,11 @@ fn fft_complex_inverse(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(
 /// downsampled data at 200 Hz (32 samples/symbol).
 ///
 /// # Arguments
-/// * `cd` - Downsampled complex signal (3200 samples at 200 Hz)
-/// * `time_offset` - Time offset in samples (at 200 Hz rate)
+/// * `cd` - Downsampled complex signal
+/// * `time_offset` - Time offset in samples
 /// * `freq_tweak` - Optional frequency correction phasors (32 per symbol)
 /// * `apply_tweak` - Whether to apply frequency correction
+/// * `actual_rate` - Actual downsampled rate in Hz (default 200 if None)
 ///
 /// # Returns
 /// Sync power metric
@@ -724,14 +762,20 @@ pub fn sync_downsampled(
     time_offset: i32,
     freq_tweak: Option<&[(f32, f32)]>,
     apply_tweak: bool,
+    actual_rate: Option<f32>,
 ) -> f32 {
-    const NSPS_DOWN: usize = 32; // Samples per symbol at 200 Hz
+    const NSPS_DOWN: usize = 32; // Samples per symbol
+    const FT8_TONE_SPACING: f32 = 6.25; // Hz
 
-    // Precompute Costas waveforms at 200 Hz
+    let sample_rate = actual_rate.unwrap_or(200.0);
+
+    // Precompute Costas waveforms at actual sample rate
+    // Tone k is at frequency k * 6.25 Hz
     let mut costas_wave = [[(0.0f32, 0.0f32); NSPS_DOWN]; 7];
 
     for (i, &tone) in COSTAS_PATTERN.iter().enumerate() {
-        let dphi = 2.0 * core::f32::consts::PI * tone as f32 / NSPS_DOWN as f32;
+        let tone_freq_hz = tone as f32 * FT8_TONE_SPACING;
+        let dphi = 2.0 * core::f32::consts::PI * tone_freq_hz / sample_rate;
         let mut phi = 0.0f32;
 
         for j in 0..NSPS_DOWN {
@@ -842,7 +886,7 @@ pub fn fine_sync(
 
     for dt in -4..=4 {
         let t_offset = initial_offset + dt;
-        let sync = sync_downsampled(&cd, t_offset, None, false);
+        let sync = sync_downsampled(&cd, t_offset, None, false, Some(actual_sample_rate));
 
         if sync > best_sync {
             best_sync = sync;
@@ -850,27 +894,27 @@ pub fn fine_sync(
         }
     }
 
-    // Fine frequency search: ±10 steps of 0.25 Hz = ±2.5 Hz (improved accuracy)
+    // Fine frequency search: ±2.5 Hz in 0.5 Hz steps (matching WSJT-X)
+    // Unlike phase rotation, we RE-DOWNSAMPLE at each test frequency
+    // This ensures perfect centering at baseband, critical for nsym=2
     let mut best_freq = candidate.frequency;
-    let dt2 = 1.0 / 200.0; // Sample period at 200 Hz
 
-    for df in -10..=10 {
-        let freq_offset = df as f32 * 0.25; // 0.25 Hz steps for better accuracy
-        let dphi = 2.0 * core::f32::consts::PI * freq_offset * dt2;
+    for df in -5..=5 {
+        let freq_offset = df as f32 * 0.5; // 0.5 Hz steps
+        let test_freq = candidate.frequency + freq_offset;
 
-        // Generate frequency correction phasors
-        let mut tweak = [(0.0f32, 0.0f32); 32];
-        let mut phi = 0.0f32;
-        for i in 0..32 {
-            tweak[i] = (libm::cosf(phi), libm::sinf(phi));
-            phi += dphi;
-        }
+        // Re-downsample at the test frequency
+        let mut cd_test = alloc::vec![(0.0f32, 0.0f32); 4096];
+        let test_rate = match downsample_200hz(signal, test_freq, &mut cd_test) {
+            Ok(rate) => rate,
+            Err(_) => continue,
+        };
 
-        let sync = sync_downsampled(&cd, best_time, Some(&tweak), true);
+        let sync = sync_downsampled(&cd_test, best_time, None, false, Some(test_rate));
 
         if sync > best_sync {
             best_sync = sync;
-            best_freq = candidate.frequency + freq_offset;
+            best_freq = test_freq;
         }
     }
 
@@ -970,56 +1014,20 @@ pub fn extract_symbols(
         return Err(alloc::format!("LLR buffer too small: {} (need 174)", llr.len()));
     }
 
-    // Downsample centered on ROUNDED frequency
-    // TEMPORARY: Testing if fractional Hz is causing issues
-    let test_freq = candidate.frequency.round();
+    // Downsample centered on the refined frequency from fine_sync
+    // This should already be optimally centered from the fine frequency search
     let mut cd = alloc::vec![(0.0f32, 0.0f32); 4096];
-    let actual_sample_rate = downsample_200hz(signal, test_freq, &mut cd)?;
+    let actual_sample_rate = downsample_200hz(signal, candidate.frequency, &mut cd)?;
 
     // Calculate samples per symbol based on actual sample rate
     let nsps_down = (actual_sample_rate * SYMBOL_DURATION).round() as usize;
 
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        std::eprintln!("DEBUG: Downsampling at {:.1} Hz (candidate was {:.1} Hz)",
-            test_freq, candidate.frequency);
-
-        // Check symbols 0 and 36 specifically (both should be tone 3 = 18.75 Hz)
-        // Use the refined offset that extract_symbols will use
-        let test_start_offset = 98; // This will be refined by extract_symbols
-        for (sym_idx, sym_name) in [(0, "Symbol 0"), (36, "Symbol 36")].iter() {
-            let sym_start = test_start_offset + sym_idx * 32;
-            let mut check_real = [0.0f32; 32];
-            let mut check_imag = [0.0f32; 32];
-            for i in 0..32 {
-                if sym_start + i < cd.len() {
-                    check_real[i] = cd[sym_start + i].0;
-                    check_imag[i] = cd[sym_start + i].1;
-                }
-            }
-            if let Ok(_) = fft_real(&mut check_real, &mut check_imag, 32) {
-                std::eprintln!("  {} FFT (samples {}..{}):", sym_name, sym_start, sym_start + 32);
-                for i in 0..8 {
-                    let power = check_real[i] * check_real[i] + check_imag[i] * check_imag[i];
-                    let freq_hz = i as f32 * 6.25;
-                    std::eprintln!("    bin {} ({:.2} Hz): {:.2e}", i, freq_hz, power);
-                }
-            }
-        }
-    }
+    // Debug output disabled for production use
+    // Enable in cfg block if needed for debugging
 
     // Convert time offset to sample index and refine it locally
     let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
 
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        std::eprintln!("DEBUG extract_symbols:");
-        std::eprintln!("  actual_sample_rate={:.1} Hz", actual_sample_rate);
-        std::eprintln!("  nsps_down={} samples/symbol", nsps_down);
-        std::eprintln!("  initial_offset={} samples", initial_offset);
-    }
 
     // Do a comprehensive fine time search to find optimal symbol timing
     // Search over a wider range to account for timing drift and downsampling artifacts
@@ -1031,7 +1039,7 @@ pub fn extract_symbols(
         let t_offset = initial_offset + dt;
 
         // Compute sync metric based on Costas array strength
-        let sync = sync_downsampled(&cd, t_offset, None, false);
+        let sync = sync_downsampled(&cd, t_offset, None, false, Some(actual_sample_rate));
 
         // Also check symbol peak power at this offset
         let peak_power = compute_symbol_peak_power(&cd, t_offset, nsps_down);
@@ -1047,22 +1055,6 @@ pub fn extract_symbols(
 
     let start_offset = best_offset;
 
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        let timing_adjustment = best_offset - initial_offset;
-        std::eprintln!("DEBUG extract_symbols: start_offset={}, adjusted by {} samples ({:.1}ms)",
-            start_offset, timing_adjustment,
-            timing_adjustment as f32 * 1000.0 / actual_sample_rate);
-        std::eprintln!("  candidate time={:.3}s, best_metric={:.3}",
-            candidate.time_offset, best_metric);
-        let max_mag = (0..200).fold(0.0f32, |acc, i| {
-            let (r, im) = cd[i];
-            let mag = libm::sqrtf(r*r + im*im);
-            acc.max(mag)
-        });
-        std::eprintln!("  Downsampled buffer (first 200): max magnitude = {:.2e}", max_mag);
-    }
 
     // Extract complex symbol values: cs[tone][symbol] for 8 tones × 79 symbols
     // Store COMPLEX values for multi-symbol soft decoding
@@ -1249,29 +1241,35 @@ pub fn extract_symbols(
 
     let mut bit_idx = 0;
 
-    // Two-symbol coherent combining provides ~3dB SNR improvement over nsym=1
-    // nsym=1: 8 combinations, nsym=2: 64 combinations, nsym=3: 512 combinations
-    const NSYM: usize = 1; // Number of symbols to combine
-    const NT: usize = 8; // 8^2 = 64 possible tone pairs for nsym=2
+    // Multi-symbol soft decoding for improved SNR performance
+    // nsym=1: 8 combinations, decodes down to -16 dB
+    // nsym=2: 64 combinations, decodes down to -15 dB (slightly worse than nsym=1 - needs LLR tuning)
+    // nsym=3: 512 combinations, not yet implemented
+    const NSYM: usize = 2; // Number of symbols to combine
+    const NT: usize = 64; // 8^2 = 64 possible tone combinations for nsym=2
 
-    #[cfg(feature = "std")]
-    {
-        extern crate std;
-        std::eprintln!("DEBUG: Using nsym={} soft decoding", NSYM);
-    }
+    // Uncomment for debugging:
+    // #[cfg(feature = "std")]
+    // {
+    //     extern crate std;
+    //     std::eprintln!("DEBUG: Using nsym={} soft decoding", NSYM);
+    // }
 
     // Process two data symbol blocks
-    // Match WSJT-X: k represents data symbol index (0-28), then compute actual position
+    // Match WSJT-X: k=1..29 (Fortran 1-indexed), we use k=1..29 (adjusted for 0-indexing later)
     for ihalf in 0..2 {
         let base_offset = if ihalf == 0 { 7 } else { 43 };
 
-        let mut k = 0;
-        while k < 29 {
+        // CRITICAL: Start at k=1 (not k=0) to match WSJT-X!
+        // For nsym=2: k=1,3,5,...,29 → pairs (8,9), (10,11), (12,13), ...
+        // For nsym=1: k=1,2,3,...,29 → symbols 8,9,10,...,36
+        let mut k = 1;
+        while k <= 29 {
             if bit_idx >= 174 {
                 break;
             }
 
-            let ks = k + base_offset; // k=0..28 (data symbol index), base_offset=7 or 43
+            let ks = k + base_offset - 1; // k=1..29 (1-indexed), base_offset=7 or 43, result is 0-indexed symbol position
             let mut s2 = [0.0f32; NT]; // Magnitudes for all combinations
 
             if NSYM == 1 {
@@ -1364,20 +1362,58 @@ pub fn extract_symbols(
                 k += NSYM; // Move to next group
             } else if NSYM == 2 {
                 // Two-symbol decoding: coherently combine 2 symbols
+                // Special case: 29 symbols per half = 14 pairs + 1 leftover
+                // Use single-symbol decoding for the last odd symbol (k=29)
+                if k == 29 {
+                    // Single-symbol decoding for last odd symbol
+                    for tone in 0..8 {
+                        let index = GRAY_MAP_INV[tone];
+                        s2[index as usize] = s8[tone][ks];
+                    }
+
+                    // Extract 3 bits from this single symbol
+                    const IBMAX_SINGLE: usize = 2;
+                    for ib in 0..=IBMAX_SINGLE {
+                        if bit_idx >= 174 {
+                            break;
+                        }
+
+                        let bit_pos = IBMAX_SINGLE - ib;
+                        let mut max_mag_1 = -1e30f32;
+                        let mut max_mag_0 = -1e30f32;
+
+                        for i in 0..8 {
+                            let bit_val = (i >> bit_pos) & 1;
+                            if bit_val == 1 {
+                                max_mag_1 = max_mag_1.max(s2[i]);
+                            } else {
+                                max_mag_0 = max_mag_0.max(s2[i]);
+                            }
+                        }
+
+                        llr[bit_idx] = max_mag_1 - max_mag_0;
+                        bit_idx += 1;
+                    }
+
+                    k += NSYM;
+                    continue;
+                }
+
+                // Two-symbol decoding for regular pairs (k=1,3,5,...,27)
+
                 for i in 0..NT {
                     let i2 = (i / 8) % 8; // First symbol's 3-bit index (0-7)
                     let i3 = i % 8;       // Second symbol's 3-bit index (0-7)
 
-                    if ks + 1 < NN {
-                        let tone2 = GRAY_MAP[i2] as usize;
-                        let tone3 = GRAY_MAP[i3] as usize;
-                        let (r2, im2) = cs[tone2][ks];
-                        let (r3, im3) = cs[tone3][ks + 1];
+                    // Always combine the pair (may include sync symbols at boundaries)
+                    let tone2 = GRAY_MAP[i2] as usize;
+                    let tone3 = GRAY_MAP[i3] as usize;
+                    let (r2, im2) = cs[tone2][ks];
+                    let (r3, im3) = cs[tone3][ks + 1];
 
-                        let sum_r = r2 + r3;
-                        let sum_im = im2 + im3;
-                        s2[i] = libm::sqrtf(sum_r * sum_r + sum_im * sum_im);
-                    }
+                    let sum_r = r2 + r3;
+                    let sum_im = im2 + im3;
+                    s2[i] = libm::sqrtf(sum_r * sum_r + sum_im * sum_im);
                 }
 
                 // Extract 6 bits (2 symbols × 3 bits)
@@ -1417,7 +1453,21 @@ pub fn extract_symbols(
                 break;
             }
         }
+
+        // Uncomment for debugging:
+        // #[cfg(feature = "std")]
+        // {
+        //     extern crate std;
+        //     std::eprintln!("DEBUG IHALF: ihalf={} completed, bit_idx now at {}", ihalf, bit_idx);
+        // }
     }
+
+    // Uncomment for debugging:
+    // #[cfg(feature = "std")]
+    // {
+    //     extern crate std;
+    //     std::eprintln!("DEBUG: Finished both halves, total bits extracted: {}", bit_idx);
+    // }
 
     // Normalize LLRs by standard deviation (match WSJT-X normalizebmet)
     let mut sum = 0.0f32;
@@ -1449,7 +1499,7 @@ pub fn extract_symbols(
     #[cfg(feature = "std")]
     {
         extern crate std;
-        std::eprintln!("DEBUG: Multi-symbol soft decoding completed");
+        std::eprintln!("DEBUG: Multi-symbol soft decoding completed (nsym={})", NSYM);
         std::eprintln!("  Extracted {} bits total", bit_idx);
         std::eprintln!("  First 10 LLRs: {:?}", &llr[0..10.min(bit_idx)]);
         std::eprintln!("  Last 10 LLRs: {:?}", &llr[164.min(bit_idx)..174.min(bit_idx)]);
