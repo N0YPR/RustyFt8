@@ -39,9 +39,15 @@ pub fn downsample_200hz(
     let mut x_real = vec![0.0f32; NFFT_IN];
     let mut x_imag = vec![0.0f32; NFFT_IN];
 
-    // Copy signal and zero-pad
-    for i in 0..NMAX {
+    // Copy signal (limited to NFFT_IN) and zero-pad
+    let copy_len = NFFT_IN.min(NMAX);
+    for i in 0..copy_len {
         x_real[i] = signal[i];
+        x_imag[i] = 0.0;
+    }
+    // Zero-pad the rest if needed
+    for i in copy_len..NFFT_IN {
+        x_real[i] = 0.0;
         x_imag[i] = 0.0;
     }
 
