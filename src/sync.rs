@@ -520,10 +520,6 @@ pub fn downsample_200hz(
     let bandwidth = (it - ib + 1) as f32 * df;
     let actual_sample_rate = bandwidth * (NFFT_OUT as f32) / (k as f32);
 
-    #[cfg(feature = "std")]
-    let _unused = (f0, fb, ft, df, k, bandwidth, NFFT_OUT, actual_sample_rate);
-    // Debug output disabled to reduce clutter
-
     // Apply taper to edges
     let taper_len = 101;
     for i in 0..taper_len {
@@ -946,9 +942,6 @@ pub fn extract_symbols(
     // Calculate samples per symbol based on actual sample rate
     let nsps_down = (actual_sample_rate * SYMBOL_DURATION).round() as usize;
 
-    // Debug output disabled for production use
-    // Enable in cfg block if needed for debugging
-
     // Convert time offset to sample index and refine it locally
     let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
 
@@ -1309,21 +1302,7 @@ pub fn extract_symbols(
                 break;
             }
         }
-
-        // Uncomment for debugging:
-        // #[cfg(feature = "std")]
-        // {
-        //     extern crate std;
-        //     std::eprintln!("DEBUG IHALF: ihalf={} completed, bit_idx now at {}", ihalf, bit_idx);
-        // }
     }
-
-    // Uncomment for debugging:
-    // #[cfg(feature = "std")]
-    // {
-    //     extern crate std;
-    //     std::eprintln!("DEBUG: Finished both halves, total bits extracted: {}", bit_idx);
-    // }
 
     // Normalize LLRs by standard deviation (match WSJT-X normalizebmet)
     let mut sum = 0.0f32;
