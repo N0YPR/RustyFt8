@@ -165,72 +165,83 @@ fn main() {
                 eprintln!("    (Testing with forced 1500.0 Hz instead of {:.1} Hz)", cand.frequency);
             }
 
-            let mut llr = vec![0.0f32; 174];
-            match sync::extract_symbols(&signal_15s, &test_cand, &mut llr) {
-                Ok(_) => {
-                    println!("OK");
+            // Multi-pass decoding like WSJT-X: try nsym=1, 2, 3 with multiple scaling factors
+            // Pass 1: nsym=1, Pass 2: nsym=2, Pass 3: nsym=3
+            let scaling_factors = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+            let mut decode_success = false;
+            let mut total_passes = 0;
 
-                    // Show LLR statistics
-                    let mean_llr = llr.iter().sum::<f32>() / 174.0;
-                    let mean_abs_llr = llr.iter().map(|x| x.abs()).sum::<f32>() / 174.0;
-                    println!("     LLR stats: mean={:.2}, mean_abs={:.2}", mean_llr, mean_abs_llr);
+            'outer: for nsym in [1, 2, 3] {
+                if decode_success {
+                    break;
+                }
 
-                    // Try multiple decoding passes with different LLR scalings (like WSJT-X)
-                    let scaling_factors = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
-                    let mut decode_success = false;
+                let mut llr = vec![0.0f32; 174];
+                match sync::extract_symbols(&signal_15s, &test_cand, nsym, &mut llr) {
+                    Ok(_) => {
+                        println!("OK (nsym={})", nsym);
 
-                    for (pass, &scale) in scaling_factors.iter().enumerate() {
-                        if decode_success {
-                            break;
-                        }
+                        // Show LLR statistics
+                        let mean_llr = llr.iter().sum::<f32>() / 174.0;
+                        let mean_abs_llr = llr.iter().map(|x| x.abs()).sum::<f32>() / 174.0;
+                        println!("     LLR stats: mean={:.2}, mean_abs={:.2}", mean_llr, mean_abs_llr);
 
-                        // Scale LLRs
-                        let mut scaled_llr = llr.clone();
-                        for i in 0..174 {
-                            scaled_llr[i] *= scale;
-                        }
-
-                        if pass == 0 {
-                            print!("     Decoding with LDPC (trying {} scaling factors)... ", scaling_factors.len());
-                        }
-
-                        match rustyft8::ldpc::decode(&scaled_llr, 100) {
-                            Some((decoded_bits, iterations)) => {
-                                if pass == 0 {
-                                    print!("SUCCESS (pass {}, scale={:.1}, {} iters)", pass + 1, scale, iterations);
-                                } else {
-                                    println!();
-                                    print!("     SUCCESS on pass {} (scale={:.1}, {} iters)", pass + 1, scale, iterations);
-                                }
-
-                                // LDPC returns 91 bits (77 info + 14 CRC), we need only the first 77
-                                use bitvec::prelude::*;
-                                let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
-
-                                // Convert bits to message (no hash cache available)
-                                match rustyft8::decode(&info_bits, None) {
-                                    Ok(message) => {
-                                        println!(" → \"{}\"", message);
-                                        decode_success = true;
-                                    }
-                                    Err(e) => {
-                                        println!(" → Failed to unpack: {}", e);
-                                    }
-                                }
+                        for (pass, &scale) in scaling_factors.iter().enumerate() {
+                            if decode_success {
+                                break;
                             }
-                            None => {
-                                // Continue to next scaling factor
+
+                            total_passes += 1;
+
+                            // Scale LLRs
+                            let mut scaled_llr = llr.clone();
+                            for i in 0..174 {
+                                scaled_llr[i] *= scale;
+                            }
+
+                            if total_passes == 1 {
+                                print!("     Decoding with LDPC (trying {} nsym × {} scales)... ", 3, scaling_factors.len());
+                            }
+
+                            match rustyft8::ldpc::decode(&scaled_llr, 100) {
+                                Some((decoded_bits, iterations)) => {
+                                    if total_passes == 1 {
+                                        print!("SUCCESS (nsym={}, scale={:.1}, {} iters)", nsym, scale, iterations);
+                                    } else {
+                                        println!();
+                                        print!("     SUCCESS on pass {} (nsym={}, scale={:.1}, {} iters)", total_passes, nsym, scale, iterations);
+                                    }
+
+                                    // LDPC returns 91 bits (77 info + 14 CRC), we need only the first 77
+                                    use bitvec::prelude::*;
+                                    let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
+
+                                    // Convert bits to message (no hash cache available)
+                                    match rustyft8::decode(&info_bits, None) {
+                                        Ok(message) => {
+                                            println!(" → \"{}\"", message);
+                                            decode_success = true;
+                                            break 'outer;
+                                        }
+                                        Err(e) => {
+                                            println!(" → Failed to unpack: {}", e);
+                                        }
+                                    }
+                                }
+                                None => {
+                                    // Continue to next scaling factor
+                                }
                             }
                         }
                     }
-
-                    if !decode_success {
-                        println!("FAILED (all {} passes)", scaling_factors.len());
+                    Err(e) => {
+                        println!("FAILED (nsym={}): {}", nsym, e);
                     }
                 }
-                Err(e) => {
-                    println!("FAILED: {}", e);
-                }
+            }
+
+            if !decode_success {
+                println!("FAILED (all {} passes)", total_passes);
             }
         }
 

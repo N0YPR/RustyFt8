@@ -1001,18 +1001,28 @@ fn compute_symbol_peak_power(cd: &[(f32, f32)], start_offset: i32, nsps: usize) 
 /// # Returns
 /// * `Ok(())` on success
 /// * `Err` if extraction fails
+/// Extract 174 LLR values using multi-symbol soft decoding.
+///
+/// # Arguments
+/// * `signal` - Input signal (15 seconds at 12 kHz)
+/// * `candidate` - Refined candidate from fine_sync
+/// * `nsym` - Number of symbols to combine (1, 2, or 3)
+/// * `llr` - Output buffer for 174 log-likelihood ratios
 pub fn extract_symbols(
     signal: &[f32],
     candidate: &Candidate,
+    nsym: usize,
     llr: &mut [f32],
 ) -> Result<(), String> {
+    if llr.len() < 174 {
+        return Err(alloc::format!("LLR buffer too small"));
+    }
+    if nsym < 1 || nsym > 3 {
+        return Err(alloc::format!("nsym must be 1, 2, or 3"));
+    }
     const NN: usize = 79; // Number of FT8 symbols
     const SYMBOL_DURATION: f32 = 0.16; // FT8 symbol duration in seconds
     const NFFT_SYM: usize = 32; // FFT size for symbol extraction (power of 2)
-
-    if llr.len() < 174 {
-        return Err(alloc::format!("LLR buffer too small: {} (need 174)", llr.len()));
-    }
 
     // Downsample centered on the refined frequency from fine_sync
     // This should already be optimally centered from the fine frequency search
@@ -1242,18 +1252,9 @@ pub fn extract_symbols(
     let mut bit_idx = 0;
 
     // Multi-symbol soft decoding for improved SNR performance
-    // nsym=1: 8 combinations, decodes down to -16 dB
-    // nsym=2: 64 combinations, decodes down to -15 dB (slightly worse than nsym=1 - needs LLR tuning)
-    // nsym=3: 512 combinations, not yet implemented
-    const NSYM: usize = 2; // Number of symbols to combine
-    const NT: usize = 64; // 8^2 = 64 possible tone combinations for nsym=2
-
-    // Uncomment for debugging:
-    // #[cfg(feature = "std")]
-    // {
-    //     extern crate std;
-    //     std::eprintln!("DEBUG: Using nsym={} soft decoding", NSYM);
-    // }
+    // nsym=1: 8 combinations, nsym=2: 64 combinations, nsym=3: 512 combinations
+    // WSJT-X tries all three in multiple decoding passes
+    let nt = 8_usize.pow(nsym as u32); // 8^nsym possible tone combinations
 
     // Process two data symbol blocks
     // Match WSJT-X: k=1..29 (Fortran 1-indexed), we use k=1..29 (adjusted for 0-indexing later)
@@ -1270,13 +1271,13 @@ pub fn extract_symbols(
             }
 
             let ks = k + base_offset - 1; // k=1..29 (1-indexed), base_offset=7 or 43, result is 0-indexed symbol position
-            let mut s2 = [0.0f32; NT]; // Magnitudes for all combinations
+            let mut s2 = alloc::vec![0.0f32; nt]; // Magnitudes for all combinations
 
-            if NSYM == 1 {
+            if nsym == 1 {
                 // Single-symbol decoding
                 // For each tone (0-7), get its power and map to the 3-bit index it represents
                 // s2[index] = power of the tone that decodes to that 3-bit index
-                for tone in 0..NT {
+                for tone in 0..8 {
                     let index = GRAY_MAP_INV[tone];  // Convert tone to 3-bit index
                     s2[index as usize] = s8[tone][ks];
                 }
@@ -1294,7 +1295,7 @@ pub fn extract_symbols(
                     let mut max_mag_0 = -1e30f32;
 
                     // Iterate over 3-bit indices (0-7), s2[index] has the magnitude
-                    for index in 0..NT {
+                    for index in 0..8 {
                         let bit_val = (index >> bit_pos) & 1;
 
                         if bit_val == 1 {
@@ -1308,10 +1309,10 @@ pub fn extract_symbols(
                     bit_idx += 1;
                 }
 
-                k += NSYM; // Move to next symbol (or group)
-            } else if NSYM == 3 {
+                k += nsym; // Move to next symbol (or group)
+            } else if nsym == 3 {
                 // Multi-symbol decoding: coherently combine 3 symbols
-                for i in 0..NT {
+                for i in 0..nt {
                     let i1 = i / 64; // First symbol's tone
                     let i2 = (i / 8) % 8; // Second symbol's tone
                     let i3 = i % 8; // Third symbol's tone
@@ -1341,7 +1342,7 @@ pub fn extract_symbols(
                     let mut max_mag_1 = -1e30f32;
                     let mut max_mag_0 = -1e30f32;
 
-                    for i in 0..NT {
+                    for i in 0..nt {
                         // i already encodes the 9 bits directly
                         // Bit 8-6: first symbol's 3-bit index
                         // Bit 5-3: second symbol's 3-bit index
@@ -1359,8 +1360,8 @@ pub fn extract_symbols(
                     bit_idx += 1;
                 }
 
-                k += NSYM; // Move to next group
-            } else if NSYM == 2 {
+                k += nsym; // Move to next group
+            } else if nsym == 2 {
                 // Two-symbol decoding: coherently combine 2 symbols
                 // Special case: 29 symbols per half = 14 pairs + 1 leftover
                 // Use single-symbol decoding for the last odd symbol (k=29)
@@ -1395,13 +1396,13 @@ pub fn extract_symbols(
                         bit_idx += 1;
                     }
 
-                    k += NSYM;
+                    k += nsym;
                     continue;
                 }
 
                 // Two-symbol decoding for regular pairs (k=1,3,5,...,27)
 
-                for i in 0..NT {
+                for i in 0..nt {
                     let i2 = (i / 8) % 8; // First symbol's 3-bit index (0-7)
                     let i3 = i % 8;       // Second symbol's 3-bit index (0-7)
 
@@ -1430,7 +1431,7 @@ pub fn extract_symbols(
                     let mut max_mag_1 = -1e30f32;
                     let mut max_mag_0 = -1e30f32;
 
-                    for i in 0..NT {
+                    for i in 0..nt {
                         // i encodes the 6 bits directly
                         // Bit 5-3: first symbol's 3-bit index
                         // Bit 2-0: second symbol's 3-bit index
@@ -1447,7 +1448,7 @@ pub fn extract_symbols(
                     bit_idx += 1;
                 }
 
-                k += NSYM; // Move to next group
+                k += nsym; // Move to next group
             } else {
                 // Invalid nsym value
                 break;
@@ -1499,7 +1500,7 @@ pub fn extract_symbols(
     #[cfg(feature = "std")]
     {
         extern crate std;
-        std::eprintln!("DEBUG: Multi-symbol soft decoding completed (nsym={})", NSYM);
+        std::eprintln!("DEBUG: Multi-symbol soft decoding completed (nsym={})", nsym);
         std::eprintln!("  Extracted {} bits total", bit_idx);
         std::eprintln!("  First 10 LLRs: {:?}", &llr[0..10.min(bit_idx)]);
         std::eprintln!("  Last 10 LLRs: {:?}", &llr[164.min(bit_idx)..174.min(bit_idx)]);
