@@ -2,7 +2,7 @@
 //!
 //! Tests the complete pipeline at various SNR levels to verify end-to-end functionality
 
-use rustyft8::{crc, encode, ldpc, pulse, symbol, sync, decode_ft8, DecoderConfig};
+use rustyft8::{crc, encode, ldpc, pulse, symbol, decode_ft8, DecoderConfig};
 use rustyft8::message::CallsignHashCache;
 use bitvec::prelude::*;
 use std::f32;
@@ -137,61 +137,24 @@ fn generate_test_signal(message: &str, snr_db: f32, freq_hz: f32, time_delay: f3
     signal
 }
 
-/// Decode FT8 signal using the full decode pipeline
-fn decode_signal(signal: &[f32]) -> Option<String> {
-    // Coarse sync
-    let candidates = sync::coarse_sync(signal, 100.0, 3000.0, 0.5, 100).ok()?;
-    if candidates.is_empty() {
-        return None;
+/// Decode all FT8 signals in the recording using the multi-signal decoder
+/// Returns all decoded messages
+fn decode_all_signals(signal: &[f32]) -> Vec<String> {
+    // Use optimized config for fast testing (decode top 5 candidates only)
+    // This is sufficient for single-signal tests and much faster
+    let config = DecoderConfig {
+        decode_top_n: 5,
+        ..DecoderConfig::default()
+    };
+    let mut messages = Vec::new();
+
+    match decode_ft8(signal, &config, |msg| {
+        eprintln!("✓ Decoded: {:.1} Hz @ {:.3} s - \"{}\"", msg.frequency, msg.time_offset, msg.message);
+        messages.push(msg.message);
+    }) {
+        Ok(_) => messages,
+        Err(_) => Vec::new(),
     }
-
-    // Try multiple candidates (like ft8detect does)
-    let scaling_factors = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
-    let nsym_values = [1, 2, 3];
-
-    for (cand_idx, candidate) in candidates.iter().take(5).enumerate() {
-        // Fine sync on this candidate
-        let refined = match sync::fine_sync(signal, candidate) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        if cand_idx == 0 {
-            eprintln!("Best candidate: {:.1} Hz @ {:.3} s", refined.frequency, refined.time_offset);
-        }
-
-        // Try multi-pass decoding
-        for &nsym in &nsym_values {
-            let mut llr = vec![0.0f32; 174];
-            if sync::extract_symbols(signal, &refined, nsym, &mut llr).is_err() {
-                continue;
-            }
-
-            for &scale in &scaling_factors {
-                let mut scaled_llr = llr.clone();
-                for v in scaled_llr.iter_mut() {
-                    *v *= scale;
-                }
-
-                if let Some((decoded_bits, iters)) = ldpc::decode(&scaled_llr, 100) {
-                    eprintln!("✓ LDPC SUCCESS: candidate #{}, scale={}, nsym={}, iters={}",
-                             cand_idx + 1, scale, nsym, iters);
-                    let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
-
-                    if let Ok(message) = rustyft8::decode(&info_bits, None) {
-                        if !message.is_empty() {
-                            eprintln!("✓ Decoded: \"{}\"", message);
-                            return Some(message);
-                        } else {
-                            eprintln!("  (empty message, continuing...)");
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    None
 }
 
 /// Test encode→decode round trip at a specific SNR
@@ -210,10 +173,14 @@ fn test_roundtrip(message: &str, snr_db: f32, should_succeed: bool) {
     assert!(has_signal, "Signal should contain non-zero samples");
     eprintln!("✓ Signal generated successfully");
 
-    // Attempt decode
-    if let Some(decoded) = decode_signal(&signal) {
-        eprintln!("✓ Decoded: \"{}\"", decoded);
-        assert_eq!(decoded, message);
+    // Attempt decode using the multi-signal decoder
+    let decoded_messages = decode_all_signals(&signal);
+
+    if !decoded_messages.is_empty() {
+        // For single-signal tests, we expect exactly one message
+        assert_eq!(decoded_messages.len(), 1, "Expected exactly one decoded message");
+        let decoded = &decoded_messages[0];
+        assert_eq!(decoded, message, "Decoded message doesn't match expected");
     } else {
         if should_succeed {
             panic!("Decode failed unexpectedly at {} dB SNR", snr_db);

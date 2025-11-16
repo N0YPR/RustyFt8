@@ -91,12 +91,12 @@ where
     let mut decoded_messages: Vec<String> = Vec::new();
     let mut decode_count = 0;
 
-    // LLR scaling factors to try (like WSJT-X multi-scale approach)
-    let scaling_factors = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+    // LLR scaling factors to try (optimized order - most common values first)
+    let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 2.5, 3.0, 4.0, 5.0, 1.25];
     let nsym_values = [1, 2, 3];
 
     // Process candidates in order of sync quality
-    for candidate in candidates.iter().take(config.decode_top_n) {
+    'candidate_loop: for candidate in candidates.iter().take(config.decode_top_n) {
         // Fine sync on this candidate
         let refined = match sync::fine_sync(signal, candidate) {
             Ok(r) => r,
@@ -142,7 +142,7 @@ where
                                 });
 
                                 // Move to next candidate after successful decode
-                                break;
+                                continue 'candidate_loop;
                             }
                         }
                     }
