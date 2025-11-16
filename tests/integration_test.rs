@@ -2,7 +2,7 @@
 //!
 //! Tests the complete pipeline at various SNR levels to verify end-to-end functionality
 
-use rustyft8::{crc, encode, ldpc, pulse, symbol, sync};
+use rustyft8::{crc, encode, ldpc, pulse, symbol, sync, decode_ft8, DecoderConfig};
 use rustyft8::message::CallsignHashCache;
 use bitvec::prelude::*;
 use std::f32;
@@ -320,4 +320,55 @@ fn test_roundtrip_comprehensive_snr_sweep() {
                   snr_db, if should_succeed { "PASS" } else { "FAIL" });
         test_roundtrip("CQ W1ABC FN42", snr_db as f32, should_succeed);
     }
+}
+
+#[test]
+fn test_multi_signal_decode() {
+    eprintln!("\n=== Testing Multiple Simultaneous Signals ===");
+
+    // Generate two signals at different frequencies and time offsets
+    let signal1 = generate_test_signal("CQ W1ABC FN42", 0.0, 1000.0, 0.0);
+    let signal2 = generate_test_signal("K1ABC W9XYZ RR73", 0.0, 2000.0, 0.0);
+
+    // Mix the signals together (like real-world)
+    let mut mixed_signal = vec![0.0f32; NMAX];
+    for i in 0..NMAX {
+        mixed_signal[i] = signal1[i] + signal2[i];
+    }
+
+    eprintln!("Generated 2 signals:");
+    eprintln!("  Signal 1: 1000 Hz - \"CQ W1ABC FN42\"");
+    eprintln!("  Signal 2: 2000 Hz - \"K1ABC W9XYZ RR73\"");
+    eprintln!();
+
+    // Decode using the multi-signal decoder
+    let config = DecoderConfig {
+        decode_top_n: 10, // Only decode top 10 candidates for faster testing
+        ..DecoderConfig::default()
+    };
+    let mut decoded_messages = Vec::new();
+
+    let count = decode_ft8(&mixed_signal, &config, |msg| {
+        eprintln!("Decoded: {:.1} Hz - \"{}\"", msg.frequency, msg.message);
+        decoded_messages.push((msg.frequency, msg.message.clone()));
+    }).expect("Decode failed");
+
+    eprintln!();
+    eprintln!("Total decoded: {}", count);
+
+    // Verify both signals were decoded
+    assert_eq!(count, 2, "Expected to decode 2 signals");
+
+    // Check that we got both messages
+    let messages: Vec<String> = decoded_messages.iter().map(|(_, m)| m.clone()).collect();
+    assert!(messages.contains(&"CQ W1ABC FN42".to_string()), "Missing first message");
+    assert!(messages.contains(&"K1ABC W9XYZ RR73".to_string()), "Missing second message");
+
+    // Verify approximate frequencies
+    for (freq, _) in &decoded_messages {
+        assert!(*freq > 900.0 && *freq < 1100.0 || *freq > 1900.0 && *freq < 2100.0,
+                "Frequency {} out of expected range", freq);
+    }
+
+    eprintln!("✓ Successfully decoded both signals");
 }
