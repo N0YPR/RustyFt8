@@ -1001,6 +1001,30 @@ fn compute_symbol_peak_power(cd: &[(f32, f32)], start_offset: i32, nsps: usize) 
 /// # Returns
 /// * `Ok(())` on success
 /// * `Err` if extraction fails
+/// Apply phase correction to remove residual frequency offset (like WSJT-X twkfreq1)
+/// This maintains phase coherence between symbols for nsym=2/3 coherent combining
+fn apply_phase_correction(cd: &mut [(f32, f32)], freq_offset_hz: f32, sample_rate: f32) {
+    let dphi = 2.0 * core::f32::consts::PI * freq_offset_hz / sample_rate;
+    let mut phi = 0.0f32;
+
+    for i in 0..cd.len() {
+        let cos_phi = libm::cosf(phi);
+        let sin_phi = libm::sinf(phi);
+
+        // Complex multiplication: cd[i] *= exp(j*phi)
+        let (re, im) = cd[i];
+        cd[i] = (
+            re * cos_phi - im * sin_phi,
+            re * sin_phi + im * cos_phi,
+        );
+
+        phi += dphi;
+        if phi > core::f32::consts::PI {
+            phi -= 2.0 * core::f32::consts::PI;
+        }
+    }
+}
+
 /// Extract 174 LLR values using multi-symbol soft decoding.
 ///
 /// # Arguments
@@ -1025,9 +1049,57 @@ pub fn extract_symbols(
     const NFFT_SYM: usize = 32; // FFT size for symbol extraction (power of 2)
 
     // Downsample centered on the refined frequency from fine_sync
-    // This should already be optimally centered from the fine frequency search
     let mut cd = alloc::vec![(0.0f32, 0.0f32); 4096];
     let actual_sample_rate = downsample_200hz(signal, candidate.frequency, &mut cd)?;
+
+    // CRITICAL for nsym=2/3: Apply fine phase correction to remove residual frequency offset
+    // Even 0.1 Hz error causes phase drift that decorrelates adjacent symbols
+    // Search ±0.3 Hz with 0.05 Hz resolution to find optimal phase tracking
+    let time_offset_samples = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
+
+    let mut best_correction = 0.0f32;
+    let mut best_sync = 0.0f32;
+
+    // Only do fine phase correction for nsym=2/3 (nsym=1 doesn't need phase coherence)
+    if nsym >= 2 {
+        let mut cd_test = cd.clone();
+
+        // Initial sync without correction
+        let initial_sync = sync_downsampled(&cd, time_offset_samples, None, false, Some(actual_sample_rate));
+        best_sync = initial_sync;
+
+        for correction_idx in -6..=6 {
+            let freq_correction = correction_idx as f32 * 0.05; // ±0.3 Hz in 0.05 Hz steps
+
+            if correction_idx == 0 {
+                continue; // Already tested initial
+            }
+
+            // Apply phase correction
+            cd_test.copy_from_slice(&cd);
+            apply_phase_correction(&mut cd_test, freq_correction, actual_sample_rate);
+
+            // Test sync quality
+            let sync = sync_downsampled(&cd_test, time_offset_samples, None, false, Some(actual_sample_rate));
+
+            if sync > best_sync {
+                best_sync = sync;
+                best_correction = freq_correction;
+            }
+        }
+
+        // Apply best correction to working buffer
+        if best_correction.abs() > 0.001 {
+            apply_phase_correction(&mut cd, best_correction, actual_sample_rate);
+
+            #[cfg(feature = "std")]
+            {
+                extern crate std;
+                std::eprintln!("DEBUG: Phase correction for nsym={}: {:.3} Hz (sync improved {:.1}% from {:.3} to {:.3})",
+                    nsym, best_correction, 100.0 * (best_sync - initial_sync) / initial_sync, initial_sync, best_sync);
+            }
+        }
+    }
 
     // Calculate samples per symbol based on actual sample rate
     let nsps_down = (actual_sample_rate * SYMBOL_DURATION).round() as usize;
