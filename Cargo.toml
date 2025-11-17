@@ -13,6 +13,7 @@ rayon = "1.8"
 
 [dev-dependencies]
 rstest = "0.23"
+hound = "3.5"
 
 [[bench]]
 name = "parallel_benchmark"
