@@ -85,31 +85,44 @@ From `MULTIPASS_ANALYSIS.md` predictions:
 
 **Conclusion:** Multi-pass infrastructure works, but signal subtraction effectiveness blocks progress.
 
-### 🎯 Next Steps
+### 🎯 Next Steps (UPDATED 2025-11-17)
 
-**Priority 1: Fix Signal Subtraction** (Critical Path)
+**SIGNAL SUBTRACTION BLOCKED** ❌
 
-Option A: **Extract Pre-LDPC Tones** (Best approach)
-- Modify decoder to save hard decision tones before LDPC correction
-- Use these original tones for signal reconstruction
-- Expected: Much better alignment with actual audio
+After extensive investigation (see [SUBTRACTION_INVESTIGATION.md](SUBTRACTION_INVESTIGATION.md)):
+- ✅ Implemented re-encoded tones (matches WSJT-X)
+- ✅ Implemented frequency refinement (±3 Hz)
+- ✅ Implemented time refinement (±90 samples, matches WSJT-X)
+- ✅ Implemented spectral residual metric (matches WSJT-X algorithm exactly)
 
-Option B: **Add Phase Tracking**
-- Estimate carrier phase offset during demodulation
-- Apply phase correction during reconstruction
-- May help but won't fix tone mismatch issue
+**Result:** Still only **-0.4 dB power reduction** on real signals (vs -40.3 dB on synthetic).
 
-Option C: **Frequency Refinement**
-- Search ±5 Hz around estimated frequency
-- Similar to time refinement but for frequency axis
-- Likely insufficient if tone mismatch is the root cause
+**Root Cause:** Missing real-world signal characteristics:
+- Phase tracking/continuity
+- Multipath propagation effects
+- Signal model accuracy (GFSK parameters, numerical precision)
 
-**Recommendation:** Pursue Option A first. The tone mismatch from LDPC correction is likely the primary issue. Phase and frequency refinement can be added after verifying tone accuracy.
+**Recommended Path Forward:**
 
-**Priority 2: After Subtraction Works**
-1. LLR normalization (small gain expected)
-2. Re-test OSD effectiveness
-3. A Priori decoding for final gap
+**Option A: Validate WSJT-X Behavior** (HIGHEST PRIORITY)
+- Run WSJT-X `jt9` on test file with diagnostics
+- Check if WSJT-X actually achieves good subtraction or if gap is elsewhere (OSD, A Priori)
+- **Impact:** May reveal we're solving the wrong problem
+- **Effort:** Low (just run their tool)
+
+**Option B: Phase Tracking**
+- Save phase estimates during symbol extraction
+- Apply same phase trajectory during reconstruction
+- **Impact:** Could be 10-20 dB improvement if phase is the issue
+- **Effort:** Moderate
+
+**Option C: Pivot to Decoder Improvements**
+- Accept imperfect subtraction, simplify code
+- Focus on OSD, A Priori, LLR normalization
+- **Impact:** May have bigger payoff than perfect subtraction
+- **Effort:** Low to moderate
+
+**Recommendation:** Start with Option A to validate assumptions before further subtraction work.
 
 ### 📁 Modified Files
 
