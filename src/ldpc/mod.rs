@@ -14,6 +14,8 @@
 mod constants;
 mod encode;
 mod decode;
+mod osd;
 
 pub use encode::encode;
 pub use decode::decode;
+pub use osd::osd_decode;

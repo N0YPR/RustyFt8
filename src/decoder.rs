@@ -96,7 +96,8 @@ where
     }
 
     // LLR scaling factors to try (optimized order - most common values first)
-    let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 2.5, 3.0, 4.0, 5.0, 1.25];
+    // Expanded range to help decode weaker signals
+    let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 1.25, 0.9, 1.1, 1.3, 1.7, 2.5, 3.0, 4.0, 5.0, 0.6, 0.8];
     let nsym_values = [1, 2, 3];
 
     // Process all candidates in parallel, collecting successful decodes
@@ -122,7 +123,8 @@ where
                         *v *= scale;
                     }
 
-                    if let Some((decoded_bits, iters)) = ldpc::decode(&scaled_llr, 100) {
+                    // Try Belief Propagation first
+                    if let Some((decoded_bits, iters)) = ldpc::decode(&scaled_llr, 200) {
                         let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
 
                         if let Ok(message) = crate::decode(&info_bits, None) {
@@ -144,6 +146,43 @@ where
                                         nsym,
                                     },
                                 });
+                            }
+                        }
+                    }
+                }
+
+                // If BP failed for all scales, try OSD as fallback (only for nsym=1)
+                if nsym == 1 {
+                    // Try OSD with multiple orders and LLR scalings
+                    for &osd_order in &[0, 1, 2] {
+                        for &osd_scale in &[1.0, 1.5, 0.75, 2.0] {
+                            let mut scaled_llr_osd = llr.clone();
+                            for v in scaled_llr_osd.iter_mut() {
+                                *v *= osd_scale;
+                            }
+
+                            if let Some(decoded_bits) = ldpc::osd_decode(&scaled_llr_osd, osd_order) {
+                                let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
+
+                                if let Ok(message) = crate::decode(&info_bits, None) {
+                                    if !message.is_empty() {
+                                        let snr_db = (refined.sync_power.log10() * 10.0 - 30.0) as i32;
+
+                                        return Some(DecodeResult {
+                                            candidate_idx,
+                                            message: DecodedMessage {
+                                                message,
+                                                frequency: refined.frequency,
+                                                time_offset: refined.time_offset,
+                                                sync_power: refined.sync_power,
+                                                snr_db,
+                                                ldpc_iterations: 0, // OSD doesn't use iterations
+                                                llr_scale: osd_scale,
+                                                nsym,
+                                            },
+                                        });
+                                    }
+                                }
                             }
                         }
                     }
