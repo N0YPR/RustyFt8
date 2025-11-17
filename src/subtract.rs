@@ -197,6 +197,16 @@ pub fn subtract_ft8_signal(
     // Low-pass filter to get smoothed amplitude estimate
     filter.apply(&mut camp, NFRAME)?;
 
+    // Calculate power before subtraction (for debugging)
+    let mut power_before = 0.0f64;
+    for i in 0..NFRAME {
+        let j_signed = nstart + i as i32;
+        if j_signed >= 0 && (j_signed as usize) < audio.len() {
+            let j = j_signed as usize;
+            power_before += (audio[j] as f64).powi(2);
+        }
+    }
+
     // Reconstruct and subtract the signal
     for i in 0..NFRAME {
         // Handle negative start position
@@ -215,6 +225,22 @@ pub fn subtract_ft8_signal(
             // Subtract from audio
             audio[j] -= reconstructed;
         }
+    }
+
+    // Calculate power after subtraction (for debugging)
+    let mut power_after = 0.0f64;
+    for i in 0..NFRAME {
+        let j_signed = nstart + i as i32;
+        if j_signed >= 0 && (j_signed as usize) < audio.len() {
+            let j = j_signed as usize;
+            power_after += (audio[j] as f64).powi(2);
+        }
+    }
+
+    // Report power reduction
+    if power_before > 0.0 {
+        let reduction_db = 10.0 * (power_after / power_before).log10();
+        eprintln!("  Subtraction @ {:.1} Hz: {:.1} dB power change", frequency, reduction_db);
     }
 
     Ok(())

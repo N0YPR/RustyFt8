@@ -136,6 +136,11 @@ where
                         if let Err(e) = symbol::map(&codeword, &mut tones) {
                             eprintln!("Warning: Failed to map codeword to tones: {}", e);
                             tones = [0u8; 79]; // Use dummy tones if mapping fails
+                        } else {
+                            // Show first 12 tones (past first Costas sync) for debugging
+                            eprintln!("DEBUG: Tones [{}, {}, {}, {}, {}, {}, {}, | {}, {}, {}, {}, {}, ...]",
+                                tones[0], tones[1], tones[2], tones[3], tones[4], tones[5], tones[6],
+                                tones[7], tones[8], tones[9], tones[10], tones[11]);
                         }
 
                         let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
@@ -278,10 +283,18 @@ where
 
     for pass_num in 0..max_passes {
         eprintln!("\n=== Pass {} ===", pass_num + 1);
+
+        // Lower sync threshold for subsequent passes to find weaker signals
+        let mut pass_config = config.clone();
+        if pass_num > 0 {
+            pass_config.sync_threshold *= 0.8; // Reduce by 20% each pass
+            eprintln!("Lowered sync threshold to {:.3} for pass {}", pass_config.sync_threshold, pass_num + 1);
+        }
+
         let mut pass_decodes = Vec::new();
 
         // Decode signals in current audio
-        decode_ft8(&working_signal, config, |msg| {
+        decode_ft8(&working_signal, &pass_config, |msg| {
             // Only report new messages (deduplication)
             if !all_decoded_messages.contains(&msg.message) {
                 all_decoded_messages.push(msg.message.clone());
