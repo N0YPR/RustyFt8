@@ -140,13 +140,16 @@ impl LowPassFilter {
     }
 }
 
-/// Subtract a decoded FT8 signal from audio
+/// Subtract a decoded FT8 signal from audio with time refinement
+///
+/// Searches ±60 samples around the estimated time offset to find the best
+/// alignment before subtracting (following WSJT-X's approach).
 ///
 /// # Arguments
 /// * `audio` - Input/output audio buffer (modified in place)
 /// * `tones` - Decoded tone sequence (79 symbols, values 0-7)
 /// * `frequency` - Signal carrier frequency in Hz
-/// * `time_offset` - Signal time offset in seconds
+/// * `time_offset` - Initial signal time offset estimate in seconds
 ///
 /// # Returns
 /// * `Ok(())` on success
@@ -156,6 +159,54 @@ pub fn subtract_ft8_signal(
     tones: &[u8; 79],
     frequency: f32,
     time_offset: f32,
+) -> Result<(), String> {
+    // Search for best time alignment (±60 samples, every 15 samples)
+    let search_offsets = [-60, -45, -30, -15, 0, 15, 30, 45, 60];
+    let mut best_offset = 0i32;
+    let mut best_power_after = f64::INFINITY; // Track minimum power after subtraction
+
+    // Try each offset and measure power reduction
+    for &offset_samples in &search_offsets {
+        let test_time = time_offset + (offset_samples as f32 / SAMPLE_RATE);
+        let mut audio_copy = audio.to_vec();
+
+        // Try subtracting at this offset
+        subtract_ft8_signal_internal(&mut audio_copy, tones, frequency, test_time, false)?;
+
+        // Measure power after subtraction
+        let nstart = (test_time * SAMPLE_RATE) as i32;
+        let mut power_after = 0.0f64;
+        for i in 0..NFRAME.min(audio_copy.len()) {
+            let j_signed = nstart + i as i32;
+            if j_signed >= 0 && (j_signed as usize) < audio_copy.len() {
+                power_after += (audio_copy[j_signed as usize] as f64).powi(2);
+            }
+        }
+
+        // Pick offset that gives minimum power after subtraction
+        if power_after < best_power_after {
+            best_power_after = power_after;
+            best_offset = offset_samples;
+        }
+    }
+
+    // Apply subtraction with best offset
+    let refined_time = time_offset + (best_offset as f32 / SAMPLE_RATE);
+    if best_offset != 0 {
+        eprintln!("  Time refinement: {:+3} samples ({:+.3} ms)",
+            best_offset, best_offset as f32 * 1000.0 / SAMPLE_RATE);
+    }
+
+    subtract_ft8_signal_internal(audio, tones, frequency, refined_time, true)
+}
+
+/// Internal subtraction function (no time refinement)
+fn subtract_ft8_signal_internal(
+    audio: &mut [f32],
+    tones: &[u8; 79],
+    frequency: f32,
+    time_offset: f32,
+    report_power: bool,
 ) -> Result<(), String> {
     // Generate complex reference signal
     let mut pulse_buf = vec![0.0f32; 3 * NSPS];
@@ -237,8 +288,8 @@ pub fn subtract_ft8_signal(
         }
     }
 
-    // Report power reduction
-    if power_before > 0.0 {
+    // Report power reduction (only if requested)
+    if report_power && power_before > 0.0 {
         let reduction_db = 10.0 * (power_after / power_before).log10();
         eprintln!("  Subtraction @ {:.1} Hz: {:.1} dB power change", frequency, reduction_db);
     }
