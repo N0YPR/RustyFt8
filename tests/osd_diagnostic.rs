@@ -49,8 +49,8 @@ fn diagnose_osd_effectiveness() {
         } else {
             bp_fail += 1;
 
-            // Try OSD
-            let osd_result = ldpc::osd_decode(&llr, 0);
+            // Try OSD with order-1 (allows single bit flips)
+            let osd_result = ldpc::osd_decode(&llr, 1);
 
             if osd_result.is_some() {
                 osd_success += 1;
