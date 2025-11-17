@@ -7,6 +7,7 @@ pub mod pulse;
 pub mod wav;
 pub mod sync;
 pub mod decoder;
+pub mod subtract;
 
 pub use message::{encode, decode};
 pub use decoder::{decode_ft8, DecodedMessage, DecoderConfig};
