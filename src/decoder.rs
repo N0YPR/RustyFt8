@@ -115,6 +115,8 @@ where
             // Try multi-pass decoding (different nsym and LLR scales)
             for &nsym in &nsym_values {
                 let mut llr = vec![0.0f32; 174];
+
+                // Extract symbols as LLRs for LDPC decoding
                 if sync::extract_symbols(signal, &refined, nsym, &mut llr).is_err() {
                     continue;
                 }
@@ -125,22 +127,18 @@ where
                         *v *= scale;
                     }
 
-                    // Try Belief Propagation first
-                    if let Some((decoded_bits, iters)) = ldpc::decode(&scaled_llr, 200) {
-                        // LDPC decode returns 91-bit message, need to re-encode to 174-bit codeword
-                        let mut codeword = bitvec![u8, Msb0; 0; 174];
-                        ldpc::encode(&decoded_bits, &mut codeword);
-
-                        // Convert codeword to tones for signal subtraction
+                    // Use hybrid BP/OSD decoder matching WSJT-X strategy:
+                    // - BP for 30 iterations with snapshots at iterations 1, 2, 3
+                    // - If BP fails, try OSD order 2 with each saved snapshot
+                    // - Multiple OSD attempts explore different solution space regions
+                    if let Some((decoded_bits, iters)) = ldpc::decode_hybrid(&scaled_llr) {
+                        // Re-encode the corrected message to get tones for signal subtraction
+                        // (following WSJT-X: use LDPC-corrected tones, not original noisy demodulation)
+                        let mut re_encoded_codeword = bitvec![u8, Msb0; 0; 174];
+                        ldpc::encode(&decoded_bits, &mut re_encoded_codeword);
                         let mut tones = [0u8; 79];
-                        if let Err(e) = symbol::map(&codeword, &mut tones) {
-                            eprintln!("Warning: Failed to map codeword to tones: {}", e);
-                            tones = [0u8; 79]; // Use dummy tones if mapping fails
-                        } else {
-                            // Show first 12 tones (past first Costas sync) for debugging
-                            eprintln!("DEBUG: Tones [{}, {}, {}, {}, {}, {}, {}, | {}, {}, {}, {}, {}, ...]",
-                                tones[0], tones[1], tones[2], tones[3], tones[4], tones[5], tones[6],
-                                tones[7], tones[8], tones[9], tones[10], tones[11]);
+                        if symbol::map(&re_encoded_codeword, &mut tones).is_err() {
+                            continue; // Skip if tone mapping fails
                         }
 
                         let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
@@ -165,55 +163,6 @@ where
                                         tones,
                                     },
                                 });
-                            }
-                        }
-                    }
-                }
-
-                // If BP failed for all scales, try OSD as fallback (only for nsym=1)
-                if nsym == 1 {
-                    // Try OSD with multiple orders and LLR scalings
-                    for &osd_order in &[0, 1, 2] {
-                        for &osd_scale in &[1.0, 1.5, 0.75, 2.0] {
-                            let mut scaled_llr_osd = llr.clone();
-                            for v in scaled_llr_osd.iter_mut() {
-                                *v *= osd_scale;
-                            }
-
-                            if let Some(decoded_bits) = ldpc::osd_decode(&scaled_llr_osd, osd_order) {
-                                // LDPC decode returns 91-bit message, need to re-encode to 174-bit codeword
-                                let mut codeword = bitvec![u8, Msb0; 0; 174];
-                                ldpc::encode(&decoded_bits, &mut codeword);
-
-                                // Convert codeword to tones for signal subtraction
-                                let mut tones = [0u8; 79];
-                                if let Err(e) = symbol::map(&codeword, &mut tones) {
-                                    eprintln!("Warning: Failed to map codeword to tones: {}", e);
-                                    tones = [0u8; 79]; // Use dummy tones if mapping fails
-                                }
-
-                                let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
-
-                                if let Ok(message) = crate::decode(&info_bits, None) {
-                                    if !message.is_empty() {
-                                        let snr_db = (refined.sync_power.log10() * 10.0 - 30.0) as i32;
-
-                                        return Some(DecodeResult {
-                                            candidate_idx,
-                                            message: DecodedMessage {
-                                                message,
-                                                frequency: refined.frequency,
-                                                time_offset: refined.time_offset,
-                                                sync_power: refined.sync_power,
-                                                snr_db,
-                                                ldpc_iterations: 0, // OSD doesn't use iterations
-                                                llr_scale: osd_scale,
-                                                nsym,
-                                                tones,
-                                            },
-                                        });
-                                    }
-                                }
                             }
                         }
                     }
