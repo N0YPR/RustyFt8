@@ -10,4 +10,4 @@ pub mod decoder;
 pub mod subtract;
 
 pub use message::{encode, decode};
-pub use decoder::{decode_ft8, DecodedMessage, DecoderConfig};
+pub use decoder::{decode_ft8, decode_ft8_multipass, DecodedMessage, DecoderConfig};

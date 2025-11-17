@@ -171,7 +171,7 @@ pub fn subtract_ft8_signal(
         NSPS,
     )?;
 
-    // Calculate start position in audio
+    // Calculate start position in audio (can be negative)
     let nstart = (time_offset * SAMPLE_RATE) as i32;
 
     // Initialize filter
@@ -182,8 +182,10 @@ pub fn subtract_ft8_signal(
     let mut camp = vec![Complex::new(0.0, 0.0); nfft];
 
     for i in 0..NFRAME {
-        let j = nstart as usize + i;
-        if j < audio.len() {
+        // Handle negative start position
+        let j_signed = nstart + i as i32;
+        if j_signed >= 0 && (j_signed as usize) < audio.len() {
+            let j = j_signed as usize;
             // camp[i] = audio[j] * conj(cref[i])
             camp[i] = Complex::new(
                 audio[j] * cref[i].0,  // Real part: audio * cos
@@ -197,8 +199,10 @@ pub fn subtract_ft8_signal(
 
     // Reconstruct and subtract the signal
     for i in 0..NFRAME {
-        let j = nstart as usize + i;
-        if j < audio.len() {
+        // Handle negative start position
+        let j_signed = nstart + i as i32;
+        if j_signed >= 0 && (j_signed as usize) < audio.len() {
+            let j = j_signed as usize;
             // reconstructed = 2 * Re{cref[i] * camp[i]}
             // Complex multiplication: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
             let re = cref[i].0;  // a = cos(phi)

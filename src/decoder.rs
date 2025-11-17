@@ -3,7 +3,7 @@
 //! Implements the complete FT8 decode pipeline for processing recordings with multiple signals.
 //! Follows WSJT-X architecture: scans for candidates, decodes each, reports immediately via callback.
 
-use crate::{ldpc, sync};
+use crate::{ldpc, symbol, sync};
 use bitvec::prelude::*;
 use rayon::prelude::*;
 
@@ -26,6 +26,8 @@ pub struct DecodedMessage {
     pub llr_scale: f32,
     /// Number of symbols used for demodulation (1, 2, or 3)
     pub nsym: usize,
+    /// Tone sequence (79 tones, values 0-7) for signal subtraction
+    pub tones: [u8; 79],
 }
 
 /// Internal struct to track decode results with candidate ordering
@@ -125,6 +127,17 @@ where
 
                     // Try Belief Propagation first
                     if let Some((decoded_bits, iters)) = ldpc::decode(&scaled_llr, 200) {
+                        // LDPC decode returns 91-bit message, need to re-encode to 174-bit codeword
+                        let mut codeword = bitvec![u8, Msb0; 0; 174];
+                        ldpc::encode(&decoded_bits, &mut codeword);
+
+                        // Convert codeword to tones for signal subtraction
+                        let mut tones = [0u8; 79];
+                        if let Err(e) = symbol::map(&codeword, &mut tones) {
+                            eprintln!("Warning: Failed to map codeword to tones: {}", e);
+                            tones = [0u8; 79]; // Use dummy tones if mapping fails
+                        }
+
                         let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
 
                         if let Ok(message) = crate::decode(&info_bits, None) {
@@ -144,6 +157,7 @@ where
                                         ldpc_iterations: iters,
                                         llr_scale: scale,
                                         nsym,
+                                        tones,
                                     },
                                 });
                             }
@@ -162,6 +176,17 @@ where
                             }
 
                             if let Some(decoded_bits) = ldpc::osd_decode(&scaled_llr_osd, osd_order) {
+                                // LDPC decode returns 91-bit message, need to re-encode to 174-bit codeword
+                                let mut codeword = bitvec![u8, Msb0; 0; 174];
+                                ldpc::encode(&decoded_bits, &mut codeword);
+
+                                // Convert codeword to tones for signal subtraction
+                                let mut tones = [0u8; 79];
+                                if let Err(e) = symbol::map(&codeword, &mut tones) {
+                                    eprintln!("Warning: Failed to map codeword to tones: {}", e);
+                                    tones = [0u8; 79]; // Use dummy tones if mapping fails
+                                }
+
                                 let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
 
                                 if let Ok(message) = crate::decode(&info_bits, None) {
@@ -179,6 +204,7 @@ where
                                                 ldpc_iterations: 0, // OSD doesn't use iterations
                                                 llr_scale: osd_scale,
                                                 nsym,
+                                                tones,
                                             },
                                         });
                                     }
@@ -220,6 +246,84 @@ where
     }
 
     Ok(decode_count)
+}
+
+/// Decode all FT8 signals with multi-pass subtraction (like WSJT-X)
+///
+/// Performs multiple decode passes, subtracting decoded signals between passes
+/// to reveal weaker signals that were masked by stronger ones.
+///
+/// # Arguments
+///
+/// * `signal` - 15-second audio recording at 12 kHz sample rate
+/// * `config` - Decoder configuration
+/// * `max_passes` - Maximum number of decode passes (typically 2-3)
+/// * `callback` - Called immediately for each decoded message. Returns `true` to continue, `false` to stop.
+///
+/// # Returns
+///
+/// Total number of unique messages decoded across all passes
+pub fn decode_ft8_multipass<F>(
+    signal: &[f32],
+    config: &DecoderConfig,
+    max_passes: usize,
+    mut callback: F,
+) -> Result<usize, &'static str>
+where
+    F: FnMut(DecodedMessage) -> bool,
+{
+    let mut working_signal = signal.to_vec();
+    let mut total_decodes = 0;
+    let mut all_decoded_messages: Vec<String> = Vec::new();
+
+    for pass_num in 0..max_passes {
+        eprintln!("\n=== Pass {} ===", pass_num + 1);
+        let mut pass_decodes = Vec::new();
+
+        // Decode signals in current audio
+        decode_ft8(&working_signal, config, |msg| {
+            // Only report new messages (deduplication)
+            if !all_decoded_messages.contains(&msg.message) {
+                all_decoded_messages.push(msg.message.clone());
+                pass_decodes.push(msg.clone());
+
+                // Report to user
+                let should_continue = callback(msg);
+                if !should_continue {
+                    return false;
+                }
+            }
+            true
+        })?;
+
+        let pass_count = pass_decodes.len();
+        total_decodes += pass_count;
+        eprintln!("Pass {} decoded: {} new messages", pass_num + 1, pass_count);
+
+        // Stop if no new signals found
+        if pass_count == 0 {
+            eprintln!("No new signals found, stopping");
+            break;
+        }
+
+        // Subtract decoded signals (if not last pass)
+        if pass_num < max_passes - 1 {
+            eprintln!("Subtracting {} signals from audio...", pass_count);
+            for decoded in &pass_decodes {
+                if let Err(e) = crate::subtract::subtract_ft8_signal(
+                    &mut working_signal,
+                    &decoded.tones,
+                    decoded.frequency,
+                    decoded.time_offset,
+                ) {
+                    eprintln!("Warning: Signal subtraction failed: {}", e);
+                }
+            }
+        }
+    }
+
+    eprintln!("\n=== Total: {} unique messages decoded ===\n", total_decodes);
+    Ok(total_decodes)
 }
 
 #[cfg(test)]
