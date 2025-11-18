@@ -62,7 +62,7 @@ impl Default for DecoderConfig {
             sync_threshold: 0.5,
             max_candidates: 100,
             decode_top_n: 30, // Balance between recall (finding signals) and precision (avoiding false positives)
-            min_snr_db: -23,  // Reject very weak dubious decodes while allowing most real signals
+            min_snr_db: -18,  // Allow decoding down to -18 dB (WSJT-X typical minimum)
         }
     }
 }
@@ -268,12 +268,9 @@ where
     for pass_num in 0..max_passes {
         eprintln!("\n=== Pass {} ===", pass_num + 1);
 
-        // Lower sync threshold for subsequent passes to find weaker signals
-        let mut pass_config = config.clone();
-        if pass_num > 0 {
-            pass_config.sync_threshold *= 0.8; // Reduce by 20% each pass
-            eprintln!("Lowered sync threshold to {:.3} for pass {}", pass_config.sync_threshold, pass_num + 1);
-        }
+        // Keep same config for all passes to avoid false positives from subtraction artifacts
+        // (Lowering sync threshold makes it easier to find spurious peaks in residuals)
+        let pass_config = config.clone();
 
         let mut pass_decodes = Vec::new();
 

@@ -108,7 +108,7 @@ fn test_real_recording_with_custom_config() {
         sync_threshold: 0.4,  // Lower threshold to catch weaker signals
         max_candidates: 200,
         decode_top_n: 10,     // Use conservative decode_top_n to reduce false positives
-        min_snr_db: -21,      // Standard SNR threshold
+        min_snr_db: -18,      // Standard SNR threshold
     };
 
     let mut count = 0;
