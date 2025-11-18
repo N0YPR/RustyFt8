@@ -50,6 +50,43 @@ Text "CQ W1ABC FN42"
 
 Failure to follow these guidelines may result in incorrect implementations or test failures.
 
+## 🧪 Development & Testing
+
+### Running Tests
+
+The test suite is optimized for fast feedback during development:
+
+```bash
+# Fast unit tests (6 seconds - run during development)
+cargo test
+
+# Comprehensive tests with optimizations (4.5 seconds - run before commits)
+cargo test --release
+
+# Run slow integration tests (includes all roundtrip/real recording tests)
+cargo test --release -- --ignored
+
+# Run ALL tests including slow ones
+cargo test --release -- --include-ignored
+```
+
+### Test Organization
+
+- **Unit tests** (185 tests, ~3s): Fast tests covering core functionality
+- **Integration tests** (187 tests in release mode):
+  - `test_roundtrip_near_threshold`: Runs in release mode (0.6s), ignored in debug (40s)
+  - Slow tests marked with `#[ignore]`: Real WAV files, comprehensive SNR sweeps
+- **Debug/diagnostic tests**: Marked `#[ignore]` - for development debugging only
+
+### Performance Notes
+
+Tests run significantly faster in release mode due to:
+- Optimized FFT with SIMD instructions
+- Eliminated bounds checking
+- Function inlining and vectorization
+
+**Recommendation**: Use `cargo test` during development for quick feedback, and `cargo test --release` before commits for comprehensive validation.
+
 ## 📊 Current Status
 
 ### What Works

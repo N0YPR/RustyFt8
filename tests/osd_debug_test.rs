@@ -3,6 +3,7 @@ use hound;
 use bitvec::prelude::*;
 
 #[test]
+#[ignore] // Debug test - run with: cargo test -- --ignored
 fn debug_first_osd_failure() {
     let wav_path = "tests/test_data/210703_133430.wav";
     let mut reader = hound::WavReader::open(wav_path).expect("Failed to open WAV file");

@@ -1,6 +1,7 @@
 use rustyft8::{pulse, subtract};
 
 #[test]
+#[ignore] // Debug test - run with: cargo test -- --ignored
 fn debug_subtract_simple() {
     // Create a very simple test: single frequency sine wave
     // Generate reference signal at 1500 Hz

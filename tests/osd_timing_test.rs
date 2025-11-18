@@ -20,6 +20,7 @@ fn create_message91(text: &str) -> Result<BitVec<u8, Msb0>, String> {
 }
 
 #[test]
+#[ignore] // Timing test - run with: cargo test -- --ignored
 fn test_osd_timing() {
     let text = "CQ N0YPR DM42";
     let message91 = create_message91(text).expect("Failed to encode message");

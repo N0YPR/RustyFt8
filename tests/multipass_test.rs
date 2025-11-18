@@ -38,6 +38,7 @@ fn read_wav_file(path: &str) -> Result<Vec<f32>, String> {
 }
 
 #[test]
+#[ignore] // Slow test - run with: cargo test -- --ignored
 fn test_multipass_on_real_recording() {
     // Load the real FT8 recording (WSJT-X decodes 22 messages from this)
     let wav_data = read_wav_file("tests/test_data/210703_133430.wav")

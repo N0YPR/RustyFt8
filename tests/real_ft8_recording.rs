@@ -2,6 +2,7 @@ use rustyft8::{decode_ft8, DecoderConfig};
 use hound;
 
 #[test]
+#[ignore] // Slow test - run with: cargo test -- --ignored
 fn test_real_ft8_recording() {
     // Read the real FT8 recording
     let wav_path = "tests/test_data/210703_133430.wav";

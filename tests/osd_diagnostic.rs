@@ -2,6 +2,7 @@ use rustyft8::{sync, DecoderConfig, ldpc};
 use hound;
 
 #[test]
+#[ignore] // Diagnostic test - run with: cargo test -- --ignored
 fn diagnose_osd_effectiveness() {
     let wav_path = "tests/test_data/210703_133430.wav";
     let mut reader = hound::WavReader::open(wav_path).expect("Failed to open WAV file");

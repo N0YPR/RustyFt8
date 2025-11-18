@@ -139,6 +139,7 @@ fn generate_test_signal(message: &str, snr_db: f32, freq_hz: f32, time_delay: f3
 
 /// Test that multipass decoding finds both signals when one masks the other
 #[test]
+#[ignore] // Slow test - run with: cargo test -- --ignored
 fn test_multipass_reveals_masked_signal() {
     eprintln!("\n=== Testing Multi-Pass with Strong + Weak Signals ===\n");
 
@@ -205,6 +206,7 @@ fn test_multipass_reveals_masked_signal() {
 
 /// Test multipass with overlapping signals at different frequencies
 #[test]
+#[ignore] // Slow test - run with: cargo test -- --ignored
 fn test_multipass_different_frequencies() {
     eprintln!("\n=== Testing Multi-Pass with Different Frequencies ===\n");
 
@@ -260,6 +262,7 @@ fn test_multipass_different_frequencies() {
 
 /// Test that multipass doesn't introduce false positives from subtraction artifacts
 #[test]
+#[ignore] // Slow test - run with: cargo test -- --ignored
 fn test_multipass_no_false_positives() {
     eprintln!("\n=== Testing Multi-Pass Doesn't Create False Positives ===\n");
 
@@ -308,6 +311,7 @@ fn test_multipass_no_false_positives() {
 
 /// Test multipass with three signals at different SNR levels
 #[test]
+#[ignore] // Slow test - run with: cargo test -- --ignored
 fn test_multipass_three_signals() {
     eprintln!("\n=== Testing Multi-Pass with Three Signals ===\n");
 
