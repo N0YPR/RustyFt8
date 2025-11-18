@@ -82,6 +82,190 @@ pub fn compute_spectra(signal: &[f32], spectra: &mut [[f32; NHSYM]]) -> Result<V
     Ok(avg_spectrum)
 }
 
+/// Compute baseline noise spectrum using WSJT-X algorithm
+///
+/// Fits a polynomial to the "lower envelope" of the average spectrum.
+/// Based on WSJT-X baseline.f90
+///
+/// # Arguments
+/// * `avg_spectrum` - Average power spectrum (linear scale)
+/// * `freq_min` - Minimum frequency in Hz
+/// * `freq_max` - Maximum frequency in Hz
+///
+/// # Returns
+/// Baseline spectrum in dB
+pub fn compute_baseline(avg_spectrum: &[f32], freq_min: f32, freq_max: f32) -> Vec<f32> {
+    const NSEG: usize = 10; // Number of segments
+    const NPCT: usize = 10; // Percentile for lower envelope (10th percentile)
+
+    let df = SAMPLE_RATE / NFFT1 as f32; // 3.125 Hz
+    let ia = (freq_min / df).max(1.0) as usize;
+    let ib = ((freq_max / df) as usize).min(NH1 - 1);
+
+    // Convert to dB scale
+    let mut s_db = vec![0.0f32; NH1];
+    for i in ia..=ib {
+        s_db[i] = if avg_spectrum[i] > 1e-30 {
+            10.0 * avg_spectrum[i].log10()
+        } else {
+            -300.0
+        };
+    }
+
+    // Collect lower envelope points
+    let nlen = (ib - ia + 1) / NSEG; // Length of each segment
+    let i0 = (ib + ia) / 2; // Midpoint
+    let mut x_pts = Vec::new();
+    let mut y_pts = Vec::new();
+
+    for n in 0..NSEG {
+        let ja = ia + n * nlen;
+        let jb = (ja + nlen - 1).min(ib);
+
+        // Find NPCT percentile in this segment
+        let mut segment: Vec<f32> = s_db[ja..=jb].to_vec();
+        segment.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let pct_idx = (segment.len() * NPCT / 100).min(segment.len() - 1);
+        let base = segment[pct_idx];
+
+        // Collect all points below this threshold
+        for i in ja..=jb {
+            if s_db[i] <= base {
+                x_pts.push((i as f32 - i0 as f32) as f64);
+                y_pts.push(s_db[i] as f64);
+            }
+        }
+    }
+
+    // Fit 5th-order polynomial to lower envelope points
+    let coeffs = if x_pts.len() >= 6 {
+        polyfit(&x_pts, &y_pts, 5)
+    } else if x_pts.len() >= 3 {
+        polyfit(&x_pts, &y_pts, 2)
+    } else {
+        // Fallback to constant baseline
+        vec![y_pts.iter().sum::<f64>() / y_pts.len().max(1) as f64]
+    };
+
+    // Evaluate polynomial to get baseline
+    let mut sbase = vec![0.0f32; NH1];
+    for i in ia..=ib {
+        let t = (i as f64 - i0 as f64);
+        let mut val = 0.0f64;
+        for (k, &coeff) in coeffs.iter().enumerate() {
+            val += coeff * t.powi(k as i32);
+        }
+        sbase[i] = (val + 0.65) as f32; // Add 0.65 dB offset like WSJT-X
+    }
+
+    sbase
+}
+
+/// Fit polynomial using least squares
+///
+/// Simple polynomial fitting using normal equations
+fn polyfit(x: &[f64], y: &[f64], degree: usize) -> Vec<f64> {
+    let n = x.len().min(y.len());
+    if n == 0 {
+        return vec![0.0];
+    }
+
+    let degree = degree.min(n - 1);
+    let m = degree + 1;
+
+    // Build Vandermonde matrix and solve normal equations
+    // X = [1, x, x^2, ..., x^degree]
+    // coeffs = (X^T X)^-1 X^T y
+
+    let mut xtx = vec![vec![0.0f64; m]; m];
+    let mut xty = vec![0.0f64; m];
+
+    for i in 0..n {
+        let xi = x[i];
+        let yi = y[i];
+        let mut xpow = 1.0;
+
+        for j in 0..m {
+            xty[j] += xpow * yi;
+            let mut xpow2 = 1.0;
+            for k in 0..m {
+                xtx[j][k] += xpow * xpow2;
+                xpow2 *= xi;
+            }
+            xpow *= xi;
+        }
+    }
+
+    // Solve using Gaussian elimination
+    gauss_solve(&xtx, &xty)
+}
+
+/// Solve linear system using Gaussian elimination with partial pivoting
+fn gauss_solve(a: &[Vec<f64>], b: &[f64]) -> Vec<f64> {
+    let n = b.len();
+    if n == 0 || a.len() != n {
+        return vec![0.0];
+    }
+
+    // Create augmented matrix [A|b]
+    let mut aug = vec![vec![0.0f64; n + 1]; n];
+    for i in 0..n {
+        for j in 0..n {
+            aug[i][j] = a[i][j];
+        }
+        aug[i][n] = b[i];
+    }
+
+    // Forward elimination with partial pivoting
+    for k in 0..n {
+        // Find pivot
+        let mut max_row = k;
+        let mut max_val = aug[k][k].abs();
+        for i in (k + 1)..n {
+            let val = aug[i][k].abs();
+            if val > max_val {
+                max_val = val;
+                max_row = i;
+            }
+        }
+
+        // Swap rows
+        if max_row != k {
+            aug.swap(k, max_row);
+        }
+
+        // Check for singular matrix
+        if aug[k][k].abs() < 1e-12 {
+            continue;
+        }
+
+        // Eliminate column
+        for i in (k + 1)..n {
+            let factor = aug[i][k] / aug[k][k];
+            for j in k..=n {
+                aug[i][j] -= factor * aug[k][j];
+            }
+        }
+    }
+
+    // Back substitution
+    let mut x = vec![0.0f64; n];
+    for i in (0..n).rev() {
+        if aug[i][i].abs() < 1e-12 {
+            x[i] = 0.0;
+            continue;
+        }
+
+        let mut sum = aug[i][n];
+        for j in (i + 1)..n {
+            sum -= aug[i][j] * x[j];
+        }
+        x[i] = sum / aug[i][i];
+    }
+
+    x
+}
+
 /// Compute 2D sync correlation matrix
 ///
 /// Correlates signal against Costas arrays at all frequency/time combinations

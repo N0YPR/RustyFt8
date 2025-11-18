@@ -14,6 +14,8 @@ pub struct Candidate {
     pub time_offset: f32,
     /// Sync quality metric (higher is better)
     pub sync_power: f32,
+    /// Baseline noise power at this frequency (linear scale, from average spectrum)
+    pub baseline_noise: f32,
 }
 
 /// Find candidate signals from sync2d correlation matrix
@@ -26,6 +28,7 @@ pub struct Candidate {
 /// * `ib` - Ending frequency bin index
 /// * `sync_min` - Minimum sync power threshold (after normalization)
 /// * `max_candidates` - Maximum number of candidates to return
+/// * `avg_spectrum` - Average power spectrum (linear scale) for baseline noise lookup
 ///
 /// # Returns
 /// Vector of candidates sorted by sync power (descending)
@@ -35,6 +38,7 @@ pub fn find_candidates(
     ib: usize,
     sync_min: f32,
     max_candidates: usize,
+    avg_spectrum: &[f32],
 ) -> Vec<Candidate> {
     let df = SAMPLE_RATE / NFFT1 as f32; // 3.125 Hz
     let tstep = NSTEP as f32 / SAMPLE_RATE; // 0.04 seconds
@@ -74,12 +78,20 @@ pub fn find_candidates(
             }
         }
 
+        // Look up baseline noise at this frequency
+        let baseline_noise = if i < avg_spectrum.len() {
+            avg_spectrum[i].max(1e-30) // Ensure non-zero
+        } else {
+            1e-30
+        };
+
         // Add both peaks (will filter by threshold after normalization)
         if best_sync > 0.0 {
             candidates.push(Candidate {
                 frequency: i as f32 * df,
                 time_offset: (best_lag as f32 - 0.5) * tstep,
                 sync_power: best_sync,
+                baseline_noise,
             });
         }
 
@@ -88,6 +100,7 @@ pub fn find_candidates(
                 frequency: i as f32 * df,
                 time_offset: (best_lag2 as f32 - 0.5) * tstep,
                 sync_power: best_sync2,
+                baseline_noise,
             });
         }
     }
@@ -159,15 +172,25 @@ pub fn coarse_sync(
     // Allocate spectra buffer
     let mut spectra = vec![[0.0f32; super::NHSYM]; super::NH1];
 
-    // Compute power spectra
-    compute_spectra(signal, &mut spectra)?;
+    // Compute power spectra and get average spectrum
+    let avg_spectrum = compute_spectra(signal, &mut spectra)?;
+
+    // Compute baseline noise spectrum using WSJT-X polynomial fitting algorithm
+    let baseline_db = super::compute_baseline(&avg_spectrum, freq_min, freq_max);
+
+    // Convert baseline from dB to linear scale using WSJT-X formula:
+    // xbase = 10^(0.1*(sbase[bin]-40.0))
+    let mut baseline_linear = vec![0.0f32; baseline_db.len()];
+    for i in 0..baseline_db.len() {
+        baseline_linear[i] = 10.0f32.powf(0.1 * (baseline_db[i] - 40.0));
+    }
 
     // Compute 2D sync correlation
     let mut sync2d = Vec::new();
     let (ia, ib) = compute_sync2d(&spectra, freq_min, freq_max, &mut sync2d)?;
 
-    // Find and rank candidates
-    let candidates = find_candidates(&sync2d, ia, ib, sync_min, max_candidates);
+    // Find and rank candidates (pass baseline_linear for noise estimation)
+    let candidates = find_candidates(&sync2d, ia, ib, sync_min, max_candidates, &baseline_linear);
 
     Ok(candidates)
 }

@@ -188,5 +188,6 @@ pub fn fine_sync(
         frequency: best_freq,
         time_offset: refined_time,
         sync_power: best_sync,
+        baseline_noise: candidate.baseline_noise, // Preserve baseline noise from coarse sync
     })
 }

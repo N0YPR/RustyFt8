@@ -35,9 +35,9 @@ pub mod extract;
 // Re-export public API
 pub use candidate::{Candidate, coarse_sync, find_candidates};
 pub use fine::{fine_sync, sync_downsampled};
-pub use extract::extract_symbols;
+pub use extract::{extract_symbols, extract_symbols_with_powers, calculate_snr};
 pub use downsample::downsample_200hz;
-pub use spectra::{compute_spectra, compute_sync2d};
+pub use spectra::{compute_spectra, compute_sync2d, compute_baseline};
 
 /// Costas 7x7 tone pattern used in FT8
 pub const COSTAS_PATTERN: [u8; 7] = [3, 1, 4, 0, 6, 5, 2];

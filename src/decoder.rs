@@ -115,9 +115,17 @@ where
             // Try multi-pass decoding (different nsym and LLR scales)
             for &nsym in &nsym_values {
                 let mut llr = vec![0.0f32; 174];
+                let mut s8 = [[0.0f32; 79]; 8];
 
-                // Extract symbols as LLRs for LDPC decoding
-                if sync::extract_symbols(signal, &refined, nsym, &mut llr).is_err() {
+                // Extract symbols - try the new function with powers first, fall back to old on error
+                let extract_ok = if let Ok(()) = sync::extract_symbols_with_powers(signal, &refined, nsym, &mut llr, &mut s8) {
+                    true
+                } else {
+                    // Fall back to original function if new one fails
+                    sync::extract_symbols(signal, &refined, nsym, &mut llr).is_ok()
+                };
+
+                if !extract_ok {
                     continue;
                 }
 
@@ -145,8 +153,19 @@ where
 
                         if let Ok(message) = crate::decode(&info_bits, None) {
                             if !message.is_empty() {
-                                // Estimate SNR from sync power (rough approximation)
-                                let snr_db = (refined.sync_power.log10() * 10.0 - 30.0) as i32;
+                                // Calculate SNR using WSJT-X algorithm if we have s8 powers
+                                // Pass baseline noise for improved SNR estimation
+                                let snr_db = if s8[0][0] != 0.0 {
+                                    sync::calculate_snr(&s8, &tones, Some(refined.baseline_noise))
+                                } else {
+                                    // Fallback for old extract_symbols path
+                                    if refined.sync_power > 0.001 {
+                                        let snr = (refined.sync_power.log10() * 10.0 - 27.0) as i32;
+                                        snr.max(-24).min(30)
+                                    } else {
+                                        -24
+                                    }
+                                };
 
                                 // Return the first successful decode for this candidate
                                 return Some(DecodeResult {

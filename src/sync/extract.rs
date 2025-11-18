@@ -114,6 +114,17 @@ pub fn extract_symbols(
     nsym: usize,
     llr: &mut [f32],
 ) -> Result<(), String> {
+    extract_symbols_impl(signal, candidate, nsym, llr, None)
+}
+
+/// Internal implementation that optionally captures s8 power array
+fn extract_symbols_impl(
+    signal: &[f32],
+    candidate: &Candidate,
+    nsym: usize,
+    llr: &mut [f32],
+    s8_out: Option<&mut [[f32; 79]; 8]>,
+) -> Result<(), String> {
     if llr.len() < 174 {
         return Err(format!("LLR buffer too small"));
     }
@@ -257,6 +268,15 @@ pub fn extract_symbols(
             let im = sym_imag[tone];
             cs[tone][k] = (re, im);
             s8[tone][k] = (re * re + im * im).sqrt();
+        }
+    }
+
+    // Copy s8 to output if requested
+    if let Some(s8_output) = s8_out {
+        for tone in 0..8 {
+            for k in 0..79 {
+                s8_output[tone][k] = s8[tone][k];
+            }
         }
     }
 
@@ -562,4 +582,107 @@ pub fn extract_symbols(
     }
 
     Ok(())
+}
+
+/// Calculate baseline noise floor from symbol power array
+///
+/// Computes noise floor by taking 20th percentile of average tone power per symbol
+fn calculate_noise_baseline(s8: &[[f32; 79]; 8]) -> f64 {
+    // For each symbol, compute average power across all 8 tones
+    let mut avg_powers: Vec<f64> = Vec::with_capacity(79);
+    for k in 0..79 {
+        let mut sum = 0.0f64;
+        for tone in 0..8 {
+            sum += (s8[tone][k] as f64).powi(2);
+        }
+        avg_powers.push(sum / 8.0);
+    }
+
+    // Sort and take 20th percentile as noise floor estimate
+    avg_powers.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let idx = (avg_powers.len() as f32 * 0.20) as usize;
+    avg_powers[idx.min(avg_powers.len() - 1)]
+}
+
+/// Calculate SNR from symbol powers and decoded tones following WSJT-X algorithm
+///
+/// # Arguments
+/// * `s8` - Power array [8 tones x 79 symbols]
+/// * `tones` - Decoded tone sequence (79 values, 0-7)
+/// * `baseline_noise` - Optional baseline noise power from average spectrum (linear scale)
+///
+/// # Returns
+/// SNR in dB, clamped to [-24, 30] range
+pub fn calculate_snr(s8: &[[f32; 79]; 8], tones: &[u8; 79], baseline_noise: Option<f32>) -> i32 {
+    // WSJT-X algorithm from ft8b.f90 computes two SNR estimates:
+    //   xsnr  = 10*log10(xsig/xnoi - 1) - 27.0   (signal/off-tone)
+    //   xsnr2 = 10*log10(xsig/xbase/3e6 - 1) - 27.0  (signal/baseline)
+
+    let mut xsig = 0.0f64;
+    let mut xnoi = 0.0f64;
+
+    for i in 0..79 {
+        let tone = tones[i] as usize;
+        if tone < 8 {
+            // Signal power at the decoded tone
+            xsig += s8[tone][i] as f64 * s8[tone][i] as f64;
+
+            // Noise power at opposite tone (4 away, mod 7 per WSJT-X)
+            let off_tone = (tone + 4) % 7;
+            xnoi += s8[off_tone][i] as f64 * s8[off_tone][i] as f64;
+        }
+    }
+
+    // Method 1: Signal/off-tone ratio (xsnr)
+    let xsnr = if xnoi > 1e-12 && xsig > xnoi {
+        let arg = xsig / xnoi - 1.0;
+        if arg > 0.1 {
+            10.0 * arg.log10() - 27.0
+        } else {
+            -24.0
+        }
+    } else {
+        -24.0
+    };
+
+    // Method 2: Signal/baseline ratio (xsnr2) if baseline is available
+    let xsnr2 = if let Some(xbase) = baseline_noise {
+        // xbase is already converted from baseline dB using: 10^(0.1*(sbase-40.0))
+        // WSJT-X formula: xsnr2 = 10*log10(xsig/xbase/3e6 - 1) - 27.0
+        let xbase_scaled = xbase as f64 * 3.0e6;
+
+        if xbase_scaled > 1e-12 && xsig > xbase_scaled * 0.1 {
+            let arg = xsig / xbase_scaled - 1.0;
+            if arg > 0.1 {
+                10.0 * arg.log10() - 27.0
+            } else {
+                -24.0
+            }
+        } else {
+            -24.0
+        }
+    } else {
+        -24.0
+    };
+
+    // Use off-tone method (xsnr) as primary - it's more robust since signal and noise
+    // are measured from the same s8 array, ensuring consistent scaling
+    // Baseline method (xsnr2) requires exact FFT normalization matching which is complex
+    let snr = xsnr;
+
+    // Clamp to reasonable range
+    snr.max(-24.0).min(30.0) as i32
+}
+
+/// Extract symbols and symbol powers for SNR calculation
+///
+/// Returns both LLRs for decoding and s8 power array for SNR estimation
+pub fn extract_symbols_with_powers(
+    signal: &[f32],
+    candidate: &Candidate,
+    nsym: usize,
+    llr: &mut [f32],
+    s8_out: &mut [[f32; 79]; 8],
+) -> Result<(), String> {
+    extract_symbols_impl(signal, candidate, nsym, llr, Some(s8_out))
 }
