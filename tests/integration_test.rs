@@ -102,10 +102,7 @@ fn generate_test_signal(message: &str, snr_db: f32, freq_hz: f32, time_delay: f3
 
         // Calculate signal scaling factor (WSJT-X formula)
         // sig = sqrt(2 * bandwidth_ratio) * 10^(0.05 * snrdb)
-        // NOTE: Our SNR calculation systematically underestimates by ~6-8 dB compared to
-        // WSJT-X. This adjustment partially compensates, bringing measurements closer.
-        let snr_db_adjusted = snr_db + 8.0;
-        let sig_scale = (2.0 * bandwidth_ratio).sqrt() * 10.0f32.powf(0.05 * snr_db_adjusted);
+        let sig_scale = (2.0 * bandwidth_ratio).sqrt() * 10.0f32.powf(0.05 * snr_db);
 
         // Scale the signal
         for s in waveform.iter_mut() {

@@ -647,11 +647,15 @@ pub fn calculate_snr(s8: &[[f32; 79]; 8], tones: &[u8; 79], baseline_noise: Opti
 
     // Method 2: Signal/baseline ratio (xsnr2) if baseline is available
     let xsnr2 = if let Some(xbase) = baseline_noise {
-        // xbase is already converted from baseline dB using: 10^(0.1*(sbase-40.0))
-        // WSJT-X formula: xsnr2 = 10*log10(xsig/xbase/3e6 - 1) - 27.0
-        let xbase_scaled = xbase as f64 * 3.0e6;
+        // WSJT-X formula: xsnr2 = 10*log10(xsig/xbase/scale - 1) - 27.0
+        // Our xbase comes from 12 kHz spectrogram (sum of NHSYM=372 FFTs)
+        // Our xsig comes from 200 Hz downsampled FFT
+        // Scale factor adjusted empirically to match WSJT-X: ~10-12 instead of 3e6
+        // This accounts for different FFT sizes and sampling rates
+        let scale_factor = 10.0;
+        let xbase_scaled = xbase as f64 * scale_factor;
 
-        if xbase_scaled > 1e-12 && xsig > xbase_scaled * 0.1 {
+        if xbase_scaled > 1e-30 && xsig > xbase_scaled * 0.1 {
             let arg = xsig / xbase_scaled - 1.0;
             if arg > 0.1 {
                 10.0 * arg.log10() - 27.0
@@ -665,10 +669,14 @@ pub fn calculate_snr(s8: &[[f32; 79]; 8], tones: &[u8; 79], baseline_noise: Opti
         -24.0
     };
 
-    // Use off-tone method (xsnr) as primary - it's more robust since signal and noise
-    // are measured from the same s8 array, ensuring consistent scaling
-    // Baseline method (xsnr2) requires exact FFT normalization matching which is complex
-    let snr = xsnr;
+    // Use baseline method (xsnr2) as primary, matching WSJT-X behavior
+    // WSJT-X uses xsnr2 by default (when nagain=false), falling back to xsnr only on second pass
+    // This fixes the systematic ~6-8 dB underestimation we were seeing
+    let snr = if baseline_noise.is_some() && xsnr2 > -24.0 {
+        xsnr2
+    } else {
+        xsnr
+    };
 
     // Clamp to reasonable range
     snr.max(-24.0).min(30.0) as i32
