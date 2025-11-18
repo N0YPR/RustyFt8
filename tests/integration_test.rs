@@ -140,12 +140,8 @@ fn generate_test_signal(message: &str, snr_db: f32, freq_hz: f32, time_delay: f3
 /// Decode FT8 signals, stopping after finding the expected count
 /// Returns all decoded messages (including possible false positives)
 fn decode_signals(signal: &[f32], max_count: usize) -> Vec<String> {
-    // Decode more candidates to ensure we find real signals even if false positives appear first
-    let config = DecoderConfig {
-        max_candidates: 200,
-        decode_top_n: 30,
-        ..DecoderConfig::default()
-    };
+    // Use default config (decode_top_n: 10) to reduce false positives
+    let config = DecoderConfig::default();
     let mut messages = Vec::new();
 
     match decode_ft8(signal, &config, |msg| {
@@ -317,13 +313,8 @@ fn test_multi_signal_decode() {
     eprintln!("  Signal 2: 2000 Hz - \"K1ABC W9XYZ RR73\"");
     eprintln!();
 
-    // Decode using the multi-signal decoder
-    // Allow decoding more candidates to catch all expected signals (false positives are OK)
-    let config = DecoderConfig {
-        max_candidates: 200,
-        decode_top_n: 30, // Decode more candidates to ensure we find all real signals
-        ..DecoderConfig::default()
-    };
+    // Decode using the multi-signal decoder with default config
+    let config = DecoderConfig::default();
     let mut decoded_messages = Vec::new();
 
     let count = decode_ft8(&mixed_signal, &config, |msg| {

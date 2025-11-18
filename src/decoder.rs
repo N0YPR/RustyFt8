@@ -50,6 +50,8 @@ pub struct DecoderConfig {
     pub max_candidates: usize,
     /// Number of candidates to actually decode (top N by sync power)
     pub decode_top_n: usize,
+    /// Minimum SNR threshold in dB (rejects weak false positives)
+    pub min_snr_db: i32,
 }
 
 impl Default for DecoderConfig {
@@ -59,7 +61,8 @@ impl Default for DecoderConfig {
             freq_max: 3000.0,
             sync_threshold: 0.5,
             max_candidates: 100,
-            decode_top_n: 50, // Decode top 50 candidates like WSJT-X
+            decode_top_n: 30, // Balance between recall (finding signals) and precision (avoiding false positives)
+            min_snr_db: -23,  // Reject very weak dubious decodes while allowing most real signals
         }
     }
 }
@@ -103,6 +106,7 @@ where
     let nsym_values = [1, 2, 3];
 
     // Process all candidates in parallel, collecting successful decodes
+    let min_snr_threshold = config.min_snr_db;
     let decode_results: Vec<DecodeResult> = candidates
         .iter()
         .take(config.decode_top_n)
@@ -167,6 +171,11 @@ where
                                     }
                                 };
 
+                                // Filter out weak decodes that are likely false positives
+                                if snr_db < min_snr_threshold {
+                                    continue; // Skip this decode, try next nsym/scale combination
+                                }
+
                                 // Return the first successful decode for this candidate
                                 return Some(DecodeResult {
                                     candidate_idx,
@@ -197,15 +206,22 @@ where
     sorted_results.sort_by_key(|r| r.candidate_idx);
 
     // Apply deduplication and call callbacks sequentially
-    let mut decoded_messages: Vec<String> = Vec::new();
+    // Track (message, frequency, time) to detect duplicates
+    let mut decoded_signals: Vec<(String, f32, f32)> = Vec::new();
     let mut decode_count = 0;
 
     for result in sorted_results {
         let message_text = &result.message.message;
+        let freq = result.message.frequency;
+        let time = result.message.time_offset;
 
-        // Check for duplicate
-        if !decoded_messages.contains(message_text) {
-            decoded_messages.push(message_text.clone());
+        // Check for duplicate: same message within 10 Hz and 0.5s
+        let is_duplicate = decoded_signals.iter().any(|(msg, f, t)| {
+            msg == message_text && (freq - f).abs() < 10.0 && (time - t).abs() < 0.5
+        });
+
+        if !is_duplicate {
+            decoded_signals.push((message_text.clone(), freq, time));
             decode_count += 1;
 
             // Report immediately via callback
