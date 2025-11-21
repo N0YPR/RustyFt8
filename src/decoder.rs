@@ -140,11 +140,24 @@ where
                         *v *= scale;
                     }
 
-                    // Use hybrid BP/OSD decoder matching WSJT-X strategy:
-                    // - BP for 30 iterations with snapshots at iterations 1, 2, 3
-                    // - If BP fails, try OSD order 2 with each saved snapshot
-                    // - Multiple OSD attempts explore different solution space regions
-                    if let Some((decoded_bits, iters)) = ldpc::decode_hybrid(&scaled_llr) {
+                    // Progressive decoding strategy (matching WSJT-X):
+                    // 1. Try BP-only first (maxosd=-1) - fast, minimal false positives
+                    // 2. If BP fails, try BP+OSD uncoupled (maxosd=0) - moderate aggression
+                    // 3. For top 20 candidates, try full hybrid OSD (maxosd=2) - most aggressive
+                    // This balances finding weak signals vs limiting false positives
+                    let decode_result = ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
+                        .or_else(|| ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled))
+                        .or_else(|| {
+                            // Only use aggressive hybrid OSD for strongest candidates
+                            // Limit to top 20 to minimize false positives from spurious candidates
+                            if candidate_idx < 20 {
+                                ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
+                            } else {
+                                None
+                            }
+                        });
+
+                    if let Some((decoded_bits, iters)) = decode_result {
                         // Re-encode the corrected message to get tones for signal subtraction
                         // (following WSJT-X: use LDPC-corrected tones, not original noisy demodulation)
                         let mut re_encoded_codeword = bitvec![u8, Msb0; 0; 174];
