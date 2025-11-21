@@ -61,7 +61,7 @@ impl Default for DecoderConfig {
             freq_max: 3000.0,
             sync_threshold: 0.5,
             max_candidates: 100,
-            decode_top_n: 30, // Balance between recall (finding signals) and precision (avoiding false positives)
+            decode_top_n: 50, // Increased from 30 to ensure weak signals aren't skipped in busy recordings
             min_snr_db: -18,  // Allow decoding down to -18 dB (WSJT-X typical minimum)
         }
     }
