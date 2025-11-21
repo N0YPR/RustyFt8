@@ -107,6 +107,7 @@ where
 
     // Process all candidates in parallel, collecting successful decodes
     let min_snr_threshold = config.min_snr_db;
+
     let decode_results: Vec<DecodeResult> = candidates
         .iter()
         .take(config.decode_top_n)
@@ -157,6 +158,24 @@ where
 
                         if let Ok(message) = crate::decode(&info_bits, None) {
                             if !message.is_empty() {
+                                // Validate that the message contains valid callsigns
+                                // This filters out OSD false positives (garbage decoded from noise)
+                                let tokens: Vec<&str> = message.split_whitespace().collect();
+
+                                // For standard messages, require ALL callsigns to be valid
+                                // First 2 tokens are typically callsigns or "CQ"
+                                let is_valid_message = if tokens.len() >= 2 {
+                                    crate::message::is_valid_callsign(tokens[0]) &&
+                                    crate::message::is_valid_callsign(tokens[1])
+                                } else {
+                                    // Short messages - require at least the first token to be valid
+                                    tokens.first().map_or(false, |t| crate::message::is_valid_callsign(t))
+                                };
+
+                                if !is_valid_message {
+                                    continue; // Skip messages with invalid callsigns
+                                }
+
                                 // Calculate SNR using WSJT-X algorithm if we have s8 powers
                                 // Pass baseline noise for improved SNR estimation
                                 let snr_db = if s8[0][0] != 0.0 {

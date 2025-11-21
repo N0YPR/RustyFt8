@@ -63,15 +63,16 @@ fn test_real_ft8_recording_210703_133430() {
     // This test uses a real FT8 recording validated against WSJT-X jt9 output.
     // WSJT-X decodes 22 messages total from this recording (SNR range: 16 to -24 dB).
     //
-    // This test expects RustyFt8 to decode 19 signals down to -17 dB SNR.
-    // Signals at this level require good LDPC decoding with proper soft-decision
-    // and LLR scaling. The 3 extremely weak signals (SNR <= -20 dB) require:
-    // - Ordered Statistics Decoding (OSD) with Gaussian elimination
-    // - A Priori decoding (uses QSO context for hints)
-    // - Signal subtraction (reveals signals masked by stronger ones)
+    // This test REQUIRES RustyFt8 to decode all 19 signals down to -17 dB.
+    // If jt9 can decode them, RustyFt8 must decode them too.
     //
-    // Decoding down to -17 dB represents excellent performance and covers the
-    // vast majority of practical FT8 operation.
+    // The decoder configuration uses min_snr_db: -18, and synthetic tests pass
+    // at -18 dB, so real-world signals at -14 to -17 dB should be achievable.
+    //
+    // Only the 3 extremely weak signals (SNR <= -20 dB) are excluded:
+    // - "K1JT HA5WA 73" (-20 dB)
+    // - "K1BZM DK8NE -10" (-20 dB)
+    // - "TU; 7N9RST EI8TRF 589 5732" (-24 dB)
 
     let wav_path = "tests/test_data/210703_133430.wav";
     let signal = read_wav_file(wav_path)
@@ -80,7 +81,13 @@ fn test_real_ft8_recording_210703_133430() {
     println!("Read {} samples from {}", signal.len(), wav_path);
 
     let signal_15s = normalize_signal_length(signal);
-    let config = DecoderConfig::default();
+    // Increase decode_top_n and lower sync_threshold to find weaker signals
+    let config = DecoderConfig {
+        decode_top_n: 150,  // Attempt all found candidates
+        sync_threshold: 0.4,  // Lower from 0.5 to find more candidates
+        max_candidates: 150,  // Increase to find more weaker signals
+        ..DecoderConfig::default()
+    };
 
     let mut decoded_messages: Vec<DecodedMessage> = Vec::new();
     let count = decode_ft8(&signal_15s, &config, |msg| {
@@ -94,11 +101,8 @@ fn test_real_ft8_recording_210703_133430() {
     println!("\nTotal decoded: {} messages", count);
     println!("WSJT-X reference: 22 messages");
 
-    // Expected messages that RustyFt8 should decode with current LDPC implementation
-    // All validated against WSJT-X jt9 output
-    //
-    // WSJT-X decodes 22 total messages. We expect to decode 19 signals down to -17 dB.
-    // The remaining 3 extremely weak signals (SNR <= -20 dB) require advanced LDPC techniques.
+    // Expected messages - ALL 19 messages down to -17 dB that jt9 decodes
+    // If jt9 can decode them, RustyFt8 must decode them too.
     let expected_messages = vec![
         // Very strong signals (SNR >= 10 dB)
         "W1FC F5BZB -08",           // SNR: 16 dB
@@ -120,7 +124,7 @@ fn test_real_ft8_recording_210703_133430() {
         "XE2X HA2NP RR73",          // SNR: -11 dB
         "N1JFU EA6EE R-07",         // SNR: -12 dB
 
-        // Very weak signals (SNR: -17 to -14 dB) - challenging but achievable with good LDPC
+        // Very weak signals (SNR: -17 to -14 dB)
         "K1JT HA0DU KN07",          // SNR: -14 dB
         "N1API HA6FQ -23",          // SNR: -14 dB
         "W0RSJ EA3BMU RR73",        // SNR: -16 dB
@@ -130,8 +134,7 @@ fn test_real_ft8_recording_210703_133430() {
         "CQ EA2BFM IN83",           // SNR: -17 dB
     ];
 
-    // Additional extremely weak messages WSJT-X decodes (SNR <= -20 dB):
-    // These require advanced techniques like OSD (Ordered Statistics Decoding):
+    // Extremely weak signals (SNR <= -20 dB) not required - these need OSD:
     // "K1JT HA5WA 73" (SNR: -20 dB)
     // "K1BZM DK8NE -10" (SNR: -20 dB)
     // "TU; 7N9RST EI8TRF 589 5732" (SNR: -24 dB)
@@ -166,13 +169,13 @@ fn test_real_ft8_recording_210703_133430() {
         panic!("Failed to decode {} expected strong signals", missing.len());
     }
 
-    // Report false positives for informational purposes (not a failure)
+    // Report false positives (messages not in WSJT-X output at all)
     let false_positives: Vec<_> = decoded_texts.iter()
         .filter(|msg| !expected_messages.contains(&msg.as_str()))
         .collect();
 
     if !false_positives.is_empty() {
-        println!("\nNote: {} additional message(s) decoded (potential false positives):",
+        println!("\nNote: {} additional message(s) decoded (not in WSJT-X output):",
             false_positives.len());
         for fp in &false_positives {
             println!("  - {}", fp);
@@ -182,7 +185,7 @@ fn test_real_ft8_recording_210703_133430() {
     println!("\n✓ Successfully decoded all {} expected signals (SNR: 16 to -17 dB)", expected_messages.len());
     println!("  Total decoded: {} messages ({} expected + {} additional)",
         count, expected_messages.len(), false_positives.len());
-    println!("  WSJT-X baseline: 22 messages (3 extremely weak signals at -20/-24 dB not required)");
+    println!("  WSJT-X baseline: 22 messages (3 extremely weak at -20/-24 dB not required)");
 }
 
 #[test]

@@ -5,6 +5,79 @@
 
 use crate::message::constants::{NTOKENS, MAX22, CHARSET_A1, CHARSET_A2, CHARSET_A3, CHARSET_A4, CHARSET_BASE38};
 
+/// Validate that a callsign follows basic amateur radio callsign rules.
+///
+/// Valid callsigns have the pattern: [1-2 letters][1 digit][1-3 letters][optional /suffix]
+/// Examples: W1ABC, K1JT, EA3AGB, N1API/P, DL8YHR/R
+///
+/// Returns true if the callsign is structurally valid.
+pub fn is_valid_callsign(callsign: &str) -> bool {
+    if callsign.is_empty() || callsign.len() > 13 {
+        return false;
+    }
+
+    // Handle special tokens
+    if callsign == "CQ" || callsign == "DE" || callsign == "QRZ" {
+        return true;
+    }
+
+    // Handle directed CQ (e.g., "CQ DX", "CQ 123")
+    if callsign.starts_with("CQ ") {
+        return true;
+    }
+
+    // Strip suffixes like /R, /P, /QRP, etc.
+    let base_call = if let Some(slash_pos) = callsign.find('/') {
+        &callsign[..slash_pos]
+    } else {
+        callsign
+    };
+
+    // Must be 3-6 characters (e.g., W1A to WM3PEN)
+    if base_call.len() < 3 || base_call.len() > 6 {
+        return false;
+    }
+
+    let chars: Vec<char> = base_call.chars().collect();
+
+    // Find the digit (must have exactly one)
+    let digit_positions: Vec<usize> = chars.iter().enumerate()
+        .filter(|(_, c)| c.is_ascii_digit())
+        .map(|(i, _)| i)
+        .collect();
+
+    if digit_positions.len() != 1 {
+        return false;  // Must have exactly one digit
+    }
+
+    let digit_pos = digit_positions[0];
+
+    // Prefix: 1-2 letters before the digit
+    if digit_pos == 0 || digit_pos > 2 {
+        return false;
+    }
+
+    for i in 0..digit_pos {
+        if !chars[i].is_ascii_alphabetic() {
+            return false;
+        }
+    }
+
+    // Suffix: 1-3 letters after the digit
+    let suffix_len = chars.len() - digit_pos - 1;
+    if suffix_len < 1 || suffix_len > 3 {
+        return false;
+    }
+
+    for i in (digit_pos + 1)..chars.len() {
+        if !chars[i].is_ascii_alphabetic() {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Unpack a 28-bit value to a callsign using WSJT-X protocol
 ///
 /// This implements the WSJT-X unpack28 algorithm, reversing pack28 encoding

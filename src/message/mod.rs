@@ -15,6 +15,7 @@ mod decode;
 // Public API - minimal surface area
 // Only expose the high-level encode/decode functions and the hash cache
 pub use callsign_cache::CallsignHashCache;
+pub use callsign::is_valid_callsign;
 
 // Internal imports - not exported
 use encode::encode_variant;

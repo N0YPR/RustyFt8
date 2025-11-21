@@ -649,10 +649,12 @@ pub fn calculate_snr(s8: &[[f32; 79]; 8], tones: &[u8; 79], baseline_noise: Opti
     let xsnr2 = if let Some(xbase) = baseline_noise {
         // WSJT-X formula: xsnr2 = 10*log10(xsig/xbase/scale - 1) - 27.0
         // Our xbase comes from 12 kHz spectrogram (sum of NHSYM=372 FFTs)
-        // Our xsig comes from 200 Hz downsampled FFT
-        // Scale factor adjusted empirically to match WSJT-X: ~10-12 instead of 3e6
-        // This accounts for different FFT sizes and sampling rates
-        let scale_factor = 10.0;
+        // Our xsig comes from 200 Hz downsampled FFT with NFFT=32
+        // Scale factor needs to account for:
+        // - Different FFT sizes (WSJT-X uses larger FFTs)
+        // - Different integration times
+        // - Empirically determined to match WSJT-X SNR measurements
+        let scale_factor = 0.05;  // Adjusted from 10.0 to correct 23 dB underestimation
         let xbase_scaled = xbase as f64 * scale_factor;
 
         if xbase_scaled > 1e-30 && xsig > xbase_scaled * 0.1 {
