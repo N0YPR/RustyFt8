@@ -134,7 +134,8 @@ pub fn fine_sync(
     candidate: &Candidate,
 ) -> Result<Candidate, String> {
     // Downsample centered on candidate frequency
-    let mut cd = vec![(0.0f32, 0.0f32); 4096];
+    // Buffer size must match NFFT_OUT in downsample.rs (3200)
+    let mut cd = vec![(0.0f32, 0.0f32); 3200];
     let actual_sample_rate = downsample_200hz(signal, candidate.frequency, &mut cd)?;
 
     // Convert time offset to downsampled sample index
@@ -167,7 +168,8 @@ pub fn fine_sync(
         let test_freq = candidate.frequency + freq_offset;
 
         // Re-downsample at the test frequency
-        let mut cd_test = vec![(0.0f32, 0.0f32); 4096];
+        // Buffer size must match NFFT_OUT in downsample.rs (3200)
+        let mut cd_test = vec![(0.0f32, 0.0f32); 3200];
         let test_rate = match downsample_200hz(signal, test_freq, &mut cd_test) {
             Ok(rate) => rate,
             Err(_) => continue,

@@ -136,7 +136,8 @@ fn extract_symbols_impl(
     const NFFT_SYM: usize = 32; // FFT size for symbol extraction (power of 2)
 
     // Downsample centered on the refined frequency from fine_sync
-    let mut cd = vec![(0.0f32, 0.0f32); 4096];
+    // Buffer size must match NFFT_OUT in downsample.rs (3200)
+    let mut cd = vec![(0.0f32, 0.0f32); 3200];
     let actual_sample_rate = downsample_200hz(signal, candidate.frequency, &mut cd)?;
 
     // CRITICAL for nsym=2/3: Apply fine phase correction to remove residual frequency offset
@@ -223,10 +224,9 @@ fn extract_symbols_impl(
     let mut sym_real = [0.0f32; NFFT_SYM];
     let mut sym_imag = [0.0f32; NFFT_SYM];
 
-    // For sub-symbol timing optimization, try centering the FFT window
-    // nsps_down is typically ~30 samples, NFFT_SYM is 32
-    // Center the data in the FFT buffer by starting 1 sample later
-    let fft_offset = if nsps_down < NFFT_SYM { 1 } else { 0 };
+    // Match WSJT-X: no FFT window offset (ft8b.f90:157)
+    // Copy samples directly without centering
+    let fft_offset = 0;
 
     for k in 0..NN {
         // Symbol starts at: start_offset + k * nsps_down samples
@@ -263,10 +263,16 @@ fn extract_symbols_impl(
 
         // Store COMPLEX values and magnitude for 8 tones
         // Use bins 0-7 for DC-centered signal
+        // WSJT-X ft8b.f90:159-160:
+        // cs(0:7,k)=csymb(1:8)/1e3     <- normalized by 1000
+        // s8(0:7,k)=abs(csymb(1:8))    <- NOT normalized (used for Costas check)
+        const NORM_FACTOR: f32 = 1000.0;
         for tone in 0..8 {
             let re = sym_real[tone];
             let im = sym_imag[tone];
-            cs[tone][k] = (re, im);
+            // Store normalized complex values for coherent combining
+            cs[tone][k] = (re / NORM_FACTOR, im / NORM_FACTOR);
+            // Store UNNORMALIZED magnitude for Costas validation
             s8[tone][k] = (re * re + im * im).sqrt();
         }
     }
@@ -331,7 +337,8 @@ fn extract_symbols_impl(
     }
 
     // If sync quality is too low, reject
-    // Note: Temporarily lowered threshold for testing
+    // TODO: WSJT-X uses threshold of >6, but our Costas quality is poor (max 4/21 even with correct 200 Hz sample rate)
+    // This suggests there's still a bug in tone extraction despite fixing FFT bin alignment
     if nsync < 3 {
         return Err(format!("Sync quality too low: {}/21 Costas tones correct", nsync));
     }

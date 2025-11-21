@@ -21,15 +21,19 @@ pub fn downsample_200hz(
     f0: f32,
     output: &mut [(f32, f32)],
 ) -> Result<f32, String> {
-    const NFFT_IN: usize = 262144; // Large FFT (2^18) for high resolution
-    const NFFT_OUT: usize = 4096;   // Power of 2 for FFT
+    // Match WSJT-X ft8_downsample.f90 exactly:
+    // NFFT1=192000, NFFT2=3200
+    // This gives exactly 200 Hz output sample rate (12000/60 = 200)
+    // With 32-point FFT: 200/32 = 6.25 Hz per bin (perfect match to FT8 tone spacing!)
+    const NFFT_IN: usize = 192000;  // Was 262144
+    const NFFT_OUT: usize = 3200;   // Was 4096
 
     if signal.len() < NMAX {
         return Err(format!("Signal too short: {}", signal.len()));
     }
 
-    if output.len() < 4096 {
-        return Err(format!("Output buffer too small: {} (need at least 4096)", output.len()));
+    if output.len() < NFFT_OUT {
+        return Err(format!("Output buffer too small: {} (need at least {})", output.len(), NFFT_OUT));
     }
 
     // Allocate FFT buffers
@@ -119,6 +123,7 @@ pub fn downsample_200hz(
     fft_complex_inverse(&mut out_real, &mut out_imag, NFFT_OUT)?;
 
     // Normalize and copy to output
+    // Match WSJT-X: fac = 1.0/sqrt(float(NFFT1)*NFFT2)
     let fac = 1.0 / ((NFFT_IN * NFFT_OUT) as f32).sqrt();
     for i in 0..NFFT_OUT {
         output[i] = (out_real[i] * fac, out_imag[i] * fac);

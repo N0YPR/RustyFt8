@@ -48,11 +48,10 @@ fn get_inverse_plan(n: usize) -> Arc<dyn Fft<f32>> {
 /// # Arguments
 /// * `real` - Real part (input/output)
 /// * `imag` - Imaginary part (input/output, should be zeros on input)
-/// * `n` - FFT size (must be power of 2)
+/// * `n` - FFT size (RustFFT supports mixed-radix sizes)
 pub(crate) fn fft_real(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(), String> {
-    if n & (n - 1) != 0 {
-        return Err(format!("FFT size must be power of 2, got {}", n));
-    }
+    // RustFFT supports mixed-radix FFTs (not just power-of-2)
+    // WSJT-X uses 192000 = 2^7 * 3 * 5^3, which is valid
 
     if real.len() < n || imag.len() < n {
         return Err(format!(
@@ -90,9 +89,7 @@ pub(crate) fn fft_complex(real: &mut [f32], imag: &mut [f32], n: usize) -> Resul
 
 /// Complex-to-complex inverse FFT
 pub(crate) fn fft_complex_inverse(real: &mut [f32], imag: &mut [f32], n: usize) -> Result<(), String> {
-    if n & (n - 1) != 0 {
-        return Err(format!("FFT size must be power of 2, got {}", n));
-    }
+    // RustFFT supports mixed-radix FFTs (not just power-of-2)
 
     if real.len() < n || imag.len() < n {
         return Err(format!(

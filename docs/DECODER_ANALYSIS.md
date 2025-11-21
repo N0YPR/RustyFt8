@@ -2,9 +2,9 @@
 
 ## Executive Summary
 
-**Current Performance:** 7/19 expected messages decoded (37% recall, 100% precision)
+**Current Performance:** 8/19 expected messages decoded (42% recall, 100% precision)
 **WSJT-X Baseline:** 22/22 messages decoded (100% recall)
-**Root Cause Identified:** Symbol extraction and LLR computation quality
+**Root Cause Identified:** FFT bin misalignment due to incorrect sample rate (FIXED), remaining issue in tone extraction logic
 
 ## Detailed Analysis
 
@@ -19,7 +19,26 @@
 
 **Result:** False positives reduced from 13 to 0 (100% reduction)
 
-### 2. Missing Messages Root Cause Analysis
+### 2. FFT Bin Misalignment (✅ FIXED)
+
+**Problem:** Downsampler produced 187.50 Hz sample rate instead of WSJT-X's 200 Hz
+
+**Root Cause:** Unnecessary power-of-2 check in FFT wrapper rejected WSJT-X's mixed-radix FFT sizes:
+- WSJT-X uses NFFT_IN=192000 (= 2^7 × 3 × 5^3), NFFT_OUT=3200 (= 2^7 × 5^2)
+- Our check: `if n & (n - 1) != 0` rejected 192000 as "not power of 2"
+- RustFFT actually supports mixed-radix FFTs perfectly fine!
+
+**Impact:**
+- Old: 187.50 Hz ÷ 32-pt FFT = **5.859 Hz per bin** (misaligned with 6.25 Hz FT8 tones)
+- New: 200.00 Hz ÷ 32-pt FFT = **6.25 Hz per bin** (perfect alignment!)
+
+**Fix:** Removed power-of-2 checks in [src/sync/fft.rs](../src/sync/fft.rs)
+
+**Result:** Performance improved from 7/19 to 8/19 messages (14% improvement)
+
+**Note:** Even with perfect FFT bin alignment, Costas validation still shows poor tone extraction quality (max 4/21 vs needed >6/21). This indicates a deeper bug in symbol extraction logic that the FFT fix did not resolve.
+
+### 3. Missing Messages Root Cause Analysis
 
 #### Initial Hypothesis (❌ DISPROVEN)
 - **Suspected:** Spurious candidates from coarse sync ranking too highly
@@ -160,9 +179,10 @@ Missing 7 messages (all valid signals WSJT-X BP decodes):
 | Milestone | Target | Current | Status |
 |-----------|--------|---------|--------|
 | Zero false positives | 0 FP | 0 FP | ✅ ACHIEVED |
-| Match WSJT-X BP-only | 14/19 msgs | 7/19 msgs | ⚠️ 50% |
-| Match WSJT-X depth 2 | 19/19 msgs | 7/19 msgs | ⚠️ 37% |
-| Match WSJT-X depth 3 | 22/22 msgs | 7/19 msgs | ⚠️ 32% |
+| Fix FFT bin alignment | 200 Hz | 200 Hz | ✅ ACHIEVED |
+| Match WSJT-X BP-only | 14/19 msgs | 8/19 msgs | ⚠️ 57% |
+| Match WSJT-X depth 2 | 19/19 msgs | 8/19 msgs | ⚠️ 42% |
+| Match WSJT-X depth 3 | 22/22 msgs | 8/19 msgs | ⚠️ 36% |
 
 ## Technical Debt
 
