@@ -4,7 +4,6 @@ pub mod ldpc;
 pub mod message;
 pub mod symbol;
 pub mod pulse;
-pub mod wav;
 pub mod sync;
 pub mod decoder;
 pub mod subtract;

@@ -27,8 +27,9 @@
 //!   # Signal at 1000 Hz with 0.5s delay
 //!   ft8sim -f 1000 -d 0.5 "CQ SOTA N0YPR DM42" output.wav
 
-use rustyft8::{crc, encode, ldpc, pulse, symbol, wav};
+use rustyft8::{crc, encode, ldpc, pulse, symbol};
 use rustyft8::message::CallsignHashCache;
+use hound;
 use bitvec::prelude::*;
 
 struct SimConfig {
@@ -337,7 +338,21 @@ fn main() -> Result<(), String> {
 
     // Step 8: Write WAV file
     println!("Step 6: Writing WAV file...");
-    wav::write_wav_file(&config.output_path, &final_waveform, pulse::SAMPLE_RATE as u32)?;
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: pulse::SAMPLE_RATE as u32,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(&config.output_path, spec)
+        .map_err(|e| format!("Failed to create WAV file: {}", e))?;
+    for &sample in &final_waveform {
+        let pcm_sample = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
+        writer.write_sample(pcm_sample)
+            .map_err(|e| format!("Failed to write sample: {}", e))?;
+    }
+    writer.finalize()
+        .map_err(|e| format!("Failed to finalize WAV file: {}", e))?;
 
     let file_size_kb = (44 + final_waveform.len() * 2) as f32 / 1024.0;
     let total_duration = final_waveform.len() as f32 / pulse::SAMPLE_RATE;

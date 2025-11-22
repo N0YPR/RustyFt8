@@ -10,10 +10,10 @@ rustfft = "6.2"
 num-complex = "0.4"
 once_cell = "1.19"
 rayon = "1.8"
+hound = "3.5"
 
 [dev-dependencies]
 rstest = "0.23"
-hound = "3.5"
 
 [[bench]]
 name = "parallel_benchmark"
