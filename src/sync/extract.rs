@@ -180,7 +180,11 @@ fn extract_symbols_impl(
 
         // Apply best correction to working buffer
         if best_correction.abs() > 0.001 {
+            eprintln!("    Phase correction: {:.3} Hz (sync: {:.3} -> {:.3})",
+                     best_correction, initial_sync, best_sync);
             apply_phase_correction(&mut cd, best_correction, actual_sample_rate);
+        } else if nsym >= 2 {
+            eprintln!("    Phase correction: NONE (sync={:.3})", initial_sync);
         }
     }
 
@@ -215,8 +219,23 @@ fn extract_symbols_impl(
         }
     }
 
-    let start_offset = best_offset;
+    let mut start_offset = best_offset;
 
+    // CRITICAL FIX: Ensure start_offset allows all 79 symbols to be extracted
+    // Signals with negative time offsets (dt < 0) can cause early symbols to be out of bounds
+    // This corrupts multi-symbol combining (nsym=2/3) much worse than single-symbol (nsym=1)
+    let min_offset = 0i32;  // First symbol must be at position 0 or later
+    let max_offset = cd.len() as i32 - (NN as i32 * nsps_down as i32); // Last symbol must fit
+
+    if start_offset < min_offset {
+        eprintln!("    CLIPPING start_offset: {} -> {} (signal starts too early)",
+                 start_offset, min_offset);
+        start_offset = min_offset;
+    } else if start_offset > max_offset {
+        eprintln!("    CLIPPING start_offset: {} -> {} (signal extends too far)",
+                 start_offset, max_offset);
+        start_offset = max_offset;
+    }
 
     // Extract complex symbol values: cs[tone][symbol] for 8 tones × 79 symbols
     // Store COMPLEX values for multi-symbol soft decoding
@@ -238,6 +257,8 @@ fn extract_symbols_impl(
         // Check bounds
         if i1 < 0 || (i1 as usize + nsps_down) > cd.len() {
             // Symbol is out of bounds, set to zero
+            eprintln!("    WARNING: Symbol {} out of bounds! i1={}, cd.len={}, nsps_down={}",
+                     k, i1, cd.len(), nsps_down);
             for tone in 0..8 {
                 cs[tone][k] = (0.0, 0.0);
                 s8[tone][k] = 0.0;
@@ -580,6 +601,7 @@ fn extract_symbols_impl(
         mean_sq.sqrt()
     };
 
+    // Normalize LLRs by standard deviation (match WSJT-X normalizebmet)
     if std_dev > 0.0 {
         for i in 0..174 {
             llr[i] /= std_dev;
