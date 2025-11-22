@@ -125,6 +125,9 @@ fn extract_symbols_impl(
     llr: &mut [f32],
     s8_out: Option<&mut [[f32; 79]; 8]>,
 ) -> Result<(), String> {
+    // eprintln!("EXTRACT: freq={:.1} Hz, dt={:.2}s, nsym={}",
+    //           candidate.frequency, candidate.time_offset, nsym);
+
     if llr.len() < 174 {
         return Err(format!("LLR buffer too small"));
     }
@@ -587,6 +590,12 @@ fn extract_symbols_impl(
     for i in 0..174 {
         llr[i] *= 2.83;
     }
+
+    // Log quality metrics
+    // let llr_mean = llr.iter().map(|x| x.abs()).sum::<f32>() / llr.len() as f32;
+    // let llr_max = llr.iter().map(|x| x.abs()).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
+    // eprintln!("  Extracted: nsync={}/21, mean_abs_LLR={:.2}, max_LLR={:.2}",
+    //           nsync, llr_mean, llr_max);
 
     Ok(())
 }

@@ -45,35 +45,42 @@ pub fn find_candidates(
 
     let mut candidates = Vec::new();
 
-    // Find peak time lag for each frequency bin
-    // Don't apply sync_min threshold yet - we'll normalize first
+    // Find peak time lag for each frequency bin using weighted scoring
+    // Prefer peaks near expected time window (close to 0s offset) to avoid spurious peaks
     for i in ia..=ib {
-        // Search within ±COARSE_LAG steps
         let mut best_lag = 0i32;
+        let mut best_score = 0.0f32;
         let mut best_sync = 0.0f32;
 
-        for lag in -COARSE_LAG..=COARSE_LAG {
-            let sync_idx = (lag + MAX_LAG) as usize;
-            if sync_idx < sync2d[i].len() {
-                let sync_val = sync2d[i][sync_idx];
-                if sync_val > best_sync {
-                    best_sync = sync_val;
-                    best_lag = lag;
-                }
-            }
-        }
-
-        // Also search full range
-        let mut best_lag2 = 0i32;
-        let mut best_sync2 = 0.0f32;
-
+        // Search full range with weighted scoring to penalize extreme time offsets
         for lag in -MAX_LAG..=MAX_LAG {
             let sync_idx = (lag + MAX_LAG) as usize;
             if sync_idx < sync2d[i].len() {
                 let sync_val = sync2d[i][sync_idx];
-                if sync_val > best_sync2 {
-                    best_sync2 = sync_val;
-                    best_lag2 = lag;
+                if sync_val == 0.0 {
+                    continue;
+                }
+
+                // Calculate time offset in seconds
+                let time_offset = (lag as f32 - 0.5) * tstep;
+
+                // Time offset penalty: prefer signals near the expected window
+                // FT8 signals typically start within ±0.8s of nominal start time
+                let time_penalty = if time_offset.abs() <= 0.8 {
+                    1.0 // No penalty within ±0.8s
+                } else {
+                    // Strong exponential decay for offsets beyond ±0.8s
+                    let excess = time_offset.abs() - 0.8;
+                    (-3.0 * excess).exp()
+                };
+
+                // Combined score: sync power weighted by time penalty
+                let score = sync_val * time_penalty;
+
+                if score > best_score {
+                    best_score = score;
+                    best_lag = lag;
+                    best_sync = sync_val;
                 }
             }
         }
@@ -85,21 +92,12 @@ pub fn find_candidates(
             1e-30
         };
 
-        // Add both peaks (will filter by threshold after normalization)
-        if best_sync > 0.0 {
+        // Add the best candidate for this frequency
+        if best_score > 0.0 {
             candidates.push(Candidate {
                 frequency: i as f32 * df,
                 time_offset: (best_lag as f32 - 0.5) * tstep,
                 sync_power: best_sync,
-                baseline_noise,
-            });
-        }
-
-        if best_lag2 != best_lag && best_sync2 > 0.0 {
-            candidates.push(Candidate {
-                frequency: i as f32 * df,
-                time_offset: (best_lag2 as f32 - 0.5) * tstep,
-                sync_power: best_sync2,
                 baseline_noise,
             });
         }

@@ -133,30 +133,50 @@ pub fn fine_sync(
     signal: &[f32],
     candidate: &Candidate,
 ) -> Result<Candidate, String> {
+    // eprintln!("FINE_SYNC: freq={:.1} Hz, dt_in={:.2}s, sync_in={:.3}",
+    //           candidate.frequency, candidate.time_offset, candidate.sync_power);
+
     // Downsample centered on candidate frequency
     // Buffer size must match NFFT_OUT in downsample.rs (3200)
     let mut cd = vec![(0.0f32, 0.0f32); 3200];
     let actual_sample_rate = downsample_200hz(signal, candidate.frequency, &mut cd)?;
 
+    // Diagnostic: check if downsampled buffer has data
+    // let cd_power: f32 = cd.iter().take(100).map(|(r, i)| r*r + i*i).sum();
+    // eprintln!("  Downsampled: rate={:.1} Hz, buffer_len={}, first_100_power={:.3}",
+    //           actual_sample_rate, cd.len(), cd_power);
+
     // Convert time offset to downsampled sample index
     // candidate.time_offset is relative to 0.5s start, but downsampled buffer starts at 0.0
     // So add 0.5s to convert to absolute time, then multiply by actual sample rate
     let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
+    // eprintln!("  Initial offset: {} samples (from dt={:.2}s)", initial_offset, candidate.time_offset);
 
 
-    // Fine time search: ±4 steps of 5 ms each = ±20 ms
+    // Fine time search: ±24 steps of 5 ms each = ±120 ms
+    // Expanded from ±20ms to correct larger timing errors from coarse sync
     let mut best_time = initial_offset;
     let mut best_sync = 0.0f32;
 
-    for dt in -4..=4 {
+    for dt in -24..=24 {
         let t_offset = initial_offset + dt;
         let sync = sync_downsampled(&cd, t_offset, None, false, Some(actual_sample_rate));
+
+        // if dt == 0 && sync == 0.0 {
+        //     // Debug: check bounds for center position
+        //     let nsps_down = 32;
+        //     let i3_end = t_offset + 78 * nsps_down as i32;
+        //     eprintln!("  DEBUG at dt=0: t_offset={}, i3_end={}, cd.len={}, sync={}",
+        //              t_offset, i3_end, cd.len(), sync);
+        // }
 
         if sync > best_sync {
             best_sync = sync;
             best_time = t_offset;
         }
     }
+
+    // eprintln!("  Time search: best_time_samples={}, best_sync={:.3}", best_time, best_sync);
 
     // Fine frequency search: ±2.5 Hz in 0.5 Hz steps (matching WSJT-X)
     // Unlike phase rotation, we RE-DOWNSAMPLE at each test frequency
@@ -183,8 +203,13 @@ pub fn fine_sync(
         }
     }
 
+    // eprintln!("  Freq search: best_freq={:.1} Hz, final_sync={:.3}", best_freq, best_sync);
+
     // Convert back to seconds (inverse of the initial_offset calculation)
     let refined_time = (best_time as f32 / actual_sample_rate) - 0.5;
+
+    // eprintln!("  REFINED: freq={:.1} Hz, dt_out={:.2}s, sync_out={:.3}",
+    //           best_freq, refined_time, best_sync);
 
     Ok(Candidate {
         frequency: best_freq,

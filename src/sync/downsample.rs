@@ -70,6 +70,9 @@ pub fn downsample_200hz(
     let it = (ft / df).round().min((NFFT_IN / 2) as f32) as usize;
     let i0 = (f0 / df).round() as usize;
 
+    // eprintln!("DOWNSAMPLE: f0={:.1} Hz, df={:.3} Hz, fb={:.1} Hz, ft={:.1} Hz, ib={}, it={}, i0={}",
+    //           f0, df, fb, ft, ib, it, i0);
+
     // Copy selected frequency bins to output FFT buffer
     let mut out_real = vec![0.0f32; NFFT_OUT];
     let mut out_imag = vec![0.0f32; NFFT_OUT];
@@ -82,6 +85,13 @@ pub fn downsample_200hz(
             k += 1;
         }
     }
+
+    // eprintln!("  Copied {} bins, bandwidth={:.1} Hz", k, (it - ib + 1) as f32 * df);
+
+    // Check power in copied bins
+    // let bin_power: f32 = out_real.iter().take(k).zip(out_imag.iter().take(k))
+    //     .map(|(r, i)| r*r + i*i).sum();
+    // eprintln!("  Power in copied bins: {:.3}", bin_power);
 
     // Calculate actual output sample rate
     let bandwidth = (it - ib + 1) as f32 * df;
@@ -104,6 +114,7 @@ pub fn downsample_200hz(
 
     // Circular shift to center at DC (matching WSJT-X cshift operation)
     let shift = (i0 as i32 - ib as i32).max(0) as usize;
+    // eprintln!("  Circular shift: shift={} (i0={}, ib={})", shift, i0, ib);
 
     if shift > 0 && shift < k {
         // Rotate array left by 'shift' positions
@@ -117,14 +128,28 @@ pub fn downsample_200hz(
             out_real[i] = temp_real[src];
             out_imag[i] = temp_imag[src];
         }
+
+        // Check power after shift
+        // let shift_power: f32 = out_real.iter().take(k).zip(out_imag.iter().take(k))
+        //     .map(|(r, i)| r*r + i*i).sum();
+        // eprintln!("  Power after shift: {:.3}", shift_power);
     }
 
     // Inverse FFT
     fft_complex_inverse(&mut out_real, &mut out_imag, NFFT_OUT)?;
 
+    // Check power after inverse FFT
+    // let ifft_power: f32 = out_real.iter().take(100).zip(out_imag.iter().take(100))
+    //     .map(|(r, i)| r*r + i*i).sum();
+    // eprintln!("  Power after IFFT (first 100): {:.3}", ifft_power);
+
     // Normalize and copy to output
     // Match WSJT-X: fac = 1.0/sqrt(float(NFFT1)*NFFT2)
-    let fac = 1.0 / ((NFFT_IN * NFFT_OUT) as f32).sqrt();
+    // BUT: Our IFFT already divided by NFFT_OUT, so we need to multiply it back first
+    // fft_complex_inverse divides by N=3200 (see fft.rs:113)
+    // So effective normalization = NFFT_OUT / sqrt(NFFT_IN * NFFT_OUT) = sqrt(NFFT_OUT / NFFT_IN)
+    let fac = (NFFT_OUT as f32 / NFFT_IN as f32).sqrt();
+    // eprintln!("  Normalization factor: {:.6} (accounts for IFFT scaling)", fac);
     for i in 0..NFFT_OUT {
         output[i] = (out_real[i] * fac, out_imag[i] * fac);
     }
