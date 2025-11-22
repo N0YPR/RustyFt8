@@ -60,7 +60,7 @@ pub enum DecodeDepth {
 /// * `Some((message91, iterations))` - Decoded message and iteration count
 /// * `None` - If all decode attempts failed
 pub fn decode_hybrid(llr: &[f32], depth: DecodeDepth) -> Option<(BitVec<u8, Msb0>, usize)> {
-    let max_bp_iters = 30;
+    let max_bp_iters = 50; // Increased from 30 to give BP more chances to converge
     let osd_order = 2;
 
     match depth {

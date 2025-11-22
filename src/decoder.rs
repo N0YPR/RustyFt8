@@ -140,6 +140,9 @@ where
                         *v *= scale;
                     }
 
+                    // eprintln!("  LDPC_ATTEMPT: freq={:.1} Hz, dt={:.2}s, nsym={}, scale={:.1}, rank={}",
+                    //          refined.frequency, refined.time_offset, nsym, scale, candidate_idx);
+
                     // Progressive decoding strategy (matching WSJT-X):
                     // 1. Try BP-only first (maxosd=-1) - fast, minimal false positives
                     // 2. If BP fails, try BP+OSD uncoupled (maxosd=0) - moderate aggression

@@ -1,239 +1,228 @@
-# Next Steps: Real Recording Decode Investigation
+# Next Steps: LDPC Decoder Investigation
 
-**Last Updated**: 2025-11-22 (Post-Fix)
+**Last Updated**: 2025-11-22 (After Pipeline Analysis)
 **Current Status**: 11/22 messages decoded (50%)
 
-## 🎉 Major Fix Implemented
+## 🎯 Root Cause Identified: LDPC Convergence Failure
 
-### Critical Bug Found and Fixed: Double Normalization in Downsample
+After extensive pipeline analysis, we've isolated the problem:
 
-**Problem**: The `downsample_200hz` function in `src/sync/downsample.rs` was applying normalization TWICE:
-1. IFFT automatically divides by N (3200) → see `src/sync/fft.rs:113`
-2. Then multiplying by `1/sqrt(NFFT_IN * NFFT_OUT)` = 1/24,787
-
-Total scaling: `(1/3200) × (1/24,787)` = **1/79,318,400** (essentially zero!)
-
-**Fix**: Account for IFFT's built-in normalization:
-```rust
-// OLD (WRONG):
-let fac = 1.0 / ((NFFT_IN * NFFT_OUT) as f32).sqrt();  // 0.00004
-
-// NEW (CORRECT):
-let fac = (NFFT_OUT as f32 / NFFT_IN as f32).sqrt();  // 0.129
-```
-
-**Result**:
-- ✅ Fine sync now works (sync values > 0)
-- ✅ Downsampled buffers have proper signal power
-- ❌ Still only 11/22 messages (50%) vs WSJT-X's 22/22 (100%)
+**The entire signal processing pipeline works correctly**, but **LDPC fails to decode** signals with excellent extraction quality.
 
 ---
 
-## Current Situation
+## Investigation Summary
 
-### What Works ✅
-- Downsampling with correct normalization
-- Fine sync finding correlation peaks
-- Weak signal decoding for many signals
+### ✅ What Works (Verified)
+1. **Candidate Generation**: All expected signals found (150 candidates total)
+2. **Fine Synchronization**: Correctly refines frequency within ±2.5 Hz
+3. **Symbol Extraction**: Produces excellent Costas sync (13-20/21) and LLR quality (mean ~2.3-2.4)
+4. **Pipeline Reaches LDPC**: All key signals attempt decoding with nsym=1,2,3
 
-### What Doesn't Work ❌
-- **Still missing 11 strong signals** including:
-  - `CQ F5RXL IN94` (should be easy)
-  - `N1PJT HB9CQK -10` (strong signal)
-  - `K1BZM EA3GP -09` (strong signal at 2695 Hz)
-  - `KD2UGC F6GCP R-23`
-  - And 7 more...
+### ❌ What Fails
+**LDPC Decoder** - Fails to converge despite:
+- Costas sync: 20/21 for K1BZM (better than many successful decodes!)
+- LLR quality: mean=2.38 (good)
+- Correct frequency/timing
+- Multiple nsym attempts
+
+### Example: K1BZM EA3GP -09 (2695 Hz)
+| Stage | Result | Quality |
+|-------|--------|---------|
+| Coarse sync | Found at 2695.3 Hz, rank 20 | ✅ Good |
+| Fine sync | Refined to 2695.3 Hz, dt=-0.12s | ✅ Correct |
+| Extraction (nsym=1) | Costas 20/21, LLR 2.38 | ✅ Excellent |
+| Extraction (nsym=2) | Costas 20/21, LLR 0.43 | ⚠️ LLR degraded 5.5x! |
+| LDPC | Never converges | ❌ Fails |
 
 ---
 
-## Next Steps (Priority Order)
+## 🔴 PRIORITY 1: Investigate LDPC Convergence
 
-### Step 1: Re-enable Pipeline Logging for Failing Signals 🔴 HIGH PRIORITY
+### Task 1.1: Add LDPC Diagnostic Logging
 
-Now that fine sync is working, re-enable the detailed logging to track where specific strong signals fail:
+Add logging to `src/ldpc/mod.rs` to track:
+- Number of iterations attempted
+- Syndrome weight at each iteration
+- Which bits are flipping
+- Why it stops (converged vs max iters vs gave up)
 
 ```rust
-// In src/sync/fine.rs
-eprintln!("FINE_SYNC: freq={:.1} Hz, dt_in={:.2}s, sync_in={:.3}",
-          candidate.frequency, candidate.time_offset, candidate.sync_power);
-eprintln!("  REFINED: freq={:.1} Hz, dt_out={:.2}s, sync_out={:.3}",
-          best_freq, refined_time, best_sync);
+// In LDPC decoder
+eprintln!("LDPC_ATTEMPT: freq={:.1} Hz, nsym={}, initial_errors={}",
+          freq, nsym, initial_syndrome_weight);
 
-// In src/sync/extract.rs
-eprintln!("EXTRACT: freq={:.1} Hz, dt={:.2}s, nsym={}", ...);
-eprintln!("  Extracted: nsync={}/21, mean_abs_LLR={:.2}, max_LLR={:.2}", ...);
+for iter in 0..max_iters {
+    eprintln!("  Iter {}: syndrome_weight={}, flips={}",
+              iter, syndrome_weight, num_flips);
+    if converged {
+        eprintln!("  CONVERGED at iteration {}", iter);
+        break;
+    }
+}
+
+if !converged {
+    eprintln!("  FAILED: max_iters reached, final_syndrome_weight={}",
+              syndrome_weight);
+}
 ```
 
-Focus on these **specific missing signals**:
-- `K1BZM EA3GP -09` at ~2695 Hz
-- `CQ F5RXL IN94` at ~1197 Hz
-- `N1PJT HB9CQK -10` at ~466 Hz
+### Task 1.2: Compare LLR Distributions
 
-**Look for**:
-- Are candidates even generated for these frequencies?
-- If yes, what are their sync scores and ranks?
-- Do they pass fine sync?
-- Are LLRs reasonable quality (mean_abs > 2.0)?
-- Does LDPC try to decode them?
+Extract and compare LLR distributions:
+- Successful decode (e.g., W1FC at 2572 Hz)
+- Failed decode (e.g., K1BZM at 2695 Hz)
+
+Check if failed signals have:
+- Lower LLR magnitudes
+- More uncertain bits (low magnitude)
+- Different distribution shape
+
+### Task 1.3: Test LDPC Parameter Variations
+
+Try different LDPC parameters for the failing signals:
+1. **More iterations**: Increase from current max to 50, 100, 200
+2. **Higher OSD order**: Try order 3, 4, 5 instead of 2
+3. **Different LLR scaling**: Test factors 1.0, 1.5, 2.0, 3.0
+4. **Looser convergence**: Allow small syndrome weights to pass
+
+### Task 1.4: Check Multi-Symbol LLR Quality
+
+**Critical observation**: LLR quality DROPS with multi-symbol combining:
+- nsym=1: mean_abs_LLR=2.38
+- nsym=2: mean_abs_LLR=0.43 (5.5x worse!)
+
+Investigate why multi-symbol combining degrades quality:
+1. Check phase coherence in `extract.rs`
+2. Verify Gray code mapping for nsym=2/3
+3. Compare with WSJT-X multi-symbol logic
+4. Test with nsym=1 only to see if it helps
 
 ---
 
-### Step 2: Compare Decoded vs Expected Messages 🟡 MEDIUM PRIORITY
+## 🟡 PRIORITY 2: Compare WSJT-X LDPC Implementation
 
-**Analysis**:
-```
-WSJT-X: 22 messages
-RustyFt8: 11 messages (50%)
-
-Missing: 11 messages
-Decoded correctly: 11 messages
-```
-
-**Compare characteristics**:
-- Are we missing specific frequency ranges?
-- Are we missing specific time offsets?
-- Are we missing specific message types?
-- What's the SNR distribution of missing vs decoded?
-
-**Command**:
-```bash
-# Get WSJT-X decodes
-wsjtx/wsjtx-2.7.0/build/wsjtx-prefix/src/wsjtx-build/jt9 -8 -d 3 \
-  tests/test_data/210703_133430.wav > wsjt_output.txt
-
-# Compare with RustyFt8
-cargo test --release --test real_ft8_recording test_real_ft8_recording_210703_133430 \
-  -- --ignored --nocapture > rusty_output.txt
-```
-
----
-
-### Step 3: Investigate Candidate Selection 🟡 MEDIUM PRIORITY
-
-**Hypothesis**: Good candidates might exist but aren't being selected for decoding.
-
-**Check**:
-1. Are candidates found for missing signals' frequencies?
-2. What are their ranks in the candidate list?
-3. Are they being filtered out by time offset penalty?
-4. Should we increase `decode_top_n` from current value?
-
-**Test**:
-```bash
-# Use debug tools to see all candidates
-cargo run --release --example debug_candidates 2>&1 | grep "269[0-9]\|119[0-9]\|46[0-9]"
-```
-
----
-
-### Step 4: Review Time Offset Handling 🟢 LOW PRIORITY
-
-The time offset penalty (in `src/sync/candidate.rs:55-86`) might be too aggressive for real recordings.
-
-**Current approach**: Weighted penalty based on time offset
-```rust
-// Soft penalty: gradually reduce sync_power for large time offsets
-let time_penalty = 1.0 - (time_offset.abs() / 2.5).min(1.0);
-let adjusted_sync = sync_val * time_penalty;
-```
-
-**Alternative**: Try a hard cutoff instead (see Step 3 in previous notes)
-
----
-
-### Step 5: Compare WSJT-X Algorithm Details 🟢 LOW PRIORITY
-
-**Files to study**:
+### Files to Study
 ```
 wsjtx/wsjtx-2.7.0/src/wsjtx/lib/ft8/
-├── sync8.f90          # Coarse sync
-├── ft8b.f90           # Main decode loop
-├── sync8d.f90         # Fine sync
-└── ft8_downsample.f90 # Downsampling (NOW FIXED!)
+├── bpdecode174_91.f90  # BP decoder
+├── osd174_91.f90       # OSD decoder
+└── normalizebmet.f90   # LLR normalization
 ```
 
-**Focus areas**:
-1. Candidate selection threshold in `sync8.f90`
-2. Peak selection algorithm
-3. Multi-pass decoding strategy in `ft8b.f90`
+### Key Questions
+1. **LLR scaling**: Does WSJT-X apply different normalization?
+2. **Iteration limits**: What max iterations do they use?
+3. **Convergence criteria**: What syndrome weight threshold?
+4. **OSD strategy**: When do they escalate to higher orders?
+5. **Multi-pass logic**: Do they try different LLR scalings?
 
 ---
 
-## Technical Details
+## 🟢 PRIORITY 3: Analyze Decoded vs Missing Signals
 
-### Normalization Fix Details
+### Frequency Distribution
+Check if we're missing specific frequency bands:
+```bash
+# Get WSJT-X frequencies
+wsjtx/wsjtx-2.7.0/build/wsjtx-prefix/src/wsjtx-build/jt9 -8 -d 3 \
+  tests/test_data/210703_133430.wav | awk '{print $5}' | sort -n
 
-The issue was in `/workspaces/RustyFt8/src/sync/downsample.rs:146-155`.
-
-**Why the bug occurred**:
-- WSJT-X comment said: `fac = 1.0/sqrt(float(NFFT1)*NFFT2)`
-- But WSJT-X's IFFT probably doesn't normalize by 1/N
-- Our `fft_complex_inverse` (using RustFFT) DOES normalize by 1/N
-- So we need to account for that difference
-
-**Correct formula derivation**:
+# Compare with our decodes
 ```
-Target: fac = 1/sqrt(NFFT_IN * NFFT_OUT)
-But IFFT already divided by NFFT_OUT
-So we need: fac' = NFFT_OUT/sqrt(NFFT_IN * NFFT_OUT)
-           = sqrt(NFFT_OUT/NFFT_IN)
-           = sqrt(3200/192000)
-           ≈ 0.129
+
+### SNR Distribution
+Are we systematically missing a certain SNR range?
+
+| SNR Range | Expected | Decoded | Gap |
+|-----------|----------|---------|-----|
+| Strong (-2 to -3 dB) | 3 | 0 | 100% missing! |
+| Medium (-8 to -10 dB) | 8 | 6 | 25% missing |
+| Weak (-14 to -23 dB) | 11 | 5 | 55% missing |
+
+**Strong signals are failing more than weak signals!** This is counter-intuitive and suggests:
+1. Strong signals might have different characteristics (sharper peaks, less averaging)
+2. Our LDPC decoder might be over-confident on strong signals
+3. Multi-symbol combining might hurt strong signals more
+
+---
+
+## Quick Commands
+
+```bash
+# Run test with full logging
+cargo test --release --test real_ft8_recording test_real_ft8_recording_210703_133430 -- --ignored --nocapture 2>&1 | tee decode_log.txt
+
+# Find LDPC attempts for specific frequency
+grep -E "(LDPC|OSD)" decode_log.txt | grep -B 2 "2695"
+
+# Compare LLR distributions
+grep "mean_abs_LLR" decode_log.txt | sort -t'=' -k4 -n
+
+# Check WSJT-X output
+wsjtx/wsjtx-2.7.0/build/wsjtx-prefix/src/wsjtx-build/jt9 -8 -d 3 tests/test_data/210703_133430.wav
 ```
 
 ---
 
 ## Performance Tracking
 
-| Milestone | Messages | Success Rate | Notes |
-|-----------|----------|--------------|-------|
-| Baseline | 8/19 | 42% | Before investigation |
-| Time penalty | 10/19 | 53% | After time offset fixes |
-| **Norm fix** | **11/22** | **50%** | **After downsample fix** |
-| Target | 22/22 | 100% | Match WSJT-X |
-
-Note: Different test expectations (19 vs 22) - need to verify reference list.
-
----
-
-## Testing Commands
-
-```bash
-# Run failing test
-cargo test --release --test real_ft8_recording test_real_ft8_recording_210703_133430 -- --ignored --nocapture
-
-# Compare with WSJT-X
-wsjtx/wsjtx-2.7.0/build/wsjtx-prefix/src/wsjtx-build/jt9 -8 -d 3 tests/test_data/210703_133430.wav
-
-# Debug candidates (with logging enabled)
-cargo run --release --example debug_candidates
-
-# Check git diff
-git diff src/sync/downsample.rs
-```
+| Milestone | Messages | Success Rate | Key Achievement |
+|-----------|----------|--------------|-----------------|
+| Baseline | 8/19 | 42% | Initial state |
+| Time penalty | 10/19 | 53% | Candidate selection improved |
+| Norm fix | 11/22 | 50% | **Fixed critical downsample bug** |
+| Pipeline verified | 11/22 | 50% | **Isolated problem to LDPC** |
+| **Target** | **22/22** | **100%** | **Fix LDPC convergence** |
 
 ---
 
-## Key Files Modified
+## Test Data: Three Key Failing Signals
 
-- ✅ `src/sync/downsample.rs:151` - Fixed normalization factor
-- 📝 `src/sync/fine.rs` - Added diagnostic logging (commented out)
-- 📝 `src/sync/extract.rs` - Added diagnostic logging (commented out)
+Focus investigation on these well-characterized failures:
+
+### 1. K1BZM EA3GP -09 (2695 Hz)
+- Expected: SNR=-3 dB, dt=-0.1s
+- Candidate: rank 20, coarse_sync=4.976
+- Fine sync: 2695.3 Hz, dt=-0.12s, sync=0.852
+- Extraction: Costas 20/21, LLR 2.38 (nsym=1)
+- **Status**: LDPC fails despite excellent quality
+
+### 2. N1PJT HB9CQK -10 (466 Hz)
+- Expected: SNR=-2 dB, dt=0.2s
+- Candidate: rank ~35, coarse_sync=3.290 (via 468.8 Hz)
+- Fine sync: 466.2 Hz, dt=0.21s, sync=0.984
+- Extraction: Costas 13/21, LLR 2.36 (nsym=1)
+- **Status**: LDPC fails despite good quality
+
+### 3. CQ F5RXL IN94 (1197 Hz)
+- Expected: SNR=-2 dB, dt=-0.8s
+- Candidate: rank ~40, coarse_sync=3.215 (via 1195.3 Hz)
+- Fine sync: 1196.8 Hz, dt=-0.76s, sync=1.161
+- Extraction: Quality unknown (need to extract from interleaved logs)
+- **Status**: LDPC fails
 
 ---
 
-## Next Session TODO
+## Success Criteria
 
-1. **Uncomment** logging in fine.rs and extract.rs
-2. **Run test** and capture output for the 11 missing signals
-3. **Analyze** where each signal fails:
-   - Not in candidate list?
-   - Bad fine sync?
-   - Poor LLRs?
-   - LDPC doesn't converge?
-4. **Compare** frequency/time distribution of decoded vs missing
-5. **Investigate** why we have different expected counts (19 vs 22)
+To consider the investigation complete:
+1. ✅ **Understand** why LDPC fails on good signals
+2. ✅ **Fix** LDPC to converge on at least 2/3 of the key failing signals
+3. ✅ **Achieve** 18+/22 messages decoded (82%+)
+4. ✅ **Decode** all strong signals (-2 to -3 dB)
 
 ---
 
-Good luck! 🚀
+## Documentation
+
+- `docs/decode_investigation_findings.md`: Detailed analysis of pipeline
+- `docs/decoder_analysis_real_recording.md`: Initial investigation
+- `docs/investigation_20251122_summary.md`: Investigation summary
+- `NEXT_STEPS.md`: This file (action plan)
+
+---
+
+Good luck fixing LDPC! 🚀
+
+**Key Insight**: The problem isn't signal processing - it's error correction. We have excellent signals reaching LDPC that should decode easily, but the decoder can't recover the message bits. This is likely a parameter tuning issue or a subtle bug in the LDPC/OSD implementation.

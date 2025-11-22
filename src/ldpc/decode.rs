@@ -37,6 +37,10 @@ pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, u
         return None;
     }
 
+    // Compute initial LLR quality metrics for debugging
+    let llr_mean = llr.iter().map(|x| x.abs()).sum::<f32>() / llr.len() as f32;
+    let llr_max = llr.iter().map(|x| x.abs()).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
+
     // Message arrays
     let mut toc = vec![vec![0.0f32; MAX_NRW]; M]; // Messages to checks
     let mut tov = vec![vec![0.0f32; NCW]; N];     // Messages to variable nodes
@@ -78,17 +82,27 @@ pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, u
             }
         }
 
+        // Log progress every 10 iterations or at key points
+        // if iter == 0 || iter == 10 || iter == 20 || iter == max_iterations || ncheck == 0 {
+        //     eprintln!("    BP iter {}: ncheck={}/83, llr_mean={:.2}, llr_max={:.2}",
+        //              iter, ncheck, llr_mean, llr_max);
+        // }
+
         // If all parity checks satisfied, check CRC
         if ncheck == 0 {
             let decoded = &cw[..K];
             if crc14_check(decoded) {
                 // Success! Return the decoded message
+                // eprintln!("    BP CONVERGED at iteration {} (CRC valid)", iter);
                 return Some((decoded.to_bitvec(), iter));
+            } else {
+                // eprintln!("    BP iter {}: All parity OK but CRC FAILED", iter);
             }
         }
 
         // If we've reached max iterations, give up
         if iter == max_iterations {
+            // eprintln!("    BP FAILED: max_iters={}, final ncheck={}/83", max_iterations, ncheck);
             break;
         }
 

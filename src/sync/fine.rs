@@ -133,8 +133,8 @@ pub fn fine_sync(
     signal: &[f32],
     candidate: &Candidate,
 ) -> Result<Candidate, String> {
-    // eprintln!("FINE_SYNC: freq={:.1} Hz, dt_in={:.2}s, sync_in={:.3}",
-    //           candidate.frequency, candidate.time_offset, candidate.sync_power);
+    eprintln!("FINE_SYNC: freq={:.1} Hz, dt_in={:.2}s, sync_in={:.3}",
+              candidate.frequency, candidate.time_offset, candidate.sync_power);
 
     // Downsample centered on candidate frequency
     // Buffer size must match NFFT_OUT in downsample.rs (3200)
@@ -208,8 +208,8 @@ pub fn fine_sync(
     // Convert back to seconds (inverse of the initial_offset calculation)
     let refined_time = (best_time as f32 / actual_sample_rate) - 0.5;
 
-    // eprintln!("  REFINED: freq={:.1} Hz, dt_out={:.2}s, sync_out={:.3}",
-    //           best_freq, refined_time, best_sync);
+    eprintln!("  REFINED: freq_in={:.1} -> freq_out={:.1} Hz, dt_out={:.2}s, sync_out={:.3}",
+              candidate.frequency, best_freq, refined_time, best_sync);
 
     Ok(Candidate {
         frequency: best_freq,
