@@ -61,7 +61,7 @@ pub enum DecodeDepth {
 /// * `None` - If all decode attempts failed
 pub fn decode_hybrid(llr: &[f32], depth: DecodeDepth) -> Option<(BitVec<u8, Msb0>, usize)> {
     let max_bp_iters = 50; // Increased from 30 to give BP more chances to converge
-    let osd_order = 2;
+    let osd_order = 4; // Increased from 2 to handle signals with more bit errors
 
     match depth {
         DecodeDepth::BpOnly => {

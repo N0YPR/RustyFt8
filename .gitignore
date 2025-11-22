@@ -31,3 +31,4 @@ Cargo.lock
 decoded.txt
 timer.out
 jt9_wisdom.dat
+ldpc_*output.txt
