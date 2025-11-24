@@ -153,22 +153,14 @@ pub fn fine_sync(
     // eprintln!("  Initial offset: {} samples (from dt={:.2}s)", initial_offset, candidate.time_offset);
 
 
-    // Fine time search: ±24 steps of 5 ms each = ±120 ms
-    // Expanded from ±20ms to correct larger timing errors from coarse sync
+    // Fine time search: ±10 samples = ±50 ms (matching WSJT-X ft8b.f90:110)
+    // WSJT-X searches i0-10 to i0+10, which is "over +/- one quarter symbol"
     let mut best_time = initial_offset;
     let mut best_sync = 0.0f32;
 
-    for dt in -24..=24 {
+    for dt in -10..=10 {
         let t_offset = initial_offset + dt;
         let sync = sync_downsampled(&cd, t_offset, None, false, Some(actual_sample_rate));
-
-        // if dt == 0 && sync == 0.0 {
-        //     // Debug: check bounds for center position
-        //     let nsps_down = 32;
-        //     let i3_end = t_offset + 78 * nsps_down as i32;
-        //     eprintln!("  DEBUG at dt=0: t_offset={}, i3_end={}, cd.len={}, sync={}",
-        //              t_offset, i3_end, cd.len(), sync);
-        // }
 
         if sync > best_sync {
             best_sync = sync;

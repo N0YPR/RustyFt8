@@ -145,7 +145,7 @@ fn extract_symbols_impl(
 
     // CRITICAL for nsym=2/3: Apply fine phase correction to remove residual frequency offset
     // Even 0.1 Hz error causes phase drift that decorrelates adjacent symbols
-    // Search ±0.3 Hz with 0.05 Hz resolution to find optimal phase tracking
+    // Search ±1.0 Hz with 0.05 Hz resolution to find optimal phase tracking
     let time_offset_samples = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
 
     let mut best_correction = 0.0f32;
@@ -158,8 +158,8 @@ fn extract_symbols_impl(
         let initial_sync = sync_downsampled(&cd, time_offset_samples, None, false, Some(actual_sample_rate));
         let mut best_sync = initial_sync;
 
-        for correction_idx in -6..=6 {
-            let freq_correction = correction_idx as f32 * 0.05; // ±0.3 Hz in 0.05 Hz steps
+        for correction_idx in -20..=20 {
+            let freq_correction = correction_idx as f32 * 0.05; // ±1.0 Hz in 0.05 Hz steps
 
             if correction_idx == 0 {
                 continue; // Already tested initial
@@ -291,9 +291,11 @@ fn extract_symbols_impl(
         // cs(0:7,k)=csymb(1:8)/1e3     <- normalized by 1000
         // s8(0:7,k)=abs(csymb(1:8))    <- NOT normalized (used for Costas check)
         const NORM_FACTOR: f32 = 1000.0;
+
         for tone in 0..8 {
             let re = sym_real[tone];
             let im = sym_imag[tone];
+
             // Store normalized complex values for coherent combining
             cs[tone][k] = (re / NORM_FACTOR, im / NORM_FACTOR);
             // Store UNNORMALIZED magnitude for Costas validation
@@ -440,7 +442,8 @@ fn extract_symbols_impl(
 
                 k += nsym; // Move to next symbol (or group)
             } else if nsym == 3 {
-                // Multi-symbol decoding: coherently combine 3 symbols
+                // Multi-symbol decoding: coherent combining (matches WSJT-X)
+                // NOTE: Currently disabled in decoder due to phase drift issues
                 for i in 0..nt {
                     let i1 = i / 64; // First symbol's tone
                     let i2 = (i / 8) % 8; // Second symbol's tone
@@ -530,17 +533,17 @@ fn extract_symbols_impl(
                 }
 
                 // Two-symbol decoding for regular pairs (k=1,3,5,...,27)
-
                 for i in 0..nt {
                     let i2 = (i / 8) % 8; // First symbol's 3-bit index (0-7)
                     let i3 = i % 8;       // Second symbol's 3-bit index (0-7)
 
-                    // Always combine the pair (may include sync symbols at boundaries)
                     let tone2 = GRAY_MAP[i2] as usize;
                     let tone3 = GRAY_MAP[i3] as usize;
                     let (r2, im2) = cs[tone2][ks];
                     let (r3, im3) = cs[tone3][ks + 1];
 
+                    // Coherent combining (matches WSJT-X)
+                    // NOTE: Currently disabled in decoder due to phase drift issues
                     let sum_r = r2 + r3;
                     let sum_im = im2 + im3;
                     s2[i] = (sum_r * sum_r + sum_im * sum_im).sqrt();
@@ -550,6 +553,7 @@ fn extract_symbols_impl(
                 // Combination index i directly encodes the 6 bits:
                 // i = (i2 << 3) | i3 where i2, i3 are 3-bit indices
                 const IBMAX: usize = 5;
+
                 for ib in 0..=IBMAX {
                     if bit_idx >= 174 {
                         break;
@@ -709,14 +713,9 @@ pub fn calculate_snr(s8: &[[f32; 79]; 8], tones: &[u8; 79], baseline_noise: Opti
         -24.0
     };
 
-    // Use baseline method (xsnr2) as primary, matching WSJT-X behavior
-    // WSJT-X uses xsnr2 by default (when nagain=false), falling back to xsnr only on second pass
-    // This fixes the systematic ~6-8 dB underestimation we were seeing
-    let snr = if baseline_noise.is_some() && xsnr2 > -24.0 {
-        xsnr2
-    } else {
-        xsnr
-    };
+    // Use signal/off-tone ratio method (xsnr) - the baseline method has scaling issues
+    // TODO: Fix baseline_noise scaling to match WSJT-X units
+    let snr = xsnr;
 
     // Clamp to reasonable range
     snr.max(-24.0).min(30.0) as i32

@@ -103,7 +103,9 @@ where
     // LLR scaling factors to try (optimized order - most common values first)
     // Expanded range to help decode weaker signals
     let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 1.25, 0.9, 1.1, 1.3, 1.7, 2.5, 3.0, 4.0, 5.0, 0.6, 0.8];
-    let nsym_values = [1, 2, 3];
+    // Disable nsym=2/3: phase drift causes false positives, no correct decodes
+    // Multi-symbol combining needs per-symbol phase tracking which we don't have yet
+    let nsym_values = [1];
 
     // Process all candidates in parallel, collecting successful decodes
     let min_snr_threshold = config.min_snr_db;
