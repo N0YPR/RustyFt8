@@ -157,11 +157,38 @@ K1BZM's poor bit confidence (min LLR=0.001) suggests phase issues. Implement per
 
 ---
 
+## Multi-Pass Decoding Test Results
+
+**Status**: FAILED - Produces false positives
+
+Tested `decode_ft8_multipass` with 3 passes:
+- Pass 1: 9 correct decodes
+- Pass 2: 0 new decodes
+- Pass 3: 2 new decodes (DW7HKN/P KK0XRY/P EH18, IX0LAK KW6JMM KE51)
+- **Result**: Both pass 3 decodes are FALSE POSITIVES (not in WSJT-X output)
+
+**Problem**: Signal subtraction creates artifacts in the residual audio that produce spurious decodes. Our subtraction is not perfect enough to avoid creating false sync peaks.
+
+**WSJT-X advantage**: Likely has:
+1. More accurate signal reconstruction for subtraction
+2. Better artifact rejection heuristics
+3. Different subtraction strategy (frequency-domain?)
+
+**Conclusion**: Multi-pass decoding disabled - need better subtraction quality before it can help.
+
+---
+
 ## Next Steps
 
-1. **Test multi-pass decoding** on the real recording
-2. **Measure improvement** - expect 3-5 more decodes from subtraction
-3. **Implement a-priori information** if multi-pass doesn't reach 22/22
+1. ~~**Test multi-pass decoding** on the real recording~~ ❌ Produces false positives
+2. **Implement a-priori information** (PRIORITY: HIGH)
+   - Hash lookups for recently seen callsigns
+   - Boost marginal candidates (mean_abs_LLR 2.3-2.5) by ~5-10%
+   - Should help K1BZM and other threshold cases
+3. **Improve signal subtraction quality** (PRIORITY: MEDIUM)
+   - Study WSJT-X's subtraction algorithm
+   - Consider frequency-domain subtraction
+   - Add artifact rejection heuristics
 4. **Profile LDPC threshold** - determine exact mean_abs_LLR threshold for different decode depths
 
 ---

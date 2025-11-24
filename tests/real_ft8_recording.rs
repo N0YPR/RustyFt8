@@ -90,6 +90,7 @@ fn test_real_ft8_recording_210703_133430() {
     };
 
     let mut decoded_messages: Vec<DecodedMessage> = Vec::new();
+    // Use single-pass decoding (multi-pass creates false positives from subtraction artifacts)
     let count = decode_ft8(&signal_15s, &config, |msg| {
         println!("Decoded: {} @ {:.1} Hz, DT={:.2}s, SNR={} dB, sync={:.2}, LDPC iters={}, LLR scale={:.1}, nsym={}",
             msg.message, msg.frequency, msg.time_offset, msg.snr_db,
