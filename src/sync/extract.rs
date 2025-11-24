@@ -374,6 +374,10 @@ fn extract_symbols_impl(
     // FT8 uses 79 symbols × 3 bits/symbol = 237 bits, but only 174 are used
     // Data symbols: 7-36 (29 symbols) and 43-71 (29 symbols) = 58 symbols × 3 bits = 174 bits
 
+    // Debug flags for specific signals (disabled - enable for investigation)
+    let debug_k1bzm = false && candidate.frequency > 2695.0 && candidate.frequency < 2696.0;
+    let debug_w1fc = false && candidate.frequency > 2571.0 && candidate.frequency < 2573.0;
+
     // Gray code mapping for decoding
     // GRAY_MAP: 3-bit index -> tone (used in encoding)
     // GRAY_MAP_INV: tone -> 3-bit index (used in decoding - what we need!)
@@ -411,6 +415,15 @@ fn extract_symbols_impl(
                 for tone in 0..8 {
                     let index = GRAY_MAP_INV[tone];  // Convert tone to 3-bit index
                     s2[index as usize] = s8[tone][ks];
+                }
+
+                // Debug first few data symbols for K1BZM/W1FC
+                // ks starts at 7 (k=1 + base_offset=7 - 1), so check ks < 12 for first 5 symbols
+                if (debug_k1bzm || debug_w1fc) && ks < 12 {
+                    let signal_name = if debug_k1bzm { "K1BZM" } else { "W1FC" };
+                    let s2_mean: f32 = s2.iter().sum::<f32>() / s2.len() as f32;
+                    let s2_max = s2.iter().cloned().fold(0.0f32, f32::max);
+                    eprintln!("  {} sym[{}]: s2_mean={:.5}, s2_max={:.5}", signal_name, ks, s2_mean, s2_max);
                 }
 
                 // Extract 3 bits from this symbol
@@ -589,6 +602,18 @@ fn extract_symbols_impl(
         }
     }
 
+    // Debug specific signals' raw LLRs before normalization
+    let debug_signal = debug_k1bzm || debug_w1fc;
+
+    if debug_signal {
+        let mean_raw_llr: f32 = llr.iter().map(|x| x.abs()).sum::<f32>() / 174.0;
+        let max_raw_llr = llr.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+        let min_raw_llr = llr.iter().map(|x| x.abs()).fold(f32::MAX, f32::min);
+        let signal_name = if debug_k1bzm { "K1BZM" } else { "W1FC" };
+        eprintln!("  {} RAW LLRs: mean={:.5}, max={:.5}, min={:.5}",
+                 signal_name, mean_raw_llr, max_raw_llr, min_raw_llr);
+    }
+
     // Normalize LLRs by standard deviation (match WSJT-X normalizebmet)
     let mut sum = 0.0f32;
     let mut sum_sq = 0.0f32;
@@ -615,6 +640,13 @@ fn extract_symbols_impl(
     // Then scale by WSJT-X scalefac=2.83
     for i in 0..174 {
         llr[i] *= 2.83;
+    }
+
+    // Debug after normalization
+    if debug_signal {
+        let mean_norm_llr: f32 = llr.iter().map(|x| x.abs()).sum::<f32>() / 174.0;
+        let signal_name = if debug_k1bzm { "K1BZM" } else { "W1FC" };
+        eprintln!("  {} NORM: std_dev={:.5}, mean_after_norm={:.5}", signal_name, std_dev, mean_norm_llr);
     }
 
     // Log quality metrics
