@@ -73,10 +73,12 @@ pub const NSPS: usize = 1920;
 pub const NSTEP: usize = NSPS / 4;
 
 /// FFT size for symbol spectra
-pub const NFFT1: usize = 4096; // Power of 2 for FFT efficiency (nearest to 2*NSPS=3840)
+/// CRITICAL: MUST be 2*NSPS = 3840 to match WSJT-X exactly!
+/// RustFFT supports mixed-radix sizes (not just power-of-2)
+pub const NFFT1: usize = 2 * NSPS; // 3840 = 2 * 1920
 
 /// Number of FFT bins
-pub const NH1: usize = NFFT1 / 2; // 2048
+pub const NH1: usize = NFFT1 / 2; // 1920
 
 /// Maximum number of samples (15 seconds at 12 kHz)
 pub const NMAX: usize = 15 * 12000; // 180,000

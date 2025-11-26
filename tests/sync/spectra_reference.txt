@@ -1,0 +1,107 @@
+At line 85 of file tests/sync/test_spectra.f90 (unit = 6, file = 'stdout')
+Fortran runtime error: Expected INTEGER for item 2 in formatted transfer, got REAL
+(A,I4,A,E16.8)
+   ^
+
+Error termination. Backtrace:
+#0  0xffffa658d197 in ???
+#1  0xffffa658def7 in ???
+#2  0xffffa667522b in ???
+#3  0xffffa668130f in ???
+#4  0xffffa668498b in ???
+#5  0xaaaad5eb23b7 in MAIN__
+#6  0xaaaad5eb24f3 in main
+ WSJT-X Spectra Test Data
+ NH1=        1920  NHSYM=         372  NSTEP=         480  NSPS=        1920  NFFT1=        3840
+ 
+ Spectra at key frequency bins (format: bin, time_step, power)
+ ================================================================
+bin= 477 time=   1 power=  0.33916088E+02
+bin= 477 time=   2 power=  0.59340504E+02
+bin= 477 time=   3 power=  0.37474079E+02
+bin= 477 time=   4 power=  0.45029594E+02
+bin= 477 time=   5 power=  0.24700119E+02
+bin= 477 time=   6 power=  0.55710846E+02
+bin= 477 time=   7 power=  0.59886330E+02
+bin= 477 time=   8 power=  0.11959797E+03
+bin= 477 time=   9 power=  0.47563972E+02
+bin= 477 time=  10 power=  0.19790857E+02
+bin= 477 time=  11 power=  0.76993570E+01
+bin= 477 time=  12 power=  0.11486896E+03
+bin= 477 time=  13 power=  0.27401386E+02
+bin= 477 time=  14 power=  0.34483914E+03
+bin= 477 time=  15 power=  0.30789276E+03
+bin= 477 time=  16 power=  0.19097711E+03
+bin= 477 time=  17 power=  0.10601652E+03
+bin= 477 time=  18 power=  0.24087620E+02
+bin= 477 time=  19 power=  0.28577267E+03
+bin= 477 time=  20 power=  0.59803778E+03
+ 
+ Bin 478 at select times:
+bin= 478 time=   1 power=  0.27408253E+02
+bin= 478 time=   2 power=  0.16059134E+02
+bin= 478 time=   3 power=  0.19623560E+03
+bin= 478 time=   4 power=  0.11282538E+03
+bin= 478 time=   5 power=  0.17891954E+03
+bin= 478 time=   6 power=  0.81607193E+02
+bin= 478 time=   7 power=  0.14830794E+03
+bin= 478 time=   8 power=  0.64022133E+02
+bin= 478 time=   9 power=  0.32177869E+03
+bin= 478 time=  10 power=  0.91876801E+02
+bin= 478 time=  11 power=  0.11059422E+03
+bin= 478 time=  12 power=  0.23780096E+01
+bin= 478 time=  13 power=  0.52448615E+03
+bin= 478 time=  14 power=  0.13112817E+03
+bin= 478 time=  15 power=  0.19122841E+03
+bin= 478 time=  16 power=  0.13749585E+03
+bin= 478 time=  17 power=  0.20789191E+03
+bin= 478 time=  18 power=  0.26705603E+03
+bin= 478 time=  19 power=  0.11624572E+02
+bin= 478 time=  20 power=  0.55449017E+03
+ 
+ Bin 482 at select times:
+bin= 482 time=   1 power=  0.17330389E+03
+bin= 482 time=   2 power=  0.57939350E+02
+bin= 482 time=   3 power=  0.10773853E+03
+bin= 482 time=   4 power=  0.11931680E+03
+bin= 482 time=   5 power=  0.32656180E+03
+bin= 482 time=   6 power=  0.17910788E+03
+bin= 482 time=   7 power=  0.11133997E+03
+bin= 482 time=   8 power=  0.22600018E+03
+bin= 482 time=   9 power=  0.10375924E+03
+bin= 482 time=  10 power=  0.13531740E+03
+bin= 482 time=  11 power=  0.23543684E+03
+bin= 482 time=  12 power=  0.41266333E+03
+bin= 482 time=  13 power=  0.78077637E+02
+bin= 482 time=  14 power=  0.13548671E+01
+bin= 482 time=  15 power=  0.45399902E+02
+bin= 482 time=  16 power=  0.24192694E+03
+bin= 482 time=  17 power=  0.98480591E+02
+bin= 482 time=  18 power=  0.56076904E+03
+bin= 482 time=  19 power=  0.53246576E+03
+bin= 482 time=  20 power=  0.65471631E+03
+ 
+ Average spectrum at key bins:
+ =============================
+bin= 477 avg=  0.13897811E+06
+bin= 478 avg=  0.13469475E+06
+bin= 482 avg=  0.10244648E+06
+bin= 811 avg=  0.17150389E+07
+bin= 823 avg=  0.15436414E+09
+ 
+ First 10 frequency bins at time step 13:
+ ==========================================
+bin=   1 power=  0.28683577E+02
+bin=   2 power=  0.83484039E+02
+bin=   3 power=  0.12123872E+03
+bin=   4 power=  0.73879005E+02
+bin=   5 power=  0.11272941E+03
+bin=   6 power=  0.52520618E+02
+bin=   7 power=  0.29808300E+02
+bin=   8 power=  0.41738472E+02
+bin=   9 power=  0.17877945E+02
+bin=  10 power=  0.47623108E+02
+ 
+ Cross-check: accessing middle Costas time indices
+ ==================================================
+ Time indices for middle Costas (lag=1, bin=477):

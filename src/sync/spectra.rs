@@ -358,11 +358,25 @@ pub fn compute_sync2d(
                     }
 
                     // Costas array 2 (symbols 36-42)
-                    // WSJT-X: NO bounds check (assumes middle Costas in valid range)
+                    // WSJT-X: NO bounds check - always accesses middle Costas!
+                    // Lines 68-69: tb=tb + s(i+nfos*icos7(n),m+nssy*36)
+                    //              t0b=t0b + sum(s(i:i+nfos*6:nfos,m+nssy*36))
+                    // The middle Costas is assumed to always be in valid range for 15s recordings
                     let m2 = m + (nssy as i32) * 36;
+                    // CRITICAL: Match WSJT-X exactly - NO bounds check here!
+                    // Only add safety check to prevent Rust panic, but this should never trigger
                     if m2 >= 1 && m2 <= NHSYM as i32 {
                         let freq_idx2 = (i as i32 + nfos as i32 * tone) as usize;
                         let time_idx2 = (m2 - 1) as usize; // Convert Fortran 1-indexed to Rust 0-indexed
+
+                        if is_debug_case {
+                            use tracing::trace;
+                            let spec_val = spectra[freq_idx2][time_idx2];
+                            trace!(n = n, m = m, m2 = m2, time_idx2 = time_idx2,
+                                   freq_idx2 = freq_idx2, tone = tone, spec_val = %spec_val,
+                                   "middle Costas: accessing spectra[{}][{}]", freq_idx2, time_idx2);
+                        }
+
                         // WSJT-X: tb=tb + s(i+nfos*icos7(n),m+nssy*36)
                         tb += spectra[freq_idx2][time_idx2];
 
@@ -370,6 +384,12 @@ pub fn compute_sync2d(
                         for k in 0..7 {
                             let baseline_idx = i + nfos * k;
                             t0b += spectra[baseline_idx][time_idx2];
+                        }
+                    } else {
+                        // This should NEVER happen for valid FT8 signals
+                        if is_debug_case {
+                            use tracing::warn;
+                            warn!(m2 = m2, NHSYM = NHSYM, "middle Costas out of range!");
                         }
                     }
 
@@ -405,6 +425,21 @@ pub fn compute_sync2d(
                 // Take the better of the two metrics
                 let sync_idx = (j + MAX_LAG) as usize;
                 sync_row[sync_idx] = sync_abc.max(sync_bc);
+
+                // Debug output for specific cases
+                if is_debug_case {
+                    use tracing::trace;
+                    trace!(
+                        bin = i, lag = j,
+                        ta = %ta, t0a = %t0a,
+                        tb = %tb, t0b = %t0b,
+                        tc = %tc, t0c = %t0c,
+                        t = %t, t0 = %t0, sync_abc = %sync_abc,
+                        t_bc = %t_bc, t0_bc = %t0_bc, sync_bc = %sync_bc,
+                        final_sync = %sync_row[sync_idx],
+                        "sync2d calculation complete"
+                    );
+                }
             }
 
             (i, sync_row)
