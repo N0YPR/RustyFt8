@@ -77,22 +77,66 @@ Trace logging reveals sync2d correlation peaks are at completely wrong lags:
 
 **Hypothesis:** There may be another array indexing bug, or the time alignment calculation in compute_sync2d() is incorrect.
 
+### Detailed Investigation of Sync2d Values
+
+After adding trace logging, we discovered that **sync2d values themselves are wrong**, not just the peak locations:
+
+#### Bin 477 (1490.6 Hz) Analysis
+
+| Lag | Our sync2d | Notes |
+|-----|------------|-------|
+| -1  | 0.952      | |
+| **0** | **1.123**  | **WSJT-X finds peak here** |
+| 1   | 2.559      | |
+| **2** | **2.994**  | **We find peak here (jpeak=3)** |
+
+WSJT-X has a peak at lag=1 with sync=1.123, but we have a much stronger peak at lag=3 with sync=2.994!
+
+#### Bin 482 (1506.2 Hz) Analysis
+
+| Lag | Our sync2d | WSJT-X Expected |
+|-----|------------|-----------------|
+| -2  | 1.438      | |
+| -1  | 3.022      | |
+| **0** | **4.048** | **We find peak here** |
+| 1   | 2.467      | |
+| ...
+| 8   | 1.094      | |
+| 9   | 0.876      | |
+| **10** | **0.710** | **WSJT-X finds peak here** |
+
+At lag=10 (where WSJT-X has a peak), our sync2d is only 0.710. But at lag=0, we have a much stronger peak of 4.048!
+
+**Conclusion:** The sync2d correlation computation itself is producing completely different values. The peaks aren't just slightly offset - they're in entirely different locations with different magnitudes.
+
+### Parameters Verified
+
+Checked all key parameters - they match WSJT-X exactly:
+- nssy = 4 ✓
+- nfos = 2 ✓
+- jstrt = 12 ✓
+- NSPS = 1920 ✓
+- NSTEP = 480 ✓
+- NFFT1 = 4096 ✓
+
 ### Next Steps
 
-1. **Investigate sync2d computation** in `src/sync/spectra.rs`:
-   - Check if there are more Fortran/Rust array indexing mismatches
-   - Verify `jstrt` calculation
-   - Verify time index calculation for all three Costas arrays
-   - Check if `m`, `m2`, `m3` calculations are correct
+1. **Verify spectra computation** in `compute_spectra()`:
+   - Check if power spectra values are correct
+   - Compare spectra[477][13] (and nearby) with WSJT-X s(477,13)
+   - Ensure FFT results match WSJT-X
 
-2. **Add detailed sync2d tracing:**
-   - Log sync2d[823][-10..10] values to see actual correlation peak shape
-   - Compare with WSJT-X sync2d output at same bins
-   - Identify where the peak should be vs where it actually is
+2. **Manually trace one correlation computation:**
+   - Pick bin=477, lag=1
+   - Compute m values: 13, 17, 21, 25, 29, 33, 37 (n=0..6)
+   - Check spectra values at these indices
+   - Compute ta, t0a, tb, t0b, tc, t0c step by step
+   - Compare sync_abc, sync_bc with WSJT-X
 
-3. **Check if spectra computation is correct:**
-   - Verify spectra power values are reasonable
-   - Check if spectra bins align with WSJT-X expectations
+3. **Check for remaining array indexing bugs:**
+   - Frequency indexing when accessing `spectra[freq_idx][time_idx]`
+   - Ensure freq_idx bounds are correct (i + nfos * tone)
+   - Double-check all three Costas arrays use correct indices
 
 ### Test Command
 

@@ -301,6 +301,20 @@ pub fn compute_sync2d(
     let nfos = NFFT1 / NSPS;  // Frequency oversampling = 2
     let jstrt = (0.5 / (NSTEP as f32 / SAMPLE_RATE)) as i32; // Start at 0.5s
 
+    // Debug: Print key parameters
+    use tracing::debug;
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        debug!(
+            nssy = nssy, nfos = nfos, jstrt = jstrt,
+            NSPS = NSPS, NSTEP = NSTEP, NFFT1 = NFFT1,
+            "sync2d computation parameters"
+        );
+    }
+
+    // Debug specific frequency bins and lags
+    let debug_bins = [(477, 1), (477, 3)]; // (bin, lag) pairs to debug
+    let should_debug = tracing::enabled!(tracing::Level::TRACE);
+
     // Process frequency bins in parallel
     let sync_results: Vec<(usize, Vec<f32>)> = (ia..=ib)
         .into_par_iter()
@@ -315,6 +329,9 @@ pub fn compute_sync2d(
                 let mut t0a = 0.0; // Baseline for array 1
                 let mut t0b = 0.0; // Baseline for array 2
                 let mut t0c = 0.0; // Baseline for array 3
+
+                // Debug specific bin/lag pairs
+                let is_debug_case = should_debug && debug_bins.iter().any(|&(bin, lag)| bin == i && lag == j);
 
                 // Sum over 7 Costas tones
                 // CRITICAL: Match WSJT-X sync8.f90 lines 62-74 EXACTLY

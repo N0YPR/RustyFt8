@@ -141,23 +141,44 @@ fn find_candidates(
     // Debug: Show raw sync values at key WSJT-X candidate bins (use RUST_LOG=trace)
     if tracing::enabled!(tracing::Level::TRACE) {
         let debug_freqs = [
-            (1490.6, 477, 0.020), // freq, bin, expected_time
-            (1493.8, 478, 0.060),
-            (1506.2, 482, 0.380),
-            (2571.9, 823, 0.300),
-            (2534.4, 811, 2.380)
+            (1490.6, 477, 0.020, 1),  // freq, bin, expected_time, expected_jpeak
+            (1493.8, 478, 0.060, 2),
+            (1506.2, 482, 0.380, 10),
+            (2571.9, 823, 0.300, 8),
+            (2534.4, 811, 2.380, 60)
         ];
-        for &(freq, expected_bin, expected_time) in &debug_freqs {
+        for &(freq, expected_bin, expected_time, expected_jpeak) in &debug_freqs {
             if expected_bin >= ia && expected_bin <= ib {
                 let bin_idx = expected_bin - ia;
                 let computed_time_narrow = (jpeak[bin_idx] as f32 - 0.5) * tstep;
                 let computed_time_wide = (jpeak2[bin_idx] as f32 - 0.5) * tstep;
+
                 trace!(
                     freq = %freq, bin = %expected_bin,
                     red_narrow = %red[bin_idx], jpeak_narrow = %jpeak[bin_idx], time_narrow = %computed_time_narrow,
                     red_wide = %red2[bin_idx], jpeak_wide = %jpeak2[bin_idx], time_wide = %computed_time_wide,
-                    expected_time = %expected_time,
-                    "sync at WSJT-X bin: narrow vs wide search"
+                    expected_time = %expected_time, expected_jpeak = expected_jpeak,
+                    "sync at WSJT-X bin: found vs expected"
+                );
+
+                // Show sync2d values around the expected peak
+                trace!(
+                    lag_minus_2 = %sync2d[expected_bin][(expected_jpeak - 2 + MAX_LAG) as usize],
+                    lag_minus_1 = %sync2d[expected_bin][(expected_jpeak - 1 + MAX_LAG) as usize],
+                    lag_expected = %sync2d[expected_bin][(expected_jpeak + MAX_LAG) as usize],
+                    lag_plus_1 = %sync2d[expected_bin][(expected_jpeak + 1 + MAX_LAG) as usize],
+                    lag_plus_2 = %sync2d[expected_bin][(expected_jpeak + 2 + MAX_LAG) as usize],
+                    "sync2d values around expected jpeak={}", expected_jpeak
+                );
+
+                // Show sync2d values around the found peak
+                trace!(
+                    lag_minus_2 = %sync2d[expected_bin][(jpeak[bin_idx] - 2 + MAX_LAG) as usize],
+                    lag_minus_1 = %sync2d[expected_bin][(jpeak[bin_idx] - 1 + MAX_LAG) as usize],
+                    lag_found = %sync2d[expected_bin][(jpeak[bin_idx] + MAX_LAG) as usize],
+                    lag_plus_1 = %sync2d[expected_bin][(jpeak[bin_idx] + 1 + MAX_LAG) as usize],
+                    lag_plus_2 = %sync2d[expected_bin][(jpeak[bin_idx] + 2 + MAX_LAG) as usize],
+                    "sync2d values around found jpeak={}", jpeak[bin_idx]
                 );
             }
         }
