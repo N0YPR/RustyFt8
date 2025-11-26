@@ -60,8 +60,8 @@ impl Default for DecoderConfig {
             freq_min: 100.0,
             freq_max: 3000.0,
             sync_threshold: 0.5,
-            max_candidates: 100,
-            decode_top_n: 50, // Increased from 30 to ensure weak signals aren't skipped in busy recordings
+            max_candidates: 1000, // Match WSJT-X MAXPRECAND (dual search generates more candidates)
+            decode_top_n: 100, // Dual search generates ~2x candidates, need higher limit
             min_snr_db: -18,  // Allow decoding down to -18 dB (WSJT-X typical minimum)
         }
     }
@@ -103,8 +103,10 @@ where
     // LLR scaling factors to try (optimized order - most common values first)
     // Expanded range to help decode weaker signals
     let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 1.25, 0.9, 1.1, 1.3, 1.7, 2.5, 3.0, 4.0, 5.0, 0.6, 0.8];
-    // Disable nsym=2/3: phase drift causes false positives, no correct decodes
-    // Multi-symbol combining needs per-symbol phase tracking which we don't have yet
+    // Disable nsym=2/3: creates more false positives than correct decodes
+    // Testing showed: nsym=1 gives 8 correct + 1 false positive (11%)
+    //                 nsym=1/2/3 gives 8 correct + 2 false positives (20%)
+    // Need better phase tracking or LLR quality before nsym=2/3 is useful
     let nsym_values = [1];
 
     // Process all candidates in parallel, collecting successful decodes
@@ -119,25 +121,59 @@ where
             // Fine sync on this candidate
             let refined = sync::fine_sync(signal, candidate).ok()?;
 
-            // Try multi-pass decoding (different nsym and LLR scales)
-            for &nsym in &nsym_values {
-                let mut llr = vec![0.0f32; 174];
-                let mut s8 = [[0.0f32; 79]; 8];
+            // Try phase-based frequency refinement first
+            // This improves accuracy from 0.2 Hz to <0.05 Hz by measuring
+            // phase progression of Costas arrays
+            let mut candidates_to_try = vec![refined.clone()];
 
-                // Extract symbols - try the new function with powers first, fall back to old on error
-                let extract_ok = if let Ok(()) = sync::extract_symbols_with_powers(signal, &refined, nsym, &mut llr, &mut s8) {
-                    true
-                } else {
-                    // Fall back to original function if new one fails
-                    sync::extract_symbols(signal, &refined, nsym, &mut llr).is_ok()
-                };
+            if let Ok(refined_freq) = sync::estimate_frequency_from_phase(signal, &refined) {
+                let freq_correction = refined_freq - refined.frequency;
 
-                if !extract_ok {
-                    continue;
+                // Only use refinement if correction is reasonable and significant
+                // Sanity: < 1 Hz (avoid wild corrections), > 0.01 Hz (worth re-extracting)
+                if freq_correction.abs() < 1.0 && freq_correction.abs() > 0.01 {
+                    let mut refined_candidate = refined.clone();
+                    refined_candidate.frequency = refined_freq;
+
+                    // Try refined candidate first (better frequency), then original
+                    candidates_to_try = vec![refined_candidate, refined.clone()];
+
+                    // Debug output (disabled by default)
+                    let _debug_phase_refine = false;
+                    if _debug_phase_refine {
+                        eprintln!("PHASE_REFINE: freq_initial={:.1} Hz -> freq_refined={:.1} Hz (correction={:+.3} Hz)",
+                                 refined.frequency, refined_freq, freq_correction);
+                    }
                 }
+            }
 
-                for &scale in &scaling_factors {
-                    let mut scaled_llr = llr.clone();
+            // Try multi-pass decoding with dual LLR methods (matching WSJT-X 4-pass strategy)
+            // Try all candidate frequencies (refined first if available, then original)
+            for candidate_to_decode in &candidates_to_try {
+                for &nsym in &nsym_values {
+                    let mut llr_diff = vec![0.0f32; 174];   // Difference method (llra)
+                    let mut llr_ratio = vec![0.0f32; 174];  // Ratio method (llrd)
+                    let mut s8 = [[0.0f32; 79]; 8];
+
+                    // Extract symbols with BOTH LLR methods in one pass
+                    let extract_ok = sync::extract_symbols_dual_llr(
+                        signal, candidate_to_decode, nsym, &mut llr_diff, &mut llr_ratio, &mut s8
+                    ).is_ok();
+
+                    if !extract_ok {
+                        continue;
+                    }
+
+                // Try both LLR methods (difference and ratio) with multiple scales
+                // This matches WSJT-X's pass 1 (llra) and pass 4 (llrd)
+                let llr_methods: [(&str, &[f32]); 2] = [
+                    ("diff", &llr_diff[..]),
+                    ("ratio", &llr_ratio[..]),
+                ];
+
+                for &(method_name, llr) in &llr_methods {
+                    for &scale in &scaling_factors {
+                    let mut scaled_llr: Vec<f32> = llr.to_vec();
                     for v in scaled_llr.iter_mut() {
                         *v *= scale;
                     }
@@ -175,6 +211,17 @@ where
                         let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
 
                         if let Ok(message) = crate::decode(&info_bits, None) {
+                            // Debug: log LDPC decoder type and LLR method (disabled by default)
+                            let _debug_ldpc = false;
+                            if _debug_ldpc {
+                                let decode_type = if iters == 0 {
+                                    "OSD"
+                                } else {
+                                    "BP"
+                                };
+                                eprintln!("  LDPC: {} iters={}, method={}, freq={:.1} Hz, nsym={}, scale={:.1}",
+                                         decode_type, iters, method_name, refined.frequency, nsym, scale);
+                            }
                             if !message.is_empty() {
                                 // Validate that the message contains valid callsigns
                                 // This filters out OSD false positives (garbage decoded from noise)
@@ -197,11 +244,11 @@ where
                                 // Calculate SNR using WSJT-X algorithm if we have s8 powers
                                 // Pass baseline noise for improved SNR estimation
                                 let snr_db = if s8[0][0] != 0.0 {
-                                    sync::calculate_snr(&s8, &tones, Some(refined.baseline_noise))
+                                    sync::calculate_snr(&s8, &tones, Some(candidate_to_decode.baseline_noise))
                                 } else {
                                     // Fallback for old extract_symbols path
-                                    if refined.sync_power > 0.001 {
-                                        let snr = (refined.sync_power.log10() * 10.0 - 27.0) as i32;
+                                    if candidate_to_decode.sync_power > 0.001 {
+                                        let snr = (candidate_to_decode.sync_power.log10() * 10.0 - 27.0) as i32;
                                         snr.max(-24).min(30)
                                     } else {
                                         -24
@@ -213,14 +260,26 @@ where
                                     continue; // Skip this decode, try next nsym/scale combination
                                 }
 
+                                // Additional filtering for OSD decodes (iters==0)
+                                // OSD can decode noise into valid messages, so be more strict
+                                // DISABLED: This filters false positives but also stops Pass 3 from running
+                                let _enable_osd_filter = false;
+                                if _enable_osd_filter && iters == 0 && snr_db < -15 {
+                                    // OSD decodes below -15 dB are likely false positives
+                                    // especially in Pass 2+ after subtraction
+                                    // This threshold still allows marginal OSD decodes (-15 to -12 dB)
+                                    // but filters very weak ones that are probably noise
+                                    continue;
+                                }
+
                                 // Return the first successful decode for this candidate
                                 return Some(DecodeResult {
                                     candidate_idx,
                                     message: DecodedMessage {
                                         message,
-                                        frequency: refined.frequency,
-                                        time_offset: refined.time_offset,
-                                        sync_power: refined.sync_power,
+                                        frequency: candidate_to_decode.frequency,
+                                        time_offset: candidate_to_decode.time_offset,
+                                        sync_power: candidate_to_decode.sync_power,
                                         snr_db,
                                         ldpc_iterations: iters,
                                         llr_scale: scale,
@@ -231,8 +290,10 @@ where
                             }
                         }
                     }
-                }
-            }
+                }  // End for &scale loop
+            }  // End for &(method_name, llr) loop
+            }  // End for &nsym loop
+            }  // End for candidate_to_decode loop
 
             None
         })

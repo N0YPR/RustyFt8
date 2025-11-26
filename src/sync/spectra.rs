@@ -317,52 +317,58 @@ pub fn compute_sync2d(
                 let mut t0c = 0.0; // Baseline for array 3
 
                 // Sum over 7 Costas tones
+                // CRITICAL: Match WSJT-X sync8.f90 lines 62-74 EXACTLY
                 for n in 0..7 {
                     let m = j + jstrt + (nssy as i32) * (n as i32);
                     let tone = COSTAS_PATTERN[n] as i32;
 
-                    // Costas array 1 (at symbol 0)
-                    if m >= 0 && (m as usize) < NHSYM {
+                    // Costas array 1 (symbols 0-6)
+                    // WSJT-X: if(m.ge.1.and.m.le.NHSYM) - Fortran 1-indexed
+                    // Rust equivalent: m >= 1 && m <= NHSYM, but array index is m-1, so m < NHSYM+1
+                    // Since we use 0-indexed: m >= 0 && m < NHSYM
+                    if m >= 1 && (m as usize) < NHSYM {
                         let freq_idx = (i as i32 + nfos as i32 * tone) as usize;
-                        if freq_idx < NH1 {
-                            ta += spectra[freq_idx][m as usize];
-                            // Baseline: sum all 7 frequency bins (not just the Costas tone)
-                            for k in 0..7 {
-                                let baseline_idx = i + nfos * k;
-                                if baseline_idx < NH1 {
-                                    t0a += spectra[baseline_idx][m as usize];
-                                }
-                            }
+                        // WSJT-X: ta=ta + s(i+nfos*icos7(n),m)  [NO frequency check!]
+                        ta += spectra[freq_idx][m as usize];
+
+                        // WSJT-X: t0a=t0a + sum(s(i:i+nfos*6:nfos,m))  [NO frequency check!]
+                        // Baseline: sum all 7 frequency bins at same time
+                        for k in 0..7 {
+                            let baseline_idx = i + nfos * k;
+                            t0a += spectra[baseline_idx][m as usize];
                         }
                     }
 
-                    // Costas array 2 (at symbol 36)
+                    // Costas array 2 (symbols 36-42)
+                    // WSJT-X: NO bounds check at all (sync8.f90:68-69)
+                    // Assumes middle Costas always in valid range for 15s recording
+                    // We add a safety check to prevent panic in Rust
                     let m2 = m + (nssy as i32) * 36;
                     if m2 >= 0 && (m2 as usize) < NHSYM {
-                        let freq_idx = (i as i32 + nfos as i32 * tone) as usize;
-                        if freq_idx < NH1 {
-                            tb += spectra[freq_idx][m2 as usize];
-                            for k in 0..7 {
-                                let baseline_idx = i + nfos * k;
-                                if baseline_idx < NH1 {
-                                    t0b += spectra[baseline_idx][m2 as usize];
-                                }
-                            }
+                        let freq_idx2 = (i as i32 + nfos as i32 * tone) as usize;
+                        // WSJT-X: tb=tb + s(i+nfos*icos7(n),m+nssy*36)  [NO checks!]
+                        tb += spectra[freq_idx2][m2 as usize];
+
+                        // WSJT-X: t0b=t0b + sum(s(i:i+nfos*6:nfos,m+nssy*36))  [NO checks!]
+                        for k in 0..7 {
+                            let baseline_idx = i + nfos * k;
+                            t0b += spectra[baseline_idx][m2 as usize];
                         }
                     }
 
-                    // Costas array 3 (at symbol 72)
+                    // Costas array 3 (symbols 72-78)
+                    // WSJT-X: if(m+nssy*72.le.NHSYM) - Fortran 1-indexed
+                    // Rust equivalent: m3 <= NHSYM means valid indices 1..NHSYM, but we need 0..NHSYM-1
                     let m3 = m + (nssy as i32) * 72;
-                    if m3 >= 0 && (m3 as usize) < NHSYM {
-                        let freq_idx = (i as i32 + nfos as i32 * tone) as usize;
-                        if freq_idx < NH1 {
-                            tc += spectra[freq_idx][m3 as usize];
-                            for k in 0..7 {
-                                let baseline_idx = i + nfos * k;
-                                if baseline_idx < NH1 {
-                                    t0c += spectra[baseline_idx][m3 as usize];
-                                }
-                            }
+                    if m3 >= 1 && (m3 as usize) < NHSYM {
+                        let freq_idx3 = (i as i32 + nfos as i32 * tone) as usize;
+                        // WSJT-X: tc=tc + s(i+nfos*icos7(n),m+nssy*72)  [NO frequency check!]
+                        tc += spectra[freq_idx3][m3 as usize];
+
+                        // WSJT-X: t0c=t0c + sum(s(i:i+nfos*6:nfos,m+nssy*72))  [NO frequency check!]
+                        for k in 0..7 {
+                            let baseline_idx = i + nfos * k;
+                            t0c += spectra[baseline_idx][m3 as usize];
                         }
                     }
                 }

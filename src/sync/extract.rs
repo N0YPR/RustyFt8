@@ -2,7 +2,7 @@
 ///!
 ///! Extracts FT8 symbols from downsampled signal and computes log-likelihood ratios.
 
-use super::candidate::Candidate;
+use super::Candidate;
 use super::downsample::downsample_200hz;
 use super::fine::sync_downsampled;
 use super::fft::fft_real;
@@ -114,7 +114,7 @@ pub fn extract_symbols(
     nsym: usize,
     llr: &mut [f32],
 ) -> Result<(), String> {
-    extract_symbols_impl(signal, candidate, nsym, llr, None)
+    extract_symbols_impl(signal, candidate, nsym, llr, None, None)
 }
 
 /// Internal implementation that optionally captures s8 power array
@@ -123,6 +123,7 @@ fn extract_symbols_impl(
     candidate: &Candidate,
     nsym: usize,
     llr: &mut [f32],
+    mut llr_ratio_out: Option<&mut [f32]>,  // Optional ratio LLR output (mut for reborrowing)
     s8_out: Option<&mut [[f32; 79]; 8]>,
 ) -> Result<(), String> {
     eprintln!("EXTRACT: freq={:.1} Hz, dt={:.2}s, nsym={}",
@@ -130,6 +131,11 @@ fn extract_symbols_impl(
 
     if llr.len() < 174 {
         return Err(format!("LLR buffer too small"));
+    }
+    if let Some(ref llr_ratio) = llr_ratio_out {
+        if llr_ratio.len() < 174 {
+            return Err(format!("LLR ratio buffer too small"));
+        }
     }
     if nsym < 1 || nsym > 3 {
         return Err(format!("nsym must be 1, 2, or 3"));
@@ -219,23 +225,14 @@ fn extract_symbols_impl(
         }
     }
 
-    let mut start_offset = best_offset;
+    let start_offset = best_offset;
 
-    // CRITICAL FIX: Ensure start_offset allows all 79 symbols to be extracted
-    // Signals with negative time offsets (dt < 0) can cause early symbols to be out of bounds
-    // This corrupts multi-symbol combining (nsym=2/3) much worse than single-symbol (nsym=1)
-    let min_offset = 0i32;  // First symbol must be at position 0 or later
-    let max_offset = cd.len() as i32 - (NN as i32 * nsps_down as i32); // Last symbol must fit
-
-    if start_offset < min_offset {
-        eprintln!("    CLIPPING start_offset: {} -> {} (signal starts too early)",
-                 start_offset, min_offset);
-        start_offset = min_offset;
-    } else if start_offset > max_offset {
-        eprintln!("    CLIPPING start_offset: {} -> {} (signal extends too far)",
-                 start_offset, max_offset);
-        start_offset = max_offset;
-    }
+    // MATCH WSJT-X: Allow negative start_offset (sync8d.f90 lines 43-46)
+    // WSJT-X checks bounds per-symbol and sets out-of-bounds symbols to zero
+    // This allows decoding signals that start before the recording (negative DT)
+    // Example: F5RXL @ -0.77s has start_offset=-54, but Costas 2 & 3 are still in bounds!
+    //
+    // The per-symbol bounds check at line 264 handles out-of-bounds symbols correctly
 
     // Extract complex symbol values: cs[tone][symbol] for 8 tones × 79 symbols
     // Store COMPLEX values for multi-symbol soft decoding
@@ -254,11 +251,10 @@ fn extract_symbols_impl(
         // Symbol starts at: start_offset + k * nsps_down samples
         let i1 = start_offset + (k as i32) * (nsps_down as i32);
 
-        // Check bounds
+        // Check bounds (per-symbol, matching WSJT-X sync8d.f90)
         if i1 < 0 || (i1 as usize + nsps_down) > cd.len() {
-            // Symbol is out of bounds, set to zero
-            eprintln!("    WARNING: Symbol {} out of bounds! i1={}, cd.len={}, nsps_down={}",
-                     k, i1, cd.len(), nsps_down);
+            // Symbol is out of bounds (signal starts before recording or extends past end)
+            // This is normal for negative DT signals - set symbol to zero
             for tone in 0..8 {
                 cs[tone][k] = (0.0, 0.0);
                 s8[tone][k] = 0.0;
@@ -363,8 +359,8 @@ fn extract_symbols_impl(
     }
 
     // If sync quality is too low, reject
-    // TODO: WSJT-X uses threshold of >6, but our Costas quality is poor (max 4/21 even with correct 200 Hz sample rate)
-    // This suggests there's still a bug in tone extraction despite fixing FFT bin alignment
+    // Using lenient threshold for now to attempt decoding marginal candidates
+    // TODO: Match WSJT-X threshold of nsync > 6 once symbol extraction is fixed
     if nsync < 3 {
         return Err(format!("Sync quality too low: {}/21 Costas tones correct", nsync));
     }
@@ -375,8 +371,79 @@ fn extract_symbols_impl(
     // Data symbols: 7-36 (29 symbols) and 43-71 (29 symbols) = 58 symbols × 3 bits = 174 bits
 
     // Debug flags for specific signals (disabled - enable for investigation)
-    let debug_k1bzm = false && candidate.frequency > 2695.0 && candidate.frequency < 2696.0;
+    let debug_k1bzm = false && candidate.frequency > 2694.0 && candidate.frequency < 2696.0;
     let debug_w1fc = false && candidate.frequency > 2571.0 && candidate.frequency < 2573.0;
+
+    // DIAGNOSTIC: Extract and display tone sequence for K1BZM
+    if debug_k1bzm {
+        eprintln!("\n=== TONE EXTRACTION DEBUG: K1BZM @ {:.1} Hz ===", candidate.frequency);
+
+        // Extract all 79 tones
+        let mut extracted_tones = [0u8; 79];
+        for k in 0..79 {
+            let mut max_power = 0.0f32;
+            let mut max_tone = 0;
+            for tone in 0..8 {
+                if s8[tone][k] > max_power {
+                    max_power = s8[tone][k];
+                    max_tone = tone;
+                }
+            }
+            extracted_tones[k] = max_tone as u8;
+        }
+
+        // Expected tones for "K1BZM EA3GP -09" from ft8code
+        let expected_tones = [
+            3,1,4,0,6,5,2, // Costas 1
+            0,3,2,2,7,0,7,3,0,0,4,4,6,0,6,2,0,5,5,1,7,4,6,3,5,3,7,5,5, // Data 1
+            3,1,4,0,6,5,2, // Costas 2
+            5,7,7,6,1,7,2,5,1,3,0,7,0,1,3,1,2,5,3,0,0,4,2,5,4,3,2,4,0, // Data 2
+            3,1,4,0,6,5,2, // Costas 3
+        ];
+
+        // DETAILED DEBUG: Show all FFT bin powers for symbols 28-44 (around error cluster and Costas 2)
+        eprintln!("\nDETAILED FFT BIN POWERS (symbols 28-44):");
+        eprintln!("Legend: [Got] (Exp) other | Tone0 Tone1 Tone2 Tone3 Tone4 Tone5 Tone6 Tone7");
+        for k in 28..45 {
+            let exp = expected_tones[k];
+            let got = extracted_tones[k];
+            let is_costas = (k >= 36 && k <= 42);
+            let marker = if got != exp { "*ERR*" } else { "  OK " };
+            let section = if is_costas { "COS2" } else { "DATA" };
+
+            eprint!("Sym[{:2}] {}: exp={} got={} {} | ", k, section, exp, got, marker);
+            for tone in 0..8 {
+                let pwr = s8[tone][k];
+                if tone == got as usize && tone == exp as usize {
+                    eprint!("[{:.3}] ", pwr); // Correct detection
+                } else if tone == got as usize {
+                    eprint!("[{:.3}]!", pwr); // Wrong detection
+                } else if tone == exp as usize {
+                    eprint!("({:.3}) ", pwr); // Missed expected
+                } else {
+                    eprint!(" {:.3}  ", pwr);
+                }
+            }
+            eprintln!();
+        }
+
+        // Compare and show errors
+        let mut errors = 0;
+        eprintln!("\nTone comparison (Extracted vs Expected):");
+        for k in 0..79 {
+            if extracted_tones[k] != expected_tones[k] {
+                let exp_power = s8[expected_tones[k] as usize][k];
+                let got_power = s8[extracted_tones[k] as usize][k];
+                let ratio = got_power / exp_power.max(0.0001);
+                eprintln!("  Sym[{}]: Got {} (pwr={:.3}) Expected {} (pwr={:.3}) Ratio={:.1}x ERROR",
+                         k, extracted_tones[k], got_power, expected_tones[k], exp_power, ratio);
+                errors += 1;
+            }
+        }
+        eprintln!("Tone accuracy: {}/79 correct ({:.1}% accuracy, {} errors)",
+                 79 - errors, (79 - errors) as f32 / 79.0 * 100.0, errors);
+        eprintln!("===\n");
+    }
 
     // Gray code mapping for decoding
     // GRAY_MAP: 3-bit index -> tone (used in encoding)
@@ -449,7 +516,19 @@ fn extract_symbols_impl(
                         }
                     }
 
+                    // Standard difference method LLR (current method)
                     llr[bit_idx] = max_mag_1 - max_mag_0;
+
+                    // Ratio method LLR (WSJT-X llrd equivalent)
+                    if let Some(ref mut llr_ratio) = llr_ratio_out {
+                        let den = max_mag_1.max(max_mag_0);
+                        llr_ratio[bit_idx] = if den > 0.0 {
+                            (max_mag_1 - max_mag_0) / den
+                        } else {
+                            0.0
+                        };
+                    }
+
                     bit_idx += 1;
                 }
 
@@ -501,7 +580,19 @@ fn extract_symbols_impl(
                         }
                     }
 
+                    // Standard difference method LLR
                     llr[bit_idx] = max_mag_1 - max_mag_0;
+
+                    // Ratio method LLR (WSJT-X llrd equivalent)
+                    if let Some(ref mut llr_ratio) = llr_ratio_out {
+                        let den = max_mag_1.max(max_mag_0);
+                        llr_ratio[bit_idx] = if den > 0.0 {
+                            (max_mag_1 - max_mag_0) / den
+                        } else {
+                            0.0
+                        };
+                    }
+
                     bit_idx += 1;
                 }
 
@@ -537,7 +628,19 @@ fn extract_symbols_impl(
                             }
                         }
 
+                        // Standard difference method LLR
                         llr[bit_idx] = max_mag_1 - max_mag_0;
+
+                        // Ratio method LLR (WSJT-X llrd equivalent)
+                        if let Some(ref mut llr_ratio) = llr_ratio_out {
+                            let den = max_mag_1.max(max_mag_0);
+                            llr_ratio[bit_idx] = if den > 0.0 {
+                                (max_mag_1 - max_mag_0) / den
+                            } else {
+                                0.0
+                            };
+                        }
+
                         bit_idx += 1;
                     }
 
@@ -590,7 +693,19 @@ fn extract_symbols_impl(
                         }
                     }
 
+                    // Standard difference method LLR
                     llr[bit_idx] = max_mag_1 - max_mag_0;
+
+                    // Ratio method LLR (WSJT-X llrd equivalent)
+                    if let Some(ref mut llr_ratio) = llr_ratio_out {
+                        let den = max_mag_1.max(max_mag_0);
+                        llr_ratio[bit_idx] = if den > 0.0 {
+                            (max_mag_1 - max_mag_0) / den
+                        } else {
+                            0.0
+                        };
+                    }
+
                     bit_idx += 1;
                 }
 
@@ -614,7 +729,7 @@ fn extract_symbols_impl(
                  signal_name, mean_raw_llr, max_raw_llr, min_raw_llr);
     }
 
-    // Normalize LLRs by standard deviation (match WSJT-X normalizebmet)
+    // Normalize difference method LLRs by standard deviation (match WSJT-X normalizebmet)
     let mut sum = 0.0f32;
     let mut sum_sq = 0.0f32;
     for i in 0..174 {
@@ -630,7 +745,6 @@ fn extract_symbols_impl(
         mean_sq.sqrt()
     };
 
-    // Normalize LLRs by standard deviation (match WSJT-X normalizebmet)
     if std_dev > 0.0 {
         for i in 0..174 {
             llr[i] /= std_dev;
@@ -640,6 +754,35 @@ fn extract_symbols_impl(
     // Then scale by WSJT-X scalefac=2.83
     for i in 0..174 {
         llr[i] *= 2.83;
+    }
+
+    // Normalize ratio method LLRs (if provided)
+    if let Some(ref mut llr_ratio) = llr_ratio_out {
+        let mut sum_r = 0.0f32;
+        let mut sum_sq_r = 0.0f32;
+        for i in 0..174 {
+            sum_r += llr_ratio[i];
+            sum_sq_r += llr_ratio[i] * llr_ratio[i];
+        }
+        let mean_r = sum_r / 174.0;
+        let mean_sq_r = sum_sq_r / 174.0;
+        let variance_r = mean_sq_r - mean_r * mean_r;
+        let std_dev_r = if variance_r > 0.0 {
+            variance_r.sqrt()
+        } else {
+            mean_sq_r.sqrt()
+        };
+
+        if std_dev_r > 0.0 {
+            for i in 0..174 {
+                llr_ratio[i] /= std_dev_r;
+            }
+        }
+
+        // Then scale by WSJT-X scalefac=2.83
+        for i in 0..174 {
+            llr_ratio[i] *= 2.83;
+        }
     }
 
     // Debug after normalization
@@ -763,5 +906,212 @@ pub fn extract_symbols_with_powers(
     llr: &mut [f32],
     s8_out: &mut [[f32; 79]; 8],
 ) -> Result<(), String> {
-    extract_symbols_impl(signal, candidate, nsym, llr, Some(s8_out))
+    extract_symbols_impl(signal, candidate, nsym, llr, None, Some(s8_out))
+}
+
+/// Extract symbols with DUAL LLR methods (difference and ratio)
+///
+/// Computes both standard difference LLR (max_1 - max_0) and normalized ratio LLR
+/// ((max_1 - max_0) / max(max_1, max_0)) in a single pass. This matches WSJT-X's
+/// 4-pass strategy where llra uses difference method and llrd uses ratio method.
+///
+/// The ratio method provides a normalized LLR that's more robust to amplitude variations.
+pub fn extract_symbols_dual_llr(
+    signal: &[f32],
+    candidate: &Candidate,
+    nsym: usize,
+    llr_diff: &mut [f32],
+    llr_ratio: &mut [f32],
+    s8_out: &mut [[f32; 79]; 8],
+) -> Result<(), String> {
+    extract_symbols_impl(signal, candidate, nsym, llr_diff, Some(llr_ratio), Some(s8_out))
+}
+
+/// Estimate frequency offset from Costas array phase progression
+///
+/// Measures the phase of Costas tones and calculates frequency offset
+/// from phase drift over time. This enables sub-0.1 Hz frequency accuracy
+/// by using the phase progression of successfully extracted Costas arrays.
+///
+/// # Algorithm
+///
+/// FT8 has 3 Costas arrays at known positions:
+/// - Costas 1: symbols 0-6
+/// - Costas 2: symbols 36-42
+/// - Costas 3: symbols 72-78
+///
+/// If frequency is off by Δf, phase drifts linearly: Δφ = 2π × Δf × Δt
+/// Therefore: Δf = Δφ / (2π × Δt)
+///
+/// # Arguments
+///
+/// * `signal` - Raw 12 kHz input signal
+/// * `candidate` - Current candidate with initial frequency estimate
+///
+/// # Returns
+///
+/// * `Ok(refined_frequency)` if Costas sync is good enough (≥5 tones per array)
+/// * `Err(message)` if Costas sync is poor or phase measurement fails
+///
+/// # Example
+///
+/// ```ignore
+/// // After initial extraction shows good Costas sync (nsync >= 15/21)
+/// if let Ok(refined_freq) = estimate_frequency_from_phase(signal, candidate) {
+///     let correction = refined_freq - candidate.frequency;
+///     if correction.abs() < 1.0 && correction.abs() > 0.01 {
+///         // Re-extract at refined frequency
+///     }
+/// }
+/// ```
+pub fn estimate_frequency_from_phase(
+    signal: &[f32],
+    candidate: &Candidate,
+) -> Result<f32, String> {
+    // Downsample at current frequency estimate
+    let mut cd = vec![(0.0f32, 0.0f32); 3200];
+    downsample_200hz(signal, candidate.frequency, &mut cd)?;
+
+    const NSPS: usize = 32; // 200 Hz × 0.16s = 32 samples per symbol
+    const NFFT_SYM: usize = 32;
+
+    // Calculate start offset in downsampled signal
+    let dt = candidate.time_offset;
+    let start_offset = ((dt + 0.5) * 200.0) as i32; // Convert to sample index
+
+    // Measure phase for each of 3 Costas arrays
+    let mut costas_data: Vec<(usize, f32, usize)> = Vec::new(); // (start_idx, phase, valid_count)
+
+    let _debug_phase = false; // Set to true to enable phase measurement debugging
+
+    for costas_start in [0, 36, 72] {
+        let mut phase_sum = 0.0;
+        let mut weight_sum = 0.0;
+        let mut valid_tones = 0;
+
+        // Extract phase from each of 7 Costas tones
+        for k in 0..7 {
+            let symbol_idx = costas_start + k;
+            let expected_tone = COSTAS_PATTERN[k];
+            let i1 = start_offset + (symbol_idx as i32) * (NSPS as i32);
+
+            // Check bounds
+            if i1 < 0 || (i1 as usize + NSPS) > cd.len() {
+                continue;
+            }
+
+            // Extract symbol
+            let mut sym_real = [0.0f32; NFFT_SYM];
+            let mut sym_imag = [0.0f32; NFFT_SYM];
+
+            for j in 0..NSPS {
+                let idx = (i1 as usize) + j;
+                sym_real[j] = cd[idx].0;
+                sym_imag[j] = cd[idx].1;
+            }
+
+            // Perform FFT
+            if fft_real(&mut sym_real, &mut sym_imag, NFFT_SYM).is_err() {
+                continue;
+            }
+
+            // Get phase at expected tone bin
+            let tone_bin = expected_tone as usize;
+            let re = sym_real[tone_bin];
+            let im = sym_imag[tone_bin];
+            let power = re * re + im * im;
+
+            if power > 0.001 {
+                let phase = im.atan2(re);
+                phase_sum += phase * power; // Weighted by power
+                weight_sum += power;
+                valid_tones += 1;
+            }
+        }
+
+        // Average phase for this Costas array
+        if valid_tones >= 5 && weight_sum > 0.0 {
+            let avg_phase = phase_sum / weight_sum;
+            costas_data.push((costas_start, avg_phase, valid_tones));
+            if _debug_phase {
+                eprintln!("  Costas {} @ symbols {}-{}: valid_tones={}/7, avg_phase={:.3} rad",
+                         costas_data.len(), costas_start, costas_start+6, valid_tones, avg_phase);
+            }
+        }
+    }
+
+    // Need at least 2 Costas arrays for phase drift measurement
+    if costas_data.len() < 2 {
+        return Err(format!("Not enough Costas arrays detected: {}", costas_data.len()));
+    }
+
+    // Find the best pair of Costas arrays (prefer those with all 7 tones valid)
+    // Prioritize: (1) both have 7/7 tones, (2) largest separation in time
+    let mut best_pair: Option<(usize, usize)> = None;
+    let mut best_quality = 0;
+    let mut best_separation = 0;
+
+    for i in 0..costas_data.len() {
+        for j in (i+1)..costas_data.len() {
+            let (start_i, _, count_i) = costas_data[i];
+            let (start_j, _, count_j) = costas_data[j];
+
+            // Quality: sum of valid tone counts (max 14 for 7+7)
+            let quality = count_i + count_j;
+            let separation = start_j - start_i;
+
+            // Prefer pairs with higher quality, then larger separation
+            if quality > best_quality || (quality == best_quality && separation > best_separation) {
+                best_quality = quality;
+                best_separation = separation;
+                best_pair = Some((i, j));
+            }
+        }
+    }
+
+    let (idx1, idx2) = best_pair.ok_or("No valid Costas pair found")?;
+    let (start1, phase1, count1) = costas_data[idx1];
+    let (start2, phase2, count2) = costas_data[idx2];
+
+    // Calculate phase differences (handle wrapping)
+    let unwrap_phase = |p1: f32, p2: f32| -> f32 {
+        let mut dp = p2 - p1;
+        if dp > std::f32::consts::PI {
+            dp -= 2.0 * std::f32::consts::PI;
+        } else if dp < -std::f32::consts::PI {
+            dp += 2.0 * std::f32::consts::PI;
+        }
+        dp
+    };
+
+    // Calculate phase drift between the best pair
+    let phase_drift = unwrap_phase(phase1, phase2);
+
+    // Time between Costas arrays (in seconds)
+    let symbol_separation = (start2 - start1) as f32; // in symbols
+    const SYMBOL_DURATION: f32 = 0.16; // seconds per symbol
+    let time_separation = symbol_separation * SYMBOL_DURATION;
+
+    if _debug_phase {
+        eprintln!("  Using Costas pair: symbols {}-{} to {}-{} (quality={}/14, separation={} symbols)",
+                 start1, start1+6, start2, start2+6, best_quality, symbol_separation as usize);
+        eprintln!("  Phase drift: {:.3} rad over {:.2}s", phase_drift, time_separation);
+    }
+
+    // Calculate frequency offset: Δf = Δφ / (2π × Δt)
+    let freq_offset = phase_drift / (2.0 * std::f32::consts::PI * time_separation);
+
+    if _debug_phase {
+        eprintln!("  Freq offset calculation: phase_drift={:.3} rad / (2π × {:.2}s) = {:.3} Hz",
+                 phase_drift, time_separation, freq_offset);
+    }
+
+    // Sanity check: offset should be < 2 Hz for typical fine sync errors
+    if freq_offset.abs() > 2.0 {
+        return Err(format!("Unrealistic frequency offset: {:.3} Hz", freq_offset));
+    }
+
+    let refined_freq = candidate.frequency + freq_offset;
+
+    Ok(refined_freq)
 }

@@ -10,7 +10,7 @@
 //! **Output**:
 //! List of decoded messages with frequency, time, SNR, and message text.
 
-use rustyft8::{decode_ft8, DecodedMessage, DecoderConfig};
+use rustyft8::{decode_ft8_multipass, DecodedMessage, DecoderConfig};
 use std::env;
 use std::fs::File;
 use std::io::Read;
@@ -109,11 +109,12 @@ fn main() {
     println!("  Frequency range: 100 - 3000 Hz");
     println!();
 
-    // Use the multi-signal decoder with callback
+    // Use multi-pass decoder with signal subtraction (like WSJT-X)
     let config = DecoderConfig::default();
+    let max_passes = 3; // Typical WSJT-X behavior: 2-3 passes
     let mut message_count = 0;
 
-    match decode_ft8(&signal_15s, &config, |msg: DecodedMessage| {
+    match decode_ft8_multipass(&signal_15s, &config, max_passes, |msg: DecodedMessage| {
         message_count += 1;
         println!("{:7.1} Hz  {:+5.2} s  {:3} dB  \"{}\"",
             msg.frequency,

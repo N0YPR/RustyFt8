@@ -2,7 +2,7 @@
 ///!
 ///! Refines frequency and timing estimates from coarse sync.
 
-use super::candidate::Candidate;
+use super::Candidate;
 use super::downsample::downsample_200hz;
 use super::COSTAS_PATTERN;
 
@@ -51,6 +51,7 @@ pub fn sync_downsampled(
     }
 
     let mut sync = 0.0f32;
+    let mut total_valid_costas = 0u32;  // Count valid Costas symbols across all tones
 
     // Sum over 7 Costas tones and 3 Costas arrays
     for i in 0..7 {
@@ -88,6 +89,7 @@ pub fn sync_downsampled(
                 z1.0 += sr * wr + si * wi;
                 z1.1 += si * wr - sr * wi;
             }
+            total_valid_costas += 1;
         }
 
         if i2 >= 0 && (i2 as usize + NSPS_DOWN - 1) < cd.len() {
@@ -98,6 +100,7 @@ pub fn sync_downsampled(
                 z2.0 += sr * wr + si * wi;
                 z2.1 += si * wr - sr * wi;
             }
+            total_valid_costas += 1;
         }
 
         if i3 >= 0 && (i3 as usize + NSPS_DOWN - 1) < cd.len() {
@@ -108,12 +111,24 @@ pub fn sync_downsampled(
                 z3.0 += sr * wr + si * wi;
                 z3.1 += si * wr - sr * wi;
             }
+            total_valid_costas += 1;
         }
 
         // Add power from all three Costas arrays
         sync += z1.0 * z1.0 + z1.1 * z1.1;
         sync += z2.0 * z2.0 + z2.1 * z2.1;
         sync += z3.0 * z3.0 + z3.1 * z3.1;
+    }
+
+    // MATCH WSJT-X: Normalize by number of valid Costas symbols
+    // For negative DT signals, Costas 1 (7 symbols) may be out of bounds
+    // Without normalization, sync score is unfairly reduced by ~33%
+    // This caused F5RXL (sync=38.69 coarse) to drop to sync=1.16 fine
+    // Example: F5RXL with Costas 1 OOB: 14 valid symbols (7 tones × 2 arrays)
+    //          Normalization: sync * 21/14 = sync * 1.5 (restores ~33% penalty)
+    const TOTAL_COSTAS_SYMBOLS: f32 = 21.0;  // 7 tones * 3 arrays
+    if total_valid_costas > 0 {
+        sync = sync * TOTAL_COSTAS_SYMBOLS / (total_valid_costas as f32);
     }
 
     sync
@@ -174,6 +189,7 @@ pub fn fine_sync(
     // Unlike phase rotation, we RE-DOWNSAMPLE at each test frequency
     // This ensures perfect centering at baseband, critical for nsym=2
     let mut best_freq = candidate.frequency;
+    let mut sync_scores: Vec<(f32, f32)> = Vec::with_capacity(11); // Store (freq, sync) pairs
 
     for df in -5..=5 {
         let freq_offset = df as f32 * 0.5; // 0.5 Hz steps
@@ -188,6 +204,7 @@ pub fn fine_sync(
         };
 
         let sync = sync_downsampled(&cd_test, best_time, None, false, Some(test_rate));
+        sync_scores.push((test_freq, sync));
 
         if sync > best_sync {
             best_sync = sync;
@@ -195,18 +212,77 @@ pub fn fine_sync(
         }
     }
 
+    // Parabolic interpolation to refine best_freq beyond 0.5 Hz quantization
+    // Improves accuracy from 0.5 Hz to ~0.05-0.1 Hz
+    // This is critical for tone extraction: 0.2 Hz error causes 20% tone errors!
+    if sync_scores.len() >= 3 {
+        // Find the index of best_freq in sync_scores
+        if let Some(best_idx) = sync_scores.iter().position(|(f, _)| (*f - best_freq).abs() < 0.01) {
+            // Need neighbors for interpolation
+            if best_idx > 0 && best_idx < sync_scores.len() - 1 {
+                let (f0, s0) = sync_scores[best_idx - 1];
+                let (f1, s1) = sync_scores[best_idx];
+                let (f2, s2) = sync_scores[best_idx + 1];
+
+                // Fit parabola: y = ax² + bx + c through (f0,s0), (f1,s1), (f2,s2)
+                // Peak is at x = -b/(2a)
+                // Using simplified formula for equally-spaced points:
+                let denom = 2.0 * (s0 - 2.0 * s1 + s2);
+                if denom.abs() > 1e-6 {  // Avoid division by zero
+                    let delta = 0.5 * (s2 - s0) / denom;
+                    let interpolated_freq = f1 + delta * 0.5; // delta is in units of 0.5 Hz steps
+
+                    // Sanity check: interpolated frequency should be within ±0.5 Hz of discrete peak
+                    if (interpolated_freq - f1).abs() <= 0.5 {
+                        // eprintln!("  Parabolic interpolation (fine): {} Hz → {} Hz (Δ={:.3} Hz)",
+                        //          f1, interpolated_freq, interpolated_freq - f1);
+                        best_freq = interpolated_freq;
+                    }
+                }
+            }
+        }
+    }
+
+    // CRITICAL: Re-downsample at the best frequency for final time refinement
+    // This matches WSJT-X ft8b.f90:140
+    let final_sample_rate = downsample_200hz(signal, best_freq, &mut cd)?;
+
+    // CRITICAL: Final time search ±4 samples after frequency correction
+    // This matches WSJT-X ft8b.f90:144-150
+    // "Search over +/- one quarter symbol" for final time alignment
+    let mut final_best_time = best_time;
+    let mut final_best_sync = 0.0f32;
+
+    for dt in -4..=4 {
+        let t_offset = best_time + dt;
+        let sync = sync_downsampled(&cd, t_offset, None, false, Some(final_sample_rate));
+
+        if sync > final_best_sync {
+            final_best_sync = sync;
+            final_best_time = t_offset;
+        }
+    }
+
+    best_time = final_best_time;
+    best_sync = final_best_sync;
+
     // eprintln!("  Freq search: best_freq={:.1} Hz, final_sync={:.3}", best_freq, best_sync);
 
     // Convert back to seconds (inverse of the initial_offset calculation)
-    let refined_time = (best_time as f32 / actual_sample_rate) - 0.5;
+    // Use final_sample_rate since we re-downsampled at best_freq
+    let refined_time = (best_time as f32 / final_sample_rate) - 0.5;
 
-    eprintln!("  REFINED: freq_in={:.1} -> freq_out={:.1} Hz, dt_out={:.2}s, sync_out={:.3}",
-              candidate.frequency, best_freq, refined_time, best_sync);
+    eprintln!("  REFINED: freq_in={:.1} -> freq_out={:.1} Hz, dt_out={:.2}s, sync_coarse={:.3} (preserved)",
+              candidate.frequency, best_freq, refined_time, candidate.sync_power);
 
+    // CRITICAL: Preserve coarse sync score (matching WSJT-X ft8b.f90)
+    // WSJT-X uses fine sync ONLY to refine frequency and time, NOT for ranking
+    // The coarse sync score (sync8.f90:124) is preserved for candidate selection
+    // This prevents negative DT signals from being filtered out due to low fine sync scores
     Ok(Candidate {
         frequency: best_freq,
         time_offset: refined_time,
-        sync_power: best_sync,
+        sync_power: candidate.sync_power,  // ← PRESERVE coarse sync, don't use best_sync
         baseline_noise: candidate.baseline_noise, // Preserve baseline noise from coarse sync
     })
 }

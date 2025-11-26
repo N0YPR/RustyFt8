@@ -70,8 +70,28 @@ pub fn downsample_200hz(
     let it = (ft / df).round().min((NFFT_IN / 2) as f32) as usize;
     let i0 = (f0 / df).round() as usize;
 
-    // eprintln!("DOWNSAMPLE: f0={:.1} Hz, df={:.3} Hz, fb={:.1} Hz, ft={:.1} Hz, ib={}, it={}, i0={}",
-    //           f0, df, fb, ft, ib, it, i0);
+    // Debug for K1BZM EA3GP @ 2695 Hz (verified in-band interference, not aliasing)
+    let debug_k1bzm = false; // Disabled - investigation complete
+    if debug_k1bzm {
+        eprintln!("\n=== DOWNSAMPLE DEBUG for f0={:.1} Hz ===", f0);
+        eprintln!("  FFT params: NFFT_IN={}, df={:.6} Hz/bin", NFFT_IN, df);
+        eprintln!("  Target frequency: f0={:.1} Hz → bin i0={}", f0, i0);
+        eprintln!("  Filter range: fb={:.1} Hz → ib={}, ft={:.1} Hz → it={}", fb, ib, ft, it);
+        eprintln!("  Extracting {} bins, bandwidth={:.1} Hz", it - ib + 1, (it - ib + 1) as f32 * df);
+
+        // Check if interferer bin is in extracted range
+        let interferer_freq = 2522.0;
+        let interferer_bin = (interferer_freq / df).round() as usize;
+        eprintln!("  Interferer @ {:.1} Hz → bin {}", interferer_freq, interferer_bin);
+
+        if interferer_bin >= ib && interferer_bin <= it {
+            eprintln!("  ⚠️  WARNING: Interferer bin {} IS in extracted range [{}, {}]!", interferer_bin, ib, it);
+        } else {
+            let distance = if interferer_bin < ib { ib - interferer_bin } else { interferer_bin - it };
+            eprintln!("  ✓ Interferer bin {} is {} bins ({:.1} Hz) away from extracted range",
+                      interferer_bin, distance, distance as f32 * df);
+        }
+    }
 
     // Copy selected frequency bins to output FFT buffer
     let mut out_real = vec![0.0f32; NFFT_OUT];
@@ -86,7 +106,46 @@ pub fn downsample_200hz(
         }
     }
 
-    // eprintln!("  Copied {} bins, bandwidth={:.1} Hz", k, (it - ib + 1) as f32 * df);
+    if debug_k1bzm {
+        eprintln!("  Copied {} bins to output buffer", k);
+
+        // Check spectral power at key frequencies
+        let check_freqs = [
+            (2522.0, "Interferer EA3CJ (OUTSIDE passband)"),
+            (2546.0, "Interferer WA2FZW (OUTSIDE passband)"),
+            (2695.0, "Target EA3GP"),
+            (2733.0, "Interferer W1DIG (INSIDE passband!)"),
+        ];
+
+        eprintln!("  Spectral power check (INPUT FFT):");
+        for (freq, label) in &check_freqs {
+            let bin = (*freq / df).round() as usize;
+            let power = if bin < NFFT_IN {
+                x_real[bin] * x_real[bin] + x_imag[bin] * x_imag[bin]
+            } else {
+                0.0
+            };
+            let in_range = bin >= ib && bin <= it;
+            eprintln!("    {:.1} Hz ({}): bin={}, power={:.3e}, extracted={}",
+                      freq, label, bin, power, in_range);
+        }
+
+        // Check for spectral leakage near passband edges
+        eprintln!("  Checking filter sidelobe leakage:");
+        let edge_bins = [
+            ib,           // Lower edge
+            ib + 10,      // 10 bins in
+            it - 10,      // 10 bins before upper edge
+            it,           // Upper edge
+        ];
+        for &edge_bin in &edge_bins {
+            if edge_bin < NFFT_IN {
+                let power = x_real[edge_bin] * x_real[edge_bin] + x_imag[edge_bin] * x_imag[edge_bin];
+                eprintln!("    Bin {}: {:.1} Hz, power={:.3e}",
+                          edge_bin, edge_bin as f32 * df, power);
+            }
+        }
+    }
 
     // Check power in copied bins
     // let bin_power: f32 = out_real.iter().take(k).zip(out_imag.iter().take(k))
@@ -152,6 +211,14 @@ pub fn downsample_200hz(
     // eprintln!("  Normalization factor: {:.6} (accounts for IFFT scaling)", fac);
     for i in 0..NFFT_OUT {
         output[i] = (out_real[i] * fac, out_imag[i] * fac);
+    }
+
+    if debug_k1bzm {
+        // Check output signal quality
+        let output_power: f32 = output.iter().take(100)
+            .map(|(r, i)| r*r + i*i).sum();
+        eprintln!("  Output buffer power (first 100 samples): {:.3e}", output_power);
+        eprintln!("=== END DOWNSAMPLE DEBUG ===\n");
     }
 
     Ok(actual_sample_rate)

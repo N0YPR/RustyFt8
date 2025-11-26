@@ -173,8 +173,9 @@ pub fn subtract_ft8_signal(
         // Try subtracting at this offset
         subtract_ft8_signal_internal(&mut audio_copy, tones, frequency, test_time, false)?;
 
-        // Measure power after subtraction
-        let nstart = (test_time * SAMPLE_RATE) as i32;
+        // Measure power after subtraction (using absolute time)
+        let absolute_test_time = test_time + 0.5;
+        let nstart = (absolute_test_time * SAMPLE_RATE) as i32;
         let mut power_after = 0.0f64;
         for i in 0..NFRAME.min(audio_copy.len()) {
             let j_signed = nstart + i as i32;
@@ -223,7 +224,10 @@ fn subtract_ft8_signal_internal(
     )?;
 
     // Calculate start position in audio (can be negative)
-    let nstart = (time_offset * SAMPLE_RATE) as i32;
+    // CRITICAL: time_offset is relative to 0.5s, not 0.0s! (see fine_sync.rs:152)
+    // The downsampled buffer starts at 0.0 but represents audio from 0.5s onward
+    let absolute_time = time_offset + 0.5;
+    let nstart = (absolute_time * SAMPLE_RATE) as i32;
 
     // Initialize filter
     let nfft = audio.len().next_power_of_two().max(NFRAME.next_power_of_two());
@@ -248,6 +252,23 @@ fn subtract_ft8_signal_internal(
     // Low-pass filter to get smoothed amplitude estimate
     filter.apply(&mut camp, NFRAME)?;
 
+    // DEBUG: Check synthesized signal and estimated amplitude (disabled)
+    let _debug = false;
+    if _debug && report_power {
+        // Check reference signal power
+        let cref_power: f64 = cref.iter()
+            .map(|(r, i)| (r*r + i*i) as f64)
+            .sum();
+
+        // Check estimated amplitude (camp after filtering)
+        let camp_mag: f64 = camp.iter().take(NFRAME)
+            .map(|c| (c.re*c.re + c.im*c.im) as f64)
+            .sum();
+
+        eprintln!("  DEBUG: cref_power={:.3e}, camp_mag={:.3e}",
+                  cref_power, camp_mag);
+    }
+
     // Calculate power before subtraction (for debugging)
     let mut power_before = 0.0f64;
     for i in 0..NFRAME {
@@ -259,6 +280,7 @@ fn subtract_ft8_signal_internal(
     }
 
     // Reconstruct and subtract the signal
+    let mut reconstructed_power = 0.0f64;
     for i in 0..NFRAME {
         // Handle negative start position
         let j_signed = nstart + i as i32;
@@ -272,10 +294,15 @@ fn subtract_ft8_signal_internal(
             let camp_im = camp[i].im; // d
 
             let reconstructed = 2.0 * (re * camp_re - im * camp_im);
+            reconstructed_power += (reconstructed as f64).powi(2);
 
             // Subtract from audio
             audio[j] -= reconstructed;
         }
+    }
+
+    if _debug && report_power {
+        eprintln!("  DEBUG: reconstructed_power={:.3e}", reconstructed_power);
     }
 
     // Calculate power after subtraction (for debugging)
@@ -291,6 +318,10 @@ fn subtract_ft8_signal_internal(
     // Report power reduction (only if requested)
     if report_power && power_before > 0.0 {
         let reduction_db = 10.0 * (power_after / power_before).log10();
+        if _debug {
+            eprintln!("  DEBUG: power_before={:.3e}, power_after={:.3e}",
+                      power_before, power_after);
+        }
         eprintln!("  Subtraction @ {:.1} Hz: {:.1} dB power change", frequency, reduction_db);
     }
 

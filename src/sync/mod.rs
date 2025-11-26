@@ -19,7 +19,7 @@
 ///! **Module Organization**:
 ///! - `fft` - FFT implementations
 ///! - `spectra` - Spectrogram computation and sync correlation
-///! - `candidate` - Candidate detection and coarse sync
+///! - `coarse` - Coarse synchronization and candidate detection
 ///! - `downsample` - Signal downsampling
 ///! - `fine` - Fine synchronization
 ///! - `extract` - Symbol extraction and LLR computation
@@ -28,16 +28,31 @@
 mod fft;
 mod spectra;
 mod downsample;
-pub mod candidate;
+mod coarse;
 pub mod fine;
 pub mod extract;
+pub mod synthesize;
+
+/// Candidate signal found during coarse sync
+#[derive(Debug, Clone, Copy)]
+pub struct Candidate {
+    /// Center frequency in Hz
+    pub frequency: f32,
+    /// Time offset in seconds from start of 15s window
+    pub time_offset: f32,
+    /// Sync quality metric (higher is better)
+    pub sync_power: f32,
+    /// Baseline noise power at this frequency (linear scale, from average spectrum)
+    pub baseline_noise: f32,
+}
 
 // Re-export public API
-pub use candidate::{Candidate, coarse_sync, find_candidates};
+pub use coarse::coarse_sync;
 pub use fine::{fine_sync, sync_downsampled};
-pub use extract::{extract_symbols, extract_symbols_with_powers, calculate_snr};
+pub use extract::{extract_symbols, extract_symbols_with_powers, extract_symbols_dual_llr, calculate_snr, estimate_frequency_from_phase};
 pub use downsample::downsample_200hz;
 pub use spectra::{compute_spectra, compute_sync2d, compute_baseline};
+pub use synthesize::{synthesize_ft8_signal, subtract_ft8_signal};
 
 /// Costas 7x7 tone pattern used in FT8
 pub const COSTAS_PATTERN: [u8; 7] = [3, 1, 4, 0, 6, 5, 2];
@@ -57,8 +72,8 @@ pub const NSPS: usize = 1920;
 /// Time step between spectra (1/4 symbol = 480 samples)
 pub const NSTEP: usize = NSPS / 4;
 
-/// FFT size for symbol spectra (must be power of 2)
-pub const NFFT1: usize = 4096; // Nearest power of 2 to 2*NSPS (3840)
+/// FFT size for symbol spectra
+pub const NFFT1: usize = 4096; // Power of 2 for FFT efficiency (nearest to 2*NSPS=3840)
 
 /// Number of FFT bins
 pub const NH1: usize = NFFT1 / 2; // 2048
