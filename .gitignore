@@ -36,3 +36,4 @@ ldpc_*output.txt
 # Fortran test binaries (compiled from .f90 sources)
 tests/sync/test_spectra
 tests/sync/test_sync8
+tests/sync/test_sync2d

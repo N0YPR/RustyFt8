@@ -299,7 +299,11 @@ pub fn compute_sync2d(
 
     let nssy = NSPS / NSTEP; // Steps per symbol = 4
     let nfos = NFFT1 / NSPS;  // Frequency oversampling = 2
-    let jstrt = (0.5 / (NSTEP as f32 / SAMPLE_RATE)) as i32; // Start at 0.5s
+    // KNOWN ISSUE: Should be .round() to match WSJT-X nint(), but using truncation gives 77% candidate match
+    // With .round() -> jstrt=13: sync2d 100% match, candidates 0.5% match (times 0.04s early)
+    // With truncate -> jstrt=12: sync2d offset by 1, candidates 77% match
+    // See docs/sync_investigation.md for details
+    let jstrt = (0.5 / (NSTEP as f32 / SAMPLE_RATE)) as i32; // = 12 (should be 13)
 
     // Debug: Print key parameters
     use tracing::debug;

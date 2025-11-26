@@ -5,3 +5,6 @@ mod test_coarse;
 
 #[path = "sync/test_spectra.rs"]
 mod test_spectra;
+
+#[path = "sync/test_sync2d.rs"]
+mod test_sync2d;
