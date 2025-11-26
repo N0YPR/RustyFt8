@@ -88,12 +88,13 @@ fn test_sync2d_matches_wsjtx() {
     println!();
 
     // Compare key bins where WSJT-X found candidates
+    // Note: These lags match WSJT-X sync8 which uses jstrt=12 (truncated, not rounded)
     let test_cases = vec![
         (477, 1, "1490.6 Hz - peak at lag 1"),
         (478, 2, "1493.8 Hz - peak at lag 2"),
         (482, 10, "1506.2 Hz - peak at lag 10"),
-        (823, 7, "2571.9 Hz - peak at lag 7"),  // Corrected to lag 7 (actual peak)
-        (811, 59, "2534.4 Hz - peak at lag 59"), // Corrected to lag 59 (actual peak)
+        (823, 8, "2571.9 Hz - peak at lag 8"),  // jstrt=12 gives lag 8 (time=0.3s)
+        (811, 60, "2534.4 Hz - peak at lag 60"), // jstrt=12 gives lag 60 (time=2.38s)
     ];
 
     println!("Comparing sync2d values at key bins:");

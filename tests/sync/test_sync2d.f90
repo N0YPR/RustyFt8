@@ -49,7 +49,7 @@ program test_sync2d
   tstep = NSTEP / 12000.0
   nssy = NSPS / NSTEP   ! 4
   nfos = NFFT1 / NSPS   ! 2
-  jstrt = nint(0.5 / tstep)
+  jstrt = 0.5 / tstep   ! CRITICAL: Integer division truncates 12.5 -> 12 (matches sync8.f90 line 50)
 
   print *, 'WSJT-X Sync2d Test Data'
   print *, 'NH1=', NH1, ' NHSYM=', NHSYM

@@ -15,59 +15,67 @@ This document tracks the investigation into achieving 95% match rate between Rus
    - Created comprehensive test: `tests/sync/test_spectra.rs`
    - Test validates all 713,868 spectra values
 
-2. **Sync2d Computation**: 100% match with WSJT-X (with jstrt=13)
+2. **Sync2d Computation**: 100% match with WSJT-X ✅
    - Created comprehensive test: `tests/sync/test_sync2d.rs`
-   - Test validates sync2d correlation matrix
+   - Test validates sync2d correlation matrix (1,250 values)
    - All peak lags match exactly
    - Created Fortran reference generator: `tests/sync/test_sync2d.f90`
+   - **BREAKTHROUGH**: Discovered and fixed jstrt calculation issue (see below)
 
 3. **Candidate Selection**: 77% match rate (154/200 candidates)
    - Both implementations find 200 candidates
    - Strong signals match perfectly
    - Weak signals (~1.0-1.6 sync power) have mismatches
 
-### 🔍 Critical Discovery: jstrt Paradox
+### 🎯 BREAKTHROUGH: jstrt Paradox Solved!
 
-A fundamental inconsistency was discovered in the `jstrt` (start lag) calculation:
+A critical discovery resolved a fundamental inconsistency in the `jstrt` (start lag) calculation.
 
-#### The Problem
+#### The Discovery
 
-```rust
-// Mathematically correct (WSJT-X uses nint() which rounds):
-let jstrt = (0.5 / tstep).round() as i32;  // = 13
+**The Paradox:**
+- With jstrt=13 (rounded): Sync2d 100% match, but candidates 0.5% match (times 0.04s early)
+- With jstrt=12 (truncated): Sync2d offset by 1, but candidates 77% match
 
-// Truncated (wrong, but matches test data):
-let jstrt = (0.5 / tstep) as i32;  // = 12
+**Root Cause Found:**
+WSJT-X's sync8.f90 line 50 contains:
+```fortran
+jstrt=0.5/tstep
 ```
 
-#### Observed Behavior
-
-| jstrt Value | Sync2d Match | Candidate Match | Notes |
-|-------------|--------------|-----------------|-------|
-| 12 (truncated) | Offset by 1 lag | 77.0% (154/200) | Wrong math, but matches test data |
-| 13 (rounded) | 100% match | 0.5% (1/200) | Correct math, all times 0.04s early |
-
-#### Analysis
-
-**With jstrt=13 (correct):**
-- Sync2d values match WSJT-X exactly (100%)
-- Peak lags match exactly
-- But candidate times are consistently 0.04s (1 time step) early
-- Example: WSJT-X finds 2571.9 Hz at 0.300s, we find it at 0.260s
-
-**With jstrt=12 (truncated):**
-- Sync2d values are offset by 1 lag from WSJT-X
-- But candidate selection somehow compensates and achieves 77% match
-- This suggests the test reference data may be inconsistent
-
-#### Verification
-
-Ran WSJT-X's test_sync2d.f90 which computes jstrt:
+**NO** `nint()` call! Since `jstrt` is not explicitly declared, **Fortran's implicit typing** makes it an integer (variables starting with i-n are implicitly integers). This causes **automatic truncation**:
 ```
-jstrt = nint(0.5/tstep) = nint(12.5) = 13
+0.5 / 0.04 = 12.5 → truncates to 12 (NOT rounded to 13)
 ```
 
-This confirms WSJT-X should use jstrt=13, yet the sync8 output suggests jstrt=12 behavior.
+#### The Bug in Our Test Code
+
+Our `test_sync2d.f90` was using:
+```fortran
+integer :: jstrt
+jstrt = nint(0.5 / tstep)  ! WRONG: Rounds to 13
+```
+
+This gave us **incorrect reference data**! WSJT-X actually uses jstrt=12 (truncated).
+
+#### The Fix
+
+Updated `test_sync2d.f90` line 52 to match WSJT-X:
+```fortran
+jstrt = 0.5 / tstep  ! CORRECT: Truncates to 12 (matches sync8.f90)
+```
+
+Regenerated `sync2d_ref.csv` with correct jstrt=12 values.
+
+#### Verification Results
+
+After fixing the test reference data:
+- **Sync2d**: 100% match with jstrt=12 (1250/1250 values within 0.001%)
+- **Peak lags**: All match exactly
+- **Candidates**: 77% match maintained (154/200)
+- **Conclusion**: Our implementation is CORRECT! jstrt=12 matches WSJT-X exactly.
+
+The "paradox" was caused by our test using wrong jstrt value, not by any bug in our implementation.
 
 ### 📊 Test Infrastructure Created
 
@@ -100,11 +108,11 @@ pub const NH1: usize = NFFT1 / 2; // 1920
 
 ### src/sync/spectra.rs (line 302)
 ```rust
-// CURRENT (77% match):
-let jstrt = (0.5 / (NSTEP as f32 / SAMPLE_RATE)) as i32; // = 12
+// CORRECT implementation (matches WSJT-X sync8.f90 line 50):
+let jstrt = (0.5 / (NSTEP as f32 / SAMPLE_RATE)) as i32; // = 12 (truncated)
 
-// SHOULD BE (100% sync2d match, but breaks candidates):
-let jstrt = (0.5 / (NSTEP as f32 / SAMPLE_RATE)).round() as i32; // = 13
+// NOTE: Do NOT use .round()! WSJT-X uses Fortran implicit typing which truncates.
+// Using .round() would give jstrt=13, which is WRONG and breaks candidate matching.
 ```
 
 ### tests/test_utils.rs
@@ -128,20 +136,37 @@ pub fn read_wav_file_raw(path: &str) -> Result<Vec<f32>, String> {
 
 ## Next Steps
 
-### Option A: Fix jstrt and Regenerate Reference Data
-1. Use jstrt=13 (correct rounding)
-2. Regenerate test_sync8 reference data with verified WSJT-X version
-3. Verify all candidates match with corrected data
+### ✅ COMPLETED: jstrt Paradox Resolution
+The jstrt issue is SOLVED! Our implementation is correct and matches WSJT-X exactly with jstrt=12.
 
-### Option B: Accept Current State and Document
-1. Keep jstrt=12 to maintain 77% match rate
-2. Document the jstrt inconsistency as a known issue
-3. Focus on other improvements (fine sync, LDPC decoding, etc.)
+### 🎯 Goal: Reach 95% Candidate Match Rate (Currently 77%)
 
-### Option C: Deep Investigation
-1. Examine WSJT-X's sync8.f90 more carefully for hidden lag adjustments
-2. Check if WSJT-X has multiple code paths that use different jstrt values
-3. Compare against multiple WSJT-X versions to identify when behavior changed
+**Current Status:**
+- 154 out of 200 candidates match (77%)
+- Strong signals match perfectly
+- Weak signals (~1.0-1.6 sync power) have discrepancies
+
+**Investigation Priorities:**
+
+1. **Analyze Weak Signal Mismatches**
+   - Compare sync2d values for mismatched candidates
+   - Check if there are subtle differences in peak selection logic
+   - Examine boundary conditions and tie-breaking rules
+
+2. **Verify Candidate Sorting and Selection**
+   - WSJT-X sorts by sync power before selecting top N
+   - Check if our sorting is stable/deterministic
+   - Verify we handle edge cases (equal sync values, boundary bins, etc.)
+
+3. **Check Fine Sync Integration**
+   - WSJT-X may refine candidate times during fine sync
+   - Investigate if reported times include post-processing adjustments
+   - Compare our coarse sync output with WSJT-X's pre-fine-sync state
+
+4. **Alternative Approach: Accept 77% as "Good Enough"**
+   - 77% match on weak signals may be acceptable given noise sensitivity
+   - Consider focusing on fine sync and LDPC decoding instead
+   - Document known limitations and move forward
 
 ## Debugging Tips
 
@@ -151,10 +176,12 @@ RUST_LOG=rustyft8::sync::spectra=trace cargo test test_coarse -- --ignored --noc
 ```
 
 ### Compare Specific Bins
-The test_sync2d program outputs sync2d values for key bins:
-- Bin 477 (1490.6 Hz) - Weak signal, peak at lag=0
-- Bin 823 (2571.9 Hz) - Strong signal, peak at lag=7
-- Bin 811 (2534.4 Hz) - Strong signal, peak at lag=59
+The test_sync2d program outputs sync2d values for key bins (with correct jstrt=12):
+- Bin 477 (1490.6 Hz) - Weak signal, peak at lag=1
+- Bin 478 (1493.8 Hz) - Weak signal, peak at lag=2
+- Bin 482 (1506.2 Hz) - Medium signal, peak at lag=10
+- Bin 823 (2571.9 Hz) - Strong signal, peak at lag=8 (time=0.30s)
+- Bin 811 (2534.4 Hz) - Strong signal, peak at lag=60 (time=2.38s)
 
 ### Recompile Fortran Tests
 ```bash
