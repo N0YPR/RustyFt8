@@ -60,7 +60,11 @@ pub fn coarse_sync(
 
 /// Find candidate signals from sync2d correlation matrix
 ///
-/// Identifies peaks in the 2D sync matrix and ranks them by quality.
+/// Matches WSJT-X sync8.f90 algorithm exactly:
+/// 1. Find peaks for all frequency bins → red[i], jpeak[i], red2[i], jpeak2[i]
+/// 2. Find 40th percentile of red values → normalize ALL bins
+/// 3. Sort bins by normalized sync power
+/// 4. Create candidates from bins with sync >= syncmin
 ///
 /// # Arguments
 /// * `sync2d` - 2D sync correlation matrix [freq_bin][time_lag]
@@ -84,7 +88,12 @@ fn find_candidates(
     let df = SAMPLE_RATE / NFFT1 as f32; // 3.125 Hz
     let tstep = NSTEP as f32 / SAMPLE_RATE; // 0.04 seconds
 
-    let mut candidates = Vec::new();
+    // Allocate per-bin arrays (matching WSJT-X sync8.f90 lines 14-20)
+    let nbins = ib - ia + 1;
+    let mut red = vec![0.0f32; nbins];      // Narrow search sync power
+    let mut jpeak = vec![0i32; nbins];      // Narrow search peak lag
+    let mut red2 = vec![0.0f32; nbins];     // Wide search sync power
+    let mut jpeak2 = vec![0i32; nbins];     // Wide search peak lag
 
     // Dual peak search strategy (matching WSJT-X sync8.f90 lines 89-97)
     // 1. Narrow search: ±10 steps around zero lag (±0.4s) for typical signals
@@ -92,223 +101,153 @@ fn find_candidates(
     // NO time penalty - use raw sync power like WSJT-X
     const NARROW_LAG: i32 = 10; // ±0.4s search range for primary peak
 
-    // Debug: Show sync2d values at key frequencies (use RUST_LOG=trace)
+    // STEP 1: Find peaks for all frequency bins (WSJT-X sync8.f90 lines 91-98)
+    for i in ia..=ib {
+        let bin_idx = i - ia;
+
+        // Narrow search: ±10 steps
+        let mut peak_narrow = 0i32;
+        let mut red_narrow = 0.0f32;
+        for lag in -NARROW_LAG..=NARROW_LAG {
+            let sync_idx = (lag + MAX_LAG) as usize;
+            if sync_idx < sync2d[i].len() {
+                let sync_val = sync2d[i][sync_idx];
+                if sync_val > red_narrow {
+                    red_narrow = sync_val;
+                    peak_narrow = lag;
+                }
+            }
+        }
+        red[bin_idx] = red_narrow;
+        jpeak[bin_idx] = peak_narrow;
+
+        // Wide search: ±MAX_LAG steps
+        let mut peak_wide = 0i32;
+        let mut red_wide = 0.0f32;
+        for lag in -MAX_LAG..=MAX_LAG {
+            let sync_idx = (lag + MAX_LAG) as usize;
+            if sync_idx < sync2d[i].len() {
+                let sync_val = sync2d[i][sync_idx];
+                if sync_val > red_wide {
+                    red_wide = sync_val;
+                    peak_wide = lag;
+                }
+            }
+        }
+        red2[bin_idx] = red_wide;
+        jpeak2[bin_idx] = peak_wide;
+    }
+
+    // Debug: Show raw sync values at key WSJT-X candidate bins (use RUST_LOG=trace)
     if tracing::enabled!(tracing::Level::TRACE) {
-        // Check frequencies where WSJT-X finds signals: 400, 590, 641, 723, 2157, 2238, 2572, 2695, 2733, 2852
-        let debug_freqs = [400.0, 590.0, 641.0, 723.0, 2157.0, 2238.0, 2572.0, 2695.0, 2733.0, 2852.0];
-        for &freq in &debug_freqs {
-            let bin = (freq / df) as usize;
-            if bin >= ia && bin <= ib && bin < sync2d.len() {
-                // Find max sync value across all lags for this frequency
-                let max_sync = sync2d[bin].iter().enumerate()
-                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
-                    .map(|(idx, val)| (idx as i32 - MAX_LAG, *val))
-                    .unwrap_or((0, 0.0));
-
-                // Also check narrow range ±10
-                let narrow_max = (-NARROW_LAG..=NARROW_LAG).map(|lag| {
-                    let idx = (lag + MAX_LAG) as usize;
-                    if idx < sync2d[bin].len() {
-                        (lag, sync2d[bin][idx])
-                    } else {
-                        (lag, 0.0)
-                    }
-                }).max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
-                .unwrap_or((0, 0.0));
-
+        let debug_freqs = [
+            (1490.6, 477, 0.020), // freq, bin, expected_time
+            (1493.8, 478, 0.060),
+            (1506.2, 482, 0.380),
+            (2571.9, 823, 0.300),
+            (2534.4, 811, 2.380)
+        ];
+        for &(freq, expected_bin, expected_time) in &debug_freqs {
+            if expected_bin >= ia && expected_bin <= ib {
+                let bin_idx = expected_bin - ia;
+                let computed_time_narrow = (jpeak[bin_idx] as f32 - 0.5) * tstep;
+                let computed_time_wide = (jpeak2[bin_idx] as f32 - 0.5) * tstep;
                 trace!(
-                    freq = %freq,
-                    bin = %bin,
-                    max_sync = %max_sync.1,
-                    max_lag = %max_sync.0,
-                    max_time = %(max_sync.0 as f32 * tstep),
-                    narrow_max = %narrow_max.1,
-                    narrow_lag = %narrow_max.0,
-                    narrow_time = %(narrow_max.0 as f32 * tstep),
-                    "sync2d debug frequency"
+                    freq = %freq, bin = %expected_bin,
+                    red_narrow = %red[bin_idx], jpeak_narrow = %jpeak[bin_idx], time_narrow = %computed_time_narrow,
+                    red_wide = %red2[bin_idx], jpeak_wide = %jpeak2[bin_idx], time_wide = %computed_time_wide,
+                    expected_time = %expected_time,
+                    "sync at WSJT-X bin: narrow vs wide search"
                 );
             }
         }
     }
 
-    for i in ia..=ib {
-        // First search: narrow range ±10 steps
-        let mut jpeak = 0i32;
-        let mut red = 0.0f32;
-        for lag in -NARROW_LAG..=NARROW_LAG {
-            let sync_idx = (lag + MAX_LAG) as usize;
-            if sync_idx < sync2d[i].len() {
-                let sync_val = sync2d[i][sync_idx];
-                if sync_val > red {
-                    red = sync_val;
-                    jpeak = lag;
-                }
-            }
+    // STEP 2: Normalize ALL bins using 40th percentile (WSJT-X sync8.f90 lines 100-116)
+    // This is the CRITICAL fix - normalize BEFORE filtering, not after!
+
+    // Sort red values to find 40th percentile
+    let mut red_sorted = red.clone();
+    red_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    // WSJT-X uses nint(0.40*iz) which rounds to nearest integer
+    let percentile_idx = (nbins as f32 * 0.4).round() as usize;
+    let baseline = red_sorted[percentile_idx].max(1e-30);
+
+    debug!(
+        bins_searched = nbins,
+        percentile_idx = percentile_idx,
+        baseline_40th = %baseline,
+        "normalizing all bins by 40th percentile"
+    );
+
+    // Debug: Show values around percentile for comparison with WSJT-X
+    if tracing::enabled!(tracing::Level::TRACE) {
+        trace!(
+            idx_minus_5 = %red_sorted[percentile_idx.saturating_sub(5)],
+            idx_minus_1 = %red_sorted[percentile_idx.saturating_sub(1)],
+            idx_0 = %red_sorted[percentile_idx],
+            idx_plus_1 = %red_sorted[(percentile_idx + 1).min(nbins - 1)],
+            idx_plus_5 = %red_sorted[(percentile_idx + 5).min(nbins - 1)],
+            "values around 40th percentile"
+        );
+    }
+
+    // Normalize ALL red values by baseline
+    for val in &mut red {
+        *val /= baseline;
+    }
+
+    // Do same for red2
+    let mut red2_sorted = red2.clone();
+    red2_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    let baseline2 = red2_sorted[percentile_idx].max(1e-30);
+    for val in &mut red2 {
+        *val /= baseline2;
+    }
+
+    // STEP 3: Create index array sorted by red (descending)
+    let mut indices: Vec<usize> = (0..nbins).collect();
+    indices.sort_by(|&a, &b| red[b].partial_cmp(&red[a]).unwrap_or(core::cmp::Ordering::Equal));
+
+    // STEP 4: Generate candidates from sorted bins (WSJT-X sync8.f90 lines 117-134)
+    let mut candidates = Vec::new();
+
+    for &bin_idx in &indices {
+        if candidates.len() >= max_candidates * 2 {
+            break; // Pre-limit before deduplication
         }
 
-        // Second search: wide range ±MAX_LAG steps
-        let mut jpeak2 = 0i32;
-        let mut red2 = 0.0f32;
-        for lag in -MAX_LAG..=MAX_LAG {
-            let sync_idx = (lag + MAX_LAG) as usize;
-            if sync_idx < sync2d[i].len() {
-                let sync_val = sync2d[i][sync_idx];
-                if sync_val > red2 {
-                    red2 = sync_val;
-                    jpeak2 = lag;
-                }
-            }
-        }
+        let i = ia + bin_idx;  // Actual frequency bin
+        let freq = i as f32 * df;  // NO INTERPOLATION - just bin center
 
         // Look up baseline noise at this frequency
         let baseline_noise = if i < avg_spectrum.len() {
-            avg_spectrum[i].max(1e-30) // Ensure non-zero
+            avg_spectrum[i].max(1e-30)
         } else {
             1e-30
         };
 
-        // Parabolic interpolation for sub-bin frequency accuracy
-        // Refines from 2.93 Hz quantization to ~0.3 Hz accuracy
-        // Critical for correct tone extraction (0.2 Hz error causes 20% tone errors!)
-        let interpolated_freq = if i > 0 && i < sync2d.len() - 1 {
-            // Get sync values at bins i-1, i, i+1 at the peak lag
-            let sync_idx = (jpeak + MAX_LAG) as usize;
-            if sync_idx < sync2d[i-1].len() && sync_idx < sync2d[i].len() && sync_idx < sync2d[i+1].len() {
-                let s0 = sync2d[i-1][sync_idx];
-                let s1 = sync2d[i][sync_idx];
-                let s2 = sync2d[i+1][sync_idx];
-
-                // Fit parabola and find peak
-                let denom = 2.0 * (s0 - 2.0 * s1 + s2);
-                let is_peak = s1 > s0 && s1 > s2;
-
-                // Debug for F5RXL frequency range (use RUST_LOG=trace)
-                if tracing::enabled!(tracing::Level::TRACE) && i >= 407 && i <= 410 {
-                    trace!(
-                        bin = %i,
-                        s0 = %s0,
-                        s1 = %s1,
-                        s2 = %s2,
-                        is_peak = %is_peak,
-                        denom = %denom,
-                        "coarse interpolation debug"
-                    );
-                }
-
-                if denom.abs() > 1e-6 && is_peak {
-                    // Peak is at i, interpolate
-                    let delta = 0.5 * (s2 - s0) / denom;
-                    let interpolated = (i as f32 + delta) * df;
-
-                    if tracing::enabled!(tracing::Level::TRACE) && i >= 407 && i <= 410 {
-                        trace!(
-                            bin = %i,
-                            freq_before = %(i as f32 * df),
-                            freq_after = %interpolated,
-                            delta = %delta,
-                            "interpolation result"
-                        );
-                    }
-
-                    // Sanity check: should be within ±1 bin
-                    if (interpolated - i as f32 * df).abs() <= df {
-                        interpolated
-                    } else {
-                        i as f32 * df
-                    }
-                } else {
-                    i as f32 * df
-                }
-            } else {
-                i as f32 * df
-            }
-        } else {
-            i as f32 * df
-        };
-
-        // Add candidate from narrow search
-        if red > 0.0 {
-            candidates.push(Candidate {
-                frequency: interpolated_freq,
-                time_offset: (jpeak as f32 - 0.5) * tstep,
-                sync_power: red,
-                baseline_noise,
-            });
-        }
+        // Add candidate from narrow search (filter by sync_min later, after we have enough)
+        candidates.push(Candidate {
+            frequency: freq,
+            time_offset: (jpeak[bin_idx] as f32 - 0.5) * tstep,
+            sync_power: red[bin_idx],
+            baseline_noise,
+        });
 
         // Add second candidate from wide search if different peak
-        // Also apply interpolation to wide search
-        if red2 > 0.0 && jpeak2 != jpeak {
-            let interpolated_freq2 = if i > 0 && i < sync2d.len() - 1 {
-                let sync_idx2 = (jpeak2 + MAX_LAG) as usize;
-                if sync_idx2 < sync2d[i-1].len() && sync_idx2 < sync2d[i].len() && sync_idx2 < sync2d[i+1].len() {
-                    let s0 = sync2d[i-1][sync_idx2];
-                    let s1 = sync2d[i][sync_idx2];
-                    let s2 = sync2d[i+1][sync_idx2];
-
-                    let denom = 2.0 * (s0 - 2.0 * s1 + s2);
-                    if denom.abs() > 1e-6 && s1 > s0 && s1 > s2 {
-                        let delta = 0.5 * (s2 - s0) / denom;
-                        let interpolated = (i as f32 + delta) * df;
-                        if (interpolated - i as f32 * df).abs() <= df {
-                            interpolated
-                        } else {
-                            i as f32 * df
-                        }
-                    } else {
-                        i as f32 * df
-                    }
-                } else {
-                    i as f32 * df
-                }
-            } else {
-                i as f32 * df
-            };
-
+        if jpeak2[bin_idx] != jpeak[bin_idx] {
             candidates.push(Candidate {
-                frequency: interpolated_freq2,
-                time_offset: (jpeak2 as f32 - 0.5) * tstep,
-                sync_power: red2,
+                frequency: freq,
+                time_offset: (jpeak2[bin_idx] as f32 - 0.5) * tstep,
+                sync_power: red2[bin_idx],
                 baseline_noise,
             });
         }
-    }
 
-    // Normalize sync powers to relative scale
-    if !candidates.is_empty() {
-        // Find 40th percentile for baseline
-        let mut sync_values: Vec<f32> = candidates.iter().map(|c| c.sync_power).collect();
-        sync_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-        let percentile_idx = (sync_values.len() as f32 * 0.4) as usize;
-        let baseline = sync_values[percentile_idx];
-
-        debug!(
-            total_candidates = candidates.len(),
-            baseline_40th = %baseline,
-            "sync power normalization"
-        );
-
-        if tracing::enabled!(tracing::Level::TRACE) {
-            // Show how our target frequencies normalize
-            let debug_bins = [136, 201, 218, 246, 736, 763, 877, 919, 932, 973]; // The frequencies we're tracking
-            for &bin in &debug_bins {
-                let freq = bin as f32 * df;
-                for cand in candidates.iter().filter(|c| ((c.frequency / df) as usize) == bin) {
-                    let normalized = cand.sync_power / baseline;
-                    trace!(
-                        freq = %freq,
-                        sync_raw = %cand.sync_power,
-                        sync_normalized = %normalized,
-                        "frequency normalization"
-                    );
-                }
-            }
-        }
-
-        if baseline > 0.0 {
-            for cand in &mut candidates {
-                cand.sync_power /= baseline;
-            }
+        // Stop after we have enough candidates (WSJT-X uses MAXPRECAND=1000)
+        if candidates.len() >= 1000 {
+            break;
         }
     }
 
@@ -339,14 +278,6 @@ fn find_candidates(
                         dupe_of = %dupe_of.unwrap(),
                         "2733 Hz candidate FILTERED as duplicate"
                     );
-                } else if cand.sync_power < sync_min {
-                    trace!(
-                        freq = %cand.frequency,
-                        sync = %cand.sync_power,
-                        sync_min = %sync_min,
-                        time = %cand.time_offset,
-                        "2733 Hz candidate FILTERED (below sync_min)"
-                    );
                 } else {
                     trace!(
                         freq = %cand.frequency,
@@ -358,6 +289,7 @@ fn find_candidates(
             }
         }
 
+        // Apply sync_min filter here (after creating candidates)
         if !is_dupe && cand.sync_power >= sync_min {
             filtered.push(*cand);
         }

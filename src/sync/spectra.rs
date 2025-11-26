@@ -324,51 +324,51 @@ pub fn compute_sync2d(
 
                     // Costas array 1 (symbols 0-6)
                     // WSJT-X: if(m.ge.1.and.m.le.NHSYM) - Fortran 1-indexed
-                    // Rust equivalent: m >= 1 && m <= NHSYM, but array index is m-1, so m < NHSYM+1
-                    // Since we use 0-indexed: m >= 0 && m < NHSYM
-                    if m >= 1 && (m as usize) < NHSYM {
+                    // WSJT-X: s(i,m) with m=1 accesses first element (Fortran index 1)
+                    // Rust: spectra[i][m-1] with m=1 accesses first element (Rust index 0)
+                    if m >= 1 && m <= NHSYM as i32 {
                         let freq_idx = (i as i32 + nfos as i32 * tone) as usize;
-                        // WSJT-X: ta=ta + s(i+nfos*icos7(n),m)  [NO frequency check!]
-                        ta += spectra[freq_idx][m as usize];
+                        let time_idx = (m - 1) as usize; // Convert Fortran 1-indexed to Rust 0-indexed
+                        // WSJT-X: ta=ta + s(i+nfos*icos7(n),m)
+                        ta += spectra[freq_idx][time_idx];
 
-                        // WSJT-X: t0a=t0a + sum(s(i:i+nfos*6:nfos,m))  [NO frequency check!]
+                        // WSJT-X: t0a=t0a + sum(s(i:i+nfos*6:nfos,m))
                         // Baseline: sum all 7 frequency bins at same time
                         for k in 0..7 {
                             let baseline_idx = i + nfos * k;
-                            t0a += spectra[baseline_idx][m as usize];
+                            t0a += spectra[baseline_idx][time_idx];
                         }
                     }
 
                     // Costas array 2 (symbols 36-42)
-                    // WSJT-X: NO bounds check at all (sync8.f90:68-69)
-                    // Assumes middle Costas always in valid range for 15s recording
-                    // We add a safety check to prevent panic in Rust
+                    // WSJT-X: NO bounds check (assumes middle Costas in valid range)
                     let m2 = m + (nssy as i32) * 36;
-                    if m2 >= 0 && (m2 as usize) < NHSYM {
+                    if m2 >= 1 && m2 <= NHSYM as i32 {
                         let freq_idx2 = (i as i32 + nfos as i32 * tone) as usize;
-                        // WSJT-X: tb=tb + s(i+nfos*icos7(n),m+nssy*36)  [NO checks!]
-                        tb += spectra[freq_idx2][m2 as usize];
+                        let time_idx2 = (m2 - 1) as usize; // Convert Fortran 1-indexed to Rust 0-indexed
+                        // WSJT-X: tb=tb + s(i+nfos*icos7(n),m+nssy*36)
+                        tb += spectra[freq_idx2][time_idx2];
 
-                        // WSJT-X: t0b=t0b + sum(s(i:i+nfos*6:nfos,m+nssy*36))  [NO checks!]
+                        // WSJT-X: t0b=t0b + sum(s(i:i+nfos*6:nfos,m+nssy*36))
                         for k in 0..7 {
                             let baseline_idx = i + nfos * k;
-                            t0b += spectra[baseline_idx][m2 as usize];
+                            t0b += spectra[baseline_idx][time_idx2];
                         }
                     }
 
                     // Costas array 3 (symbols 72-78)
                     // WSJT-X: if(m+nssy*72.le.NHSYM) - Fortran 1-indexed
-                    // Rust equivalent: m3 <= NHSYM means valid indices 1..NHSYM, but we need 0..NHSYM-1
                     let m3 = m + (nssy as i32) * 72;
-                    if m3 >= 1 && (m3 as usize) < NHSYM {
+                    if m3 >= 1 && m3 <= NHSYM as i32 {
                         let freq_idx3 = (i as i32 + nfos as i32 * tone) as usize;
-                        // WSJT-X: tc=tc + s(i+nfos*icos7(n),m+nssy*72)  [NO frequency check!]
-                        tc += spectra[freq_idx3][m3 as usize];
+                        let time_idx3 = (m3 - 1) as usize; // Convert Fortran 1-indexed to Rust 0-indexed
+                        // WSJT-X: tc=tc + s(i+nfos*icos7(n),m+nssy*72)
+                        tc += spectra[freq_idx3][time_idx3];
 
-                        // WSJT-X: t0c=t0c + sum(s(i:i+nfos*6:nfos,m+nssy*72))  [NO frequency check!]
+                        // WSJT-X: t0c=t0c + sum(s(i:i+nfos*6:nfos,m+nssy*72))
                         for k in 0..7 {
                             let baseline_idx = i + nfos * k;
-                            t0c += spectra[baseline_idx][m3 as usize];
+                            t0c += spectra[baseline_idx][time_idx3];
                         }
                     }
                 }
