@@ -1,6 +1,29 @@
 //! Shared utilities for integration tests
 
 use hound;
+use once_cell::sync::Lazy;
+
+/// Initialize tracing for tests (call once per test that needs tracing)
+pub fn init_test_tracing() {
+    static TRACING: Lazy<()> = Lazy::new(|| {
+        #[cfg(test)]
+        {
+            use tracing_subscriber::{fmt, EnvFilter};
+
+            let filter = EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("rustyft8=warn"));
+
+            fmt()
+                .with_env_filter(filter)
+                .with_target(true)
+                .with_line_number(true)
+                .with_test_writer()
+                .init();
+        }
+    });
+
+    Lazy::force(&TRACING);
+}
 
 /// Read a WAV file and convert to f32 samples normalized to [-1.0, 1.0]
 pub fn read_wav_file(path: &str) -> Result<Vec<f32>, String> {

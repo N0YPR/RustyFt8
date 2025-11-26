@@ -7,11 +7,13 @@ use rustyft8::sync::coarse_sync;
 
 #[path = "../test_utils.rs"]
 mod test_utils;
-use test_utils::{read_wav_file, normalize_signal_length};
+use test_utils::{read_wav_file, normalize_signal_length, init_test_tracing};
 
 #[test]
 #[ignore] // Slow test - run with: cargo test -- --ignored
 fn test_coarse_sync_matches_wsjtx() {
+    // Initialize tracing (controlled by RUST_LOG env var)
+    init_test_tracing();
     // This test compares RustyFt8's coarse_sync output against WSJT-X's sync8 function.
     // WSJT-X sync8 is the reference implementation for FT8 coarse synchronization.
     //

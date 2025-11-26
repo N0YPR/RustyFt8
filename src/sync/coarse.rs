@@ -4,6 +4,7 @@
 
 use super::{SAMPLE_RATE, NFFT1, NSTEP, MAX_LAG, COARSE_LAG, Candidate};
 use super::spectra::{compute_spectra, compute_sync2d};
+use tracing::{debug, info, trace, instrument};
 
 
 
@@ -23,6 +24,7 @@ use super::spectra::{compute_spectra, compute_sync2d};
 ///
 /// # Returns
 /// Vector of candidate signals sorted by quality
+#[instrument(skip(signal), fields(signal_len = signal.len()))]
 pub fn coarse_sync(
     signal: &[f32],
     freq_min: f32,
@@ -70,6 +72,7 @@ pub fn coarse_sync(
 ///
 /// # Returns
 /// Vector of candidates sorted by sync power (descending)
+#[instrument(skip(sync2d, avg_spectrum), fields(freq_bins = ib - ia + 1))]
 fn find_candidates(
     sync2d: &[Vec<f32>],
     ia: usize,
@@ -89,9 +92,8 @@ fn find_candidates(
     // NO time penalty - use raw sync power like WSJT-X
     const NARROW_LAG: i32 = 10; // ±0.4s search range for primary peak
 
-    // Debug: Show sync2d values at key frequencies (disabled by default)
-    let _debug_sync2d = false;
-    if _debug_sync2d {
+    // Debug: Show sync2d values at key frequencies (use RUST_LOG=trace)
+    if tracing::enabled!(tracing::Level::TRACE) {
         // Check frequencies where WSJT-X finds signals: 400, 590, 641, 723, 2157, 2238, 2572, 2695, 2733, 2852
         let debug_freqs = [400.0, 590.0, 641.0, 723.0, 2157.0, 2238.0, 2572.0, 2695.0, 2733.0, 2852.0];
         for &freq in &debug_freqs {
@@ -114,9 +116,17 @@ fn find_candidates(
                 }).max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
                 .unwrap_or((0, 0.0));
 
-                eprintln!("sync2d[{:.0} Hz (bin {})]: max={:.3} at lag={} ({:.2}s), narrow_max={:.3} at lag={} ({:.2}s)",
-                    freq, bin, max_sync.1, max_sync.0, max_sync.0 as f32 * tstep,
-                    narrow_max.1, narrow_max.0, narrow_max.0 as f32 * tstep);
+                trace!(
+                    freq = %freq,
+                    bin = %bin,
+                    max_sync = %max_sync.1,
+                    max_lag = %max_sync.0,
+                    max_time = %(max_sync.0 as f32 * tstep),
+                    narrow_max = %narrow_max.1,
+                    narrow_lag = %narrow_max.0,
+                    narrow_time = %(narrow_max.0 as f32 * tstep),
+                    "sync2d debug frequency"
+                );
             }
         }
     }
@@ -172,11 +182,17 @@ fn find_candidates(
                 let denom = 2.0 * (s0 - 2.0 * s1 + s2);
                 let is_peak = s1 > s0 && s1 > s2;
 
-                // Debug for F5RXL frequency range (disabled after investigation)
-                let _debug_interpolation = false;
-                if _debug_interpolation && i >= 407 && i <= 410 {
-                    eprintln!("  Coarse interpolation bin {}: s0={:.3}, s1={:.3}, s2={:.3}, is_peak={}, denom={:.6}",
-                             i, s0, s1, s2, is_peak, denom);
+                // Debug for F5RXL frequency range (use RUST_LOG=trace)
+                if tracing::enabled!(tracing::Level::TRACE) && i >= 407 && i <= 410 {
+                    trace!(
+                        bin = %i,
+                        s0 = %s0,
+                        s1 = %s1,
+                        s2 = %s2,
+                        is_peak = %is_peak,
+                        denom = %denom,
+                        "coarse interpolation debug"
+                    );
                 }
 
                 if denom.abs() > 1e-6 && is_peak {
@@ -184,9 +200,14 @@ fn find_candidates(
                     let delta = 0.5 * (s2 - s0) / denom;
                     let interpolated = (i as f32 + delta) * df;
 
-                    if _debug_interpolation && i >= 407 && i <= 410 {
-                        eprintln!("    → Interpolated: {:.1} Hz → {:.1} Hz (delta={:.3})",
-                                 i as f32 * df, interpolated, delta);
+                    if tracing::enabled!(tracing::Level::TRACE) && i >= 407 && i <= 410 {
+                        trace!(
+                            bin = %i,
+                            freq_before = %(i as f32 * df),
+                            freq_after = %interpolated,
+                            delta = %delta,
+                            "interpolation result"
+                        );
                     }
 
                     // Sanity check: should be within ±1 bin
@@ -261,17 +282,25 @@ fn find_candidates(
         let percentile_idx = (sync_values.len() as f32 * 0.4) as usize;
         let baseline = sync_values[percentile_idx];
 
-        if _debug_sync2d {
-            eprintln!("Normalization: {} candidates, 40th percentile baseline = {:.3}",
-                candidates.len(), baseline);
+        debug!(
+            total_candidates = candidates.len(),
+            baseline_40th = %baseline,
+            "sync power normalization"
+        );
+
+        if tracing::enabled!(tracing::Level::TRACE) {
             // Show how our target frequencies normalize
             let debug_bins = [136, 201, 218, 246, 736, 763, 877, 919, 932, 973]; // The frequencies we're tracking
             for &bin in &debug_bins {
                 let freq = bin as f32 * df;
                 for cand in candidates.iter().filter(|c| ((c.frequency / df) as usize) == bin) {
                     let normalized = cand.sync_power / baseline;
-                    eprintln!("  {:.0} Hz: sync={:.3} → normalized={:.3}",
-                        freq, cand.sync_power, normalized);
+                    trace!(
+                        freq = %freq,
+                        sync_raw = %cand.sync_power,
+                        sync_normalized = %normalized,
+                        "frequency normalization"
+                    );
                 }
             }
         }
@@ -298,18 +327,34 @@ fn find_candidates(
             }
         }
 
-        // Debug: track 2733 Hz candidates through filtering
-        let is_2733 = (cand.frequency - 2733.0).abs() < 5.0;
-        if _debug_sync2d && is_2733 {
-            if is_dupe {
-                eprintln!("  2733 Hz candidate FILTERED as dupe of {:.0} Hz: sync={:.3}, time={:.2}s",
-                    dupe_of.unwrap(), cand.sync_power, cand.time_offset);
-            } else if cand.sync_power < sync_min {
-                eprintln!("  2733 Hz candidate FILTERED (sync < {:.1}): sync={:.3}, time={:.2}s",
-                    sync_min, cand.sync_power, cand.time_offset);
-            } else {
-                eprintln!("  2733 Hz candidate PASSED: sync={:.3}, time={:.2}s",
-                    cand.sync_power, cand.time_offset);
+        // Debug: track 2733 Hz candidates through filtering (use RUST_LOG=trace)
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let is_2733 = (cand.frequency - 2733.0).abs() < 5.0;
+            if is_2733 {
+                if is_dupe {
+                    trace!(
+                        freq = %cand.frequency,
+                        sync = %cand.sync_power,
+                        time = %cand.time_offset,
+                        dupe_of = %dupe_of.unwrap(),
+                        "2733 Hz candidate FILTERED as duplicate"
+                    );
+                } else if cand.sync_power < sync_min {
+                    trace!(
+                        freq = %cand.frequency,
+                        sync = %cand.sync_power,
+                        sync_min = %sync_min,
+                        time = %cand.time_offset,
+                        "2733 Hz candidate FILTERED (below sync_min)"
+                    );
+                } else {
+                    trace!(
+                        freq = %cand.frequency,
+                        sync = %cand.sync_power,
+                        time = %cand.time_offset,
+                        "2733 Hz candidate PASSED"
+                    );
+                }
             }
         }
 
@@ -323,6 +368,21 @@ fn find_candidates(
 
     // Limit to max_candidates
     filtered.truncate(max_candidates);
+
+    info!(
+        total_candidates = filtered.len(),
+        max_candidates = max_candidates,
+        "coarse sync complete"
+    );
+
+    if tracing::enabled!(tracing::Level::DEBUG) && !filtered.is_empty() {
+        debug!(
+            top_freq = %filtered[0].frequency,
+            top_sync = %filtered[0].sync_power,
+            top_time = %filtered[0].time_offset,
+            "top candidate"
+        );
+    }
 
     filtered
 }
