@@ -101,9 +101,9 @@ mod tests {
 
     #[test]
     fn test_compute_spectra_size() {
-        // NH1 = NFFT1/2 = 4096/2 = 2048 bins
+        // NH1 = NFFT1/2 = 3840/2 = 1920 bins
         // NHSYM = NMAX/NSTEP - 3 = 180000/480 - 3 = 372 time steps
-        assert_eq!(NH1, 2048);
+        assert_eq!(NH1, 1920);
         assert_eq!(NHSYM, 372);
 
         // Also test actual compute_spectra function

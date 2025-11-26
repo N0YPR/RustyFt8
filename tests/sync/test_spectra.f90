@@ -82,9 +82,38 @@ program test_spectra
   ! For lag=1 at bin 477: m values are 13,17,21,25,29,33,37 (n=0..6)
   ! Middle Costas at m+nssy*36 = 13+4*36 = 157, 17+144=161, etc.
   print *, 'Time indices for middle Costas (lag=1, bin=477):'
-  print '(A,I4,A,E16.8)', 'bin=477 time=157 power=', s(477,157)
-  print '(A,I4,A,E16.8)', 'bin=477 time=161 power=', s(477,161)
-  print '(A,I4,A,E16.8)', 'bin=477 time=165 power=', s(477,165)
+  print '(A,E16.8)', 'bin=477 time=157 power=', s(477,157)
+  print '(A,E16.8)', 'bin=477 time=161 power=', s(477,161)
+  print '(A,E16.8)', 'bin=477 time=165 power=', s(477,165)
+
+  ! Write full spectra array to CSV file for comprehensive testing
+  print *, ''
+  print *, 'Writing full spectra to tests/sync/spectra.csv...'
+  open(20, file='tests/sync/spectra.csv', status='replace', action='write')
+  do i=1,NH1
+     do j=1,NHSYM
+        if (j < NHSYM) then
+           write(20, '(E16.8,A)', advance='no') s(i,j), ','
+        else
+           write(20, '(E16.8)') s(i,j)
+        endif
+     enddo
+  enddo
+  close(20)
+  print *, 'Done writing spectra.csv (', NH1, 'x', NHSYM, 'values)'
+
+  ! Write average spectrum to CSV
+  print *, 'Writing average spectrum to tests/sync/avg_spectrum.csv...'
+  open(21, file='tests/sync/avg_spectrum.csv', status='replace', action='write')
+  do i=1,NH1
+     if (i < NH1) then
+        write(21, '(E16.8,A)', advance='no') savg(i), ','
+     else
+        write(21, '(E16.8)') savg(i)
+     endif
+  enddo
+  close(21)
+  print *, 'Done writing avg_spectrum.csv (', NH1, 'values)'
 
 end program test_spectra
 
