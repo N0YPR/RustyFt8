@@ -2,7 +2,7 @@
 //!
 //! This test verifies that our sync2d correlation computation matches WSJT-X exactly.
 
-use rustyft8::sync::{compute_spectra, compute_sync2d, NH1, NHSYM, MAX_LAG};
+use rustyft8::sync::{compute_spectra, compute_sync2d, NH1, NHSYM, MAX_LAG, NFFT1};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::collections::HashMap;
@@ -87,72 +87,69 @@ fn test_sync2d_matches_wsjtx() {
     println!("Loaded {} bins from reference", ref_sync2d.len());
     println!();
 
-    // Compare key bins where WSJT-X found candidates
+    // Iterate through all bins in CSV (sorted by bin number)
     // Note: These lags match WSJT-X sync8 which uses jstrt=12 (truncated, not rounded)
-    let test_cases = vec![
-        (477, 1, "1490.6 Hz - peak at lag 1"),
-        (478, 2, "1493.8 Hz - peak at lag 2"),
-        (482, 10, "1506.2 Hz - peak at lag 10"),
-        (823, 8, "2571.9 Hz - peak at lag 8"),  // jstrt=12 gives lag 8 (time=0.3s)
-        (811, 60, "2534.4 Hz - peak at lag 60"), // jstrt=12 gives lag 60 (time=2.38s)
-    ];
+    let df = 12000.0 / NFFT1 as f32;  // Frequency resolution
+    let mut bins: Vec<usize> = ref_sync2d.keys().cloned().collect();
+    bins.sort();
 
-    println!("Comparing sync2d values at key bins:");
-    println!("=====================================");
+    println!("Comparing sync2d values at all CSV bins:");
+    println!("=========================================");
 
-    for &(bin, expected_peak_lag, desc) in &test_cases {
-        if let Some(ref_values) = ref_sync2d.get(&bin) {
-            println!();
-            println!("Bin {} - {}", bin, desc);
-            println!("  {:<6} {:<12} {:<12} {:<12} {:<12}", "lag", "WSJT-X", "RustyFt8", "Diff", "Rel Err %");
-            println!("  {}", "-".repeat(60));
+    for &bin in &bins {
+        let ref_values = &ref_sync2d[&bin];
 
-            // Compare values around the expected peak
-            let start_lag = (expected_peak_lag - 3).max(-MAX_LAG);
-            let end_lag = (expected_peak_lag + 3).min(MAX_LAG);
+        // Find peak lags for both implementations
+        let wsjtx_peak_lag = ref_values.iter().enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(idx, _)| idx as i32 - MAX_LAG)
+            .unwrap_or(0);
 
-            for lag in start_lag..=end_lag {
-                let ref_idx = (lag + MAX_LAG) as usize;
-                let expected = ref_values[ref_idx];
-                let actual = sync2d[bin][ref_idx];
+        let rust_peak_lag = sync2d[bin].iter().enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(idx, _)| idx as i32 - MAX_LAG)
+            .unwrap_or(0);
 
-                let diff = (actual - expected).abs();
-                let rel_error = if expected.abs() > 1e-10 {
-                    diff / expected.abs() * 100.0
-                } else if actual.abs() < 1e-10 {
-                    0.0
-                } else {
-                    100.0  // Expected zero but got non-zero
-                };
+        let freq = bin as f32 * df;
+        let peak_sync = ref_values[(wsjtx_peak_lag + MAX_LAG) as usize];
 
-                let marker = if lag == expected_peak_lag { " ← PEAK" } else { "" };
-                println!("  {:<6} {:<12.6} {:<12.6} {:<12.6} {:<12.2}{}",
-                         lag, expected, actual, diff, rel_error, marker);
-            }
+        println!();
+        println!("Bin {} ({:.1} Hz) - peak at lag {} (sync={:.3})", bin, freq, wsjtx_peak_lag, peak_sync);
+        println!("  {:<6} {:<12} {:<12} {:<12} {:<12}", "lag", "WSJT-X", "RustyFt8", "Diff", "Rel Err %");
+        println!("  {}", "-".repeat(60));
 
-            // Find actual peaks
-            let rust_peak_lag = sync2d[bin].iter().enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .map(|(idx, _)| idx as i32 - MAX_LAG)
-                .unwrap_or(0);
+        // Compare values around the peak
+        let start_lag = (wsjtx_peak_lag - 3).max(-MAX_LAG);
+        let end_lag = (wsjtx_peak_lag + 3).min(MAX_LAG);
 
-            let wsjtx_peak_lag = ref_values.iter().enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .map(|(idx, _)| idx as i32 - MAX_LAG)
-                .unwrap_or(0);
+        for lag in start_lag..=end_lag {
+            let ref_idx = (lag + MAX_LAG) as usize;
+            let expected = ref_values[ref_idx];
+            let actual = sync2d[bin][ref_idx];
 
-            println!();
-            println!("  Peak detection:");
-            println!("    WSJT-X:   lag={} sync={:.6}", wsjtx_peak_lag, ref_values[(wsjtx_peak_lag + MAX_LAG) as usize]);
-            println!("    RustyFt8: lag={} sync={:.6}", rust_peak_lag, sync2d[bin][(rust_peak_lag + MAX_LAG) as usize]);
-
-            if rust_peak_lag == wsjtx_peak_lag {
-                println!("    ✓ Peak lag matches!");
+            let diff = (actual - expected).abs();
+            let rel_error = if expected.abs() > 1e-10 {
+                diff / expected.abs() * 100.0
+            } else if actual.abs() < 1e-10 {
+                0.0
             } else {
-                println!("    ✗ Peak lag mismatch: {} vs {}", rust_peak_lag, wsjtx_peak_lag);
-            }
+                100.0  // Expected zero but got non-zero
+            };
+
+            let marker = if lag == wsjtx_peak_lag { " ← PEAK" } else { "" };
+            println!("  {:<6} {:<12.6} {:<12.6} {:<12.6} {:<12.2}{}",
+                     lag, expected, actual, diff, rel_error, marker);
+        }
+
+        println!();
+        println!("  Peak detection:");
+        println!("    WSJT-X:   lag={} sync={:.6}", wsjtx_peak_lag, ref_values[(wsjtx_peak_lag + MAX_LAG) as usize]);
+        println!("    RustyFt8: lag={} sync={:.6}", rust_peak_lag, sync2d[bin][(rust_peak_lag + MAX_LAG) as usize]);
+
+        if rust_peak_lag == wsjtx_peak_lag {
+            println!("    ✓ Peak lag matches!");
         } else {
-            println!("Bin {} not found in reference data", bin);
+            println!("    ✗ Peak lag mismatch: {} vs {}", rust_peak_lag, wsjtx_peak_lag);
         }
     }
 

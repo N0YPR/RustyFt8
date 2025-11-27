@@ -19,11 +19,16 @@ program test_sync2d
   real :: ta, tb, tc, t0a, t0b, t0c, t, t0
   real :: sync_abc, sync_bc
   integer :: icos7(0:6)
-  integer :: key_bins(10)
+  integer :: key_bins(20)
   integer :: bin, k
   real :: freq
   data icos7/3,1,4,0,6,5,2/  ! Costas array pattern
-  data key_bins/477, 478, 482, 811, 823, 189, 231, 347, 862, 458/
+  ! Original 10 bins + 10 new bins for better coverage (sorted by sync power)
+  ! Bins: 823(237.8), 811(67.5), 813(60.4), 835(32.2), 690(31.8), 678(26.0), 703(18.9), 705(16.9),
+  !       686(16.4), 189(15.8), 371(13.2), 231(13.0), 862(12.7), 137(11.0), 680(10.8), 477(1.6),
+  !       478(1.6), 482(1.4), 347(edge), 458(edge)
+  data key_bins/823, 811, 813, 835, 690, 678, 703, 705, 686, 189, &
+                 371, 231, 862, 137, 680, 477, 478, 482, 347, 458/
 
   ! Read WAV file (210703_133430.wav)
   call read_wav_file('tests/test_data/210703_133430.wav', dd, NPTS)
@@ -167,7 +172,7 @@ program test_sync2d
   enddo
 
   ! Write data for key bins
-  do k=1,10
+  do k=1,20
      bin = key_bins(k)
      freq = bin * df
      write(20, '(I4,A,F8.2)', advance='no') bin, ',', freq
