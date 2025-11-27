@@ -147,39 +147,43 @@ where
                 }
             }
 
-            // Try multi-pass decoding with dual LLR methods (matching WSJT-X 4-pass strategy)
+            // Try multi-pass decoding with ALL 4 LLR methods (matching WSJT-X exactly)
+            // WSJT-X uses 4 separate passes with independent normalization:
+            // Pass 1: llra (nsym=1 difference), Pass 2: llrb (nsym=2), Pass 3: llrc (nsym=3), Pass 4: llrd (nsym=1 ratio)
             // Try all candidate frequencies (refined first if available, then original)
             for candidate_to_decode in &candidates_to_try {
-                for &nsym in &nsym_values {
-                    let mut llr_diff = vec![0.0f32; 174];   // Difference method (llra)
-                    let mut llr_ratio = vec![0.0f32; 174];  // Ratio method (llrd)
-                    let mut s8 = [[0.0f32; 79]; 8];
+                let mut llra = vec![0.0f32; 174];   // nsym=1 difference
+                let mut llrb = vec![0.0f32; 174];   // nsym=2 difference
+                let mut llrc = vec![0.0f32; 174];   // nsym=3 difference
+                let mut llrd = vec![0.0f32; 174];   // nsym=1 ratio
+                let mut s8 = [[0.0f32; 79]; 8];
 
-                    // Extract symbols with BOTH LLR methods in one pass
-                    let extract_ok = sync::extract_symbols_dual_llr(
-                        signal, candidate_to_decode, nsym, &mut llr_diff, &mut llr_ratio, &mut s8
-                    ).is_ok();
+                // Extract ALL 4 LLR arrays in one pass (with independent normalization)
+                let extract_ok = sync::extract_symbols_all_llr(
+                    signal, candidate_to_decode, &mut llra, &mut llrb, &mut llrc, &mut llrd, &mut s8
+                ).is_ok();
 
-                    if !extract_ok {
-                        continue;
-                    }
+                if !extract_ok {
+                    continue;
+                }
 
-                // Try both LLR methods (difference and ratio) with multiple scales
-                // This matches WSJT-X's pass 1 (llra) and pass 4 (llrd)
-                let llr_methods: [(&str, &[f32]); 2] = [
-                    ("diff", &llr_diff[..]),
-                    ("ratio", &llr_ratio[..]),
+                // Try all 4 LLR methods with multiple scales (matching WSJT-X 4-pass strategy)
+                let llr_methods: [(&str, &[f32], usize); 4] = [
+                    ("nsym1_diff", &llra[..], 1),   // Pass 1
+                    ("nsym2_diff", &llrb[..], 2),   // Pass 2
+                    ("nsym3_diff", &llrc[..], 3),   // Pass 3
+                    ("nsym1_ratio", &llrd[..], 1),  // Pass 4
                 ];
 
-                for &(method_name, llr) in &llr_methods {
+                for &(method_name, llr, nsym) in &llr_methods {
                     for &scale in &scaling_factors {
                     let mut scaled_llr: Vec<f32> = llr.to_vec();
                     for v in scaled_llr.iter_mut() {
                         *v *= scale;
                     }
 
-                    // eprintln!("  LDPC_ATTEMPT: freq={:.1} Hz, dt={:.2}s, nsym={}, scale={:.1}, rank={}",
-                    //          refined.frequency, refined.time_offset, nsym, scale, candidate_idx);
+                    // eprintln!("  LDPC_ATTEMPT: freq={:.1} Hz, dt={:.2}s, method={}, scale={:.1}, rank={}",
+                    //          refined.frequency, refined.time_offset, method_name, scale, candidate_idx);
 
                     // Progressive decoding strategy (matching WSJT-X):
                     // 1. Try BP-only first (maxosd=-1) - fast, minimal false positives
@@ -291,8 +295,7 @@ where
                         }
                     }
                 }  // End for &scale loop
-            }  // End for &(method_name, llr) loop
-            }  // End for &nsym loop
+            }  // End for &(method_name, llr, nsym) loop (4 LLR methods)
             }  // End for candidate_to_decode loop
 
             None

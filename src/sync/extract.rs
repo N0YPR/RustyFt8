@@ -930,6 +930,100 @@ pub fn extract_symbols_dual_llr(
     extract_symbols_impl(signal, candidate, nsym, llr_diff, Some(llr_ratio), Some(s8_out))
 }
 
+/// Extract symbols with ALL FOUR LLR methods (matching WSJT-X ft8b.f90)
+///
+/// WSJT-X generates 4 separate LLR arrays and normalizes each independently:
+/// - llra (bmeta): nsym=1, difference method
+/// - llrb (bmetb): nsym=2, difference method
+/// - llrc (bmetc): nsym=3, difference method
+/// - llrd (bmetd): nsym=1, ratio method
+///
+/// Each array is normalized independently before scaling by 2.83 (WSJT-X scalefac).
+/// The decoder then tries all 4 methods with multiple scaling factors.
+///
+/// # Arguments
+/// * `signal` - Input signal (15 seconds at 12 kHz)
+/// * `candidate` - Refined candidate from fine_sync
+/// * `llra` - Output: nsym=1 difference LLR (174 values)
+/// * `llrb` - Output: nsym=2 difference LLR (174 values)
+/// * `llrc` - Output: nsym=3 difference LLR (174 values)
+/// * `llrd` - Output: nsym=1 ratio LLR (174 values)
+/// * `s8_out` - Output: Symbol powers for SNR calculation (8×79)
+///
+/// # Returns
+/// Ok(()) on success, Err() if extraction fails
+pub fn extract_symbols_all_llr(
+    signal: &[f32],
+    candidate: &Candidate,
+    llra: &mut [f32],  // nsym=1 difference
+    llrb: &mut [f32],  // nsym=2 difference
+    llrc: &mut [f32],  // nsym=3 difference
+    llrd: &mut [f32],  // nsym=1 ratio
+    s8_out: &mut [[f32; 79]; 8],
+) -> Result<(), String> {
+    // Extract nsym=1 with both difference and ratio methods
+    extract_symbols_impl(signal, candidate, 1, llra, Some(llrd), Some(s8_out))?;
+
+    // Extract nsym=2 (difference only, ratio not used by WSJT-X for nsym>1)
+    extract_symbols_impl(signal, candidate, 2, llrb, None, None)?;
+
+    // Extract nsym=3 (difference only, ratio not used by WSJT-X for nsym>1)
+    extract_symbols_impl(signal, candidate, 3, llrc, None, None)?;
+
+    // Normalize each LLR array independently (matching WSJT-X normalizebmet)
+    normalize_llr(llra);
+    normalize_llr(llrb);
+    normalize_llr(llrc);
+    normalize_llr(llrd);
+
+    // Apply WSJT-X scale factor
+    const SCALEFAC: f32 = 2.83;
+    for i in 0..174 {
+        llra[i] *= SCALEFAC;
+        llrb[i] *= SCALEFAC;
+        llrc[i] *= SCALEFAC;
+        llrd[i] *= SCALEFAC;
+    }
+
+    Ok(())
+}
+
+/// Normalize LLR array (matching WSJT-X normalizebmet subroutine)
+///
+/// WSJT-X normalizebmet divides by standard deviation WITHOUT centering.
+/// This is critical - centering changes the LLR distribution and breaks decoding!
+fn normalize_llr(llr: &mut [f32]) {
+    let n = llr.len();
+    if n == 0 {
+        return;
+    }
+
+    // Calculate mean
+    let sum: f32 = llr.iter().sum();
+    let mean = sum / n as f32;
+
+    // Calculate mean of squares
+    let sum_sq: f32 = llr.iter().map(|&x| x * x).sum();
+    let mean_sq = sum_sq / n as f32;
+
+    // Calculate variance: var = E[X^2] - E[X]^2
+    let var = mean_sq - mean * mean;
+
+    // Calculate standard deviation
+    let std = if var > 0.0 {
+        var.sqrt()
+    } else {
+        mean_sq.sqrt()
+    };
+
+    // Normalize by std (WSJT-X does NOT subtract mean!)
+    if std > 1e-6 {
+        for val in llr.iter_mut() {
+            *val /= std;
+        }
+    }
+}
+
 /// Estimate frequency offset from Costas array phase progression
 ///
 /// Measures the phase of Costas tones and calculates frequency offset
