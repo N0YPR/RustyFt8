@@ -230,13 +230,44 @@ fn find_candidates(
     let mut indices: Vec<usize> = (0..nbins).collect();
     indices.sort_by(|&a, &b| red[b].partial_cmp(&red[a]).unwrap_or(core::cmp::Ordering::Equal));
 
+    // Debug: Check bin 835 (2609.4 Hz) which WSJT-X finds but we might miss
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        let target_bin = 835;
+        if target_bin >= ia && target_bin <= ib {
+            let bin_idx = target_bin - ia;
+            debug!(
+                bin = target_bin,
+                freq = %(target_bin as f32 * df),
+                red_narrow = %red[bin_idx],
+                jpeak_narrow = %jpeak[bin_idx],
+                time_narrow = %((jpeak[bin_idx] as f32 - 0.5) * tstep),
+                red2_wide = %red2[bin_idx],
+                jpeak2_wide = %jpeak2[bin_idx],
+                time_wide = %((jpeak2[bin_idx] as f32 - 0.5) * tstep),
+                "bin 835 (2609.4 Hz) analysis"
+            );
+        }
+    }
+
     // STEP 4: Generate candidates from sorted bins (WSJT-X sync8.f90 lines 117-134)
     let mut candidates = Vec::new();
 
-    for &bin_idx in &indices {
-        if candidates.len() >= max_candidates * 2 {
-            break; // Pre-limit before deduplication
+    // Debug: Find position of bin 835 in sorted order
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        if let Some(pos) = indices.iter().position(|&idx| ia + idx == 835) {
+            debug!(
+                bin_835_position = pos,
+                bin_835_red = %red[835 - ia],
+                total_bins = indices.len(),
+                "bin 835 position in sorted order (0=strongest)"
+            );
         }
+    }
+
+    for &bin_idx in &indices {
+        // WSJT-X uses MAXPRECAND=1000 as the loop limit (sync8.f90 line 117, 119, 127)
+        // Don't break early - let the 1000 candidate limit below handle it
+        // Removing the premature break at max_candidates*2 fixes missing candidates like bin 835
 
         let i = ia + bin_idx;  // Actual frequency bin
         let freq = i as f32 * df;  // NO INTERPOLATION - just bin center
@@ -257,13 +288,35 @@ fn find_candidates(
         });
 
         // Add second candidate from wide search if different peak
+        if tracing::enabled!(tracing::Level::DEBUG) && i == 835 {
+            debug!(
+                jpeak_narrow = %jpeak[bin_idx],
+                jpeak2_wide = %jpeak2[bin_idx],
+                equal = %(jpeak2[bin_idx] == jpeak[bin_idx]),
+                "bin 835: checking if wide peak is different from narrow"
+            );
+        }
+
         if jpeak2[bin_idx] != jpeak[bin_idx] {
-            candidates.push(Candidate {
+            let wide_cand = Candidate {
                 frequency: freq,
                 time_offset: (jpeak2[bin_idx] as f32 - 0.5) * tstep,
                 sync_power: red2[bin_idx],
                 baseline_noise,
-            });
+            };
+
+            // Debug bin 835's wide candidate
+            if tracing::enabled!(tracing::Level::DEBUG) && i == 835 {
+                debug!(
+                    freq = %freq,
+                    time = %wide_cand.time_offset,
+                    sync = %wide_cand.sync_power,
+                    candidates_so_far = candidates.len(),
+                    "adding bin 835 wide candidate to pre-filter list"
+                );
+            }
+
+            candidates.push(wide_cand);
         }
 
         // Stop after we have enough candidates (WSJT-X uses MAXPRECAND=1000)
@@ -273,46 +326,82 @@ fn find_candidates(
     }
 
     // Remove duplicates (within 4 Hz and 40 ms)
+    // CRITICAL: Match WSJT-X behavior - keep STRONGEST candidate, not first
+    // WSJT-X sync8.f90 lines 137-144: compares sync powers and zeros out weaker duplicate
     let mut filtered: Vec<Candidate> = Vec::new();
     for cand in &candidates {
-        let mut is_dupe = false;
-        let mut dupe_of: Option<f32> = None;
-        for existing in &filtered {
+        // Debug bin 835
+        let is_bin_835 = (cand.frequency - 2609.4).abs() < 1.0;
+
+        // Apply sync_min filter first
+        if cand.sync_power < sync_min {
+            if tracing::enabled!(tracing::Level::DEBUG) && is_bin_835 {
+                debug!(
+                    freq = %cand.frequency,
+                    sync = %cand.sync_power,
+                    sync_min = %sync_min,
+                    "bin 835 candidate filtered by sync_min"
+                );
+            }
+            continue;
+        }
+
+        // Check if this is a duplicate of an existing candidate
+        let mut dupe_idx: Option<usize> = None;
+        for (idx, existing) in filtered.iter().enumerate() {
             let fdiff = (cand.frequency - existing.frequency).abs();
             let tdiff = (cand.time_offset - existing.time_offset).abs();
             if fdiff < 4.0 && tdiff < 0.04 {
-                is_dupe = true;
-                dupe_of = Some(existing.frequency);
+                dupe_idx = Some(idx);
                 break;
             }
         }
 
-        // Debug: track 2733 Hz candidates through filtering (use RUST_LOG=trace)
-        if tracing::enabled!(tracing::Level::TRACE) {
-            let is_2733 = (cand.frequency - 2733.0).abs() < 5.0;
-            if is_2733 {
-                if is_dupe {
-                    trace!(
-                        freq = %cand.frequency,
-                        sync = %cand.sync_power,
-                        time = %cand.time_offset,
-                        dupe_of = %dupe_of.unwrap(),
-                        "2733 Hz candidate FILTERED as duplicate"
-                    );
+        match dupe_idx {
+            Some(idx) => {
+                // Found a duplicate - keep the STRONGER one (matching WSJT-X)
+                let existing = &filtered[idx];
+                if cand.sync_power > existing.sync_power {
+                    // New candidate is stronger - replace the existing one
+                    if tracing::enabled!(tracing::Level::DEBUG) && is_bin_835 {
+                        debug!(
+                            new_freq = %cand.frequency,
+                            new_sync = %cand.sync_power,
+                            new_time = %cand.time_offset,
+                            old_freq = %existing.frequency,
+                            old_sync = %existing.sync_power,
+                            old_time = %existing.time_offset,
+                            "bin 835: replacing weaker duplicate with stronger candidate"
+                        );
+                    }
+                    filtered[idx] = *cand;
                 } else {
-                    trace!(
-                        freq = %cand.frequency,
-                        sync = %cand.sync_power,
-                        time = %cand.time_offset,
-                        "2733 Hz candidate PASSED"
-                    );
+                    // Existing candidate is stronger - skip the new one
+                    if tracing::enabled!(tracing::Level::DEBUG) && is_bin_835 {
+                        debug!(
+                            new_freq = %cand.frequency,
+                            new_sync = %cand.sync_power,
+                            new_time = %cand.time_offset,
+                            old_freq = %existing.frequency,
+                            old_sync = %existing.sync_power,
+                            old_time = %existing.time_offset,
+                            "bin 835: keeping stronger duplicate, skipping weaker candidate"
+                        );
+                    }
                 }
             }
-        }
-
-        // Apply sync_min filter here (after creating candidates)
-        if !is_dupe && cand.sync_power >= sync_min {
-            filtered.push(*cand);
+            None => {
+                // Not a duplicate - add to filtered list
+                if tracing::enabled!(tracing::Level::DEBUG) && is_bin_835 {
+                    debug!(
+                        freq = %cand.frequency,
+                        sync = %cand.sync_power,
+                        time = %cand.time_offset,
+                        "bin 835: candidate PASSED (not a duplicate)"
+                    );
+                }
+                filtered.push(*cand);
+            }
         }
     }
 

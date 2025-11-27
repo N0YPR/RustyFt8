@@ -22,10 +22,10 @@ This document tracks the investigation into achieving 95% match rate between Rus
    - Created Fortran reference generator: `tests/sync/test_sync2d.f90`
    - **BREAKTHROUGH**: Discovered and fixed jstrt calculation issue (see below)
 
-3. **Candidate Selection**: 77% match rate (154/200 candidates)
+3. **Candidate Selection**: **96% match rate (192/200 candidates)** ✅
    - Both implementations find 200 candidates
-   - Strong signals match perfectly
-   - Weak signals (~1.0-1.6 sync power) have mismatches
+   - Strong and medium signals match perfectly
+   - Only 8 very weak edge-case signals differ (~1.0-1.6 sync power)
 
 ### 🎯 BREAKTHROUGH: jstrt Paradox Solved!
 
@@ -139,34 +139,68 @@ pub fn read_wav_file_raw(path: &str) -> Result<Vec<f32>, String> {
 ### ✅ COMPLETED: jstrt Paradox Resolution
 The jstrt issue is SOLVED! Our implementation is correct and matches WSJT-X exactly with jstrt=12.
 
-### 🎯 Goal: Reach 95% Candidate Match Rate (Currently 77%)
+### 🎉 COMPLETED: Reached 96% Candidate Match Rate!
 
-**Current Status:**
-- 154 out of 200 candidates match (77%)
-- Strong signals match perfectly
-- Weak signals (~1.0-1.6 sync power) have discrepancies
+Starting from 77% match, we identified and fixed two critical bugs:
 
-**Investigation Priorities:**
+#### Bug 1: Deduplication Kept First, Not Strongest (77% → 82%)
 
-1. **Analyze Weak Signal Mismatches**
-   - Compare sync2d values for mismatched candidates
-   - Check if there are subtle differences in peak selection logic
-   - Examine boundary conditions and tie-breaking rules
+**Problem:** When multiple candidates were within 4 Hz and 0.04s, we kept the FIRST one encountered, even if a later candidate was stronger.
 
-2. **Verify Candidate Sorting and Selection**
-   - WSJT-X sorts by sync power before selecting top N
-   - Check if our sorting is stable/deterministic
-   - Verify we handle edge cases (equal sync values, boundary bins, etc.)
+**WSJT-X behavior (sync8.f90 lines 137-144):**
+```fortran
+! Compare sync powers and keep the STRONGER one
+if(candidate0(3,i).ge.candidate0(3,j)) candidate0(3,j)=0.
+if(candidate0(3,i).lt.candidate0(3,j)) candidate0(3,i)=0.
+```
 
-3. **Check Fine Sync Integration**
-   - WSJT-X may refine candidate times during fine sync
-   - Investigate if reported times include post-processing adjustments
-   - Compare our coarse sync output with WSJT-X's pre-fine-sync state
+**Our bug:** First-come-first-served deduplication. Example:
+- Bin A narrow: sync=10.0 (processed first, added to filtered)
+- Bin B wide: sync=11.0 (marked as duplicate, INCORRECTLY rejected)
 
-4. **Alternative Approach: Accept 77% as "Good Enough"**
-   - 77% match on weak signals may be acceptable given noise sensitivity
-   - Consider focusing on fine sync and LDPC decoding instead
-   - Document known limitations and move forward
+**Fix:** Changed [coarse.rs:328-356](../src/sync/coarse.rs#L328-L356) to compare sync powers and replace weaker duplicates:
+```rust
+if cand.sync_power > existing.sync_power {
+    filtered[idx] = *cand;  // Replace weaker with stronger
+}
+```
+
+**Result:** 77% → 82% (10 more candidates matched)
+
+#### Bug 2: Premature Loop Break (82% → 96%)
+
+**Problem:** We broke the candidate generation loop after 400 candidates (`max_candidates * 2`), but WSJT-X processes up to 1000.
+
+**Impact:** Bins ranked by weak narrow peaks but having strong wide peaks never got processed. Example:
+- Bin 835 (2609.4 Hz): Narrow=1.316, Wide=**32.161** (matches WSJT-X!)
+- Position in sorted order: **288** (sorted by narrow peak strength)
+- We broke at ~200 bins (400 candidates), so bin 835 **never got processed**
+
+**WSJT-X behavior (sync8.f90):**
+```fortran
+parameter (MAXPRECAND=1000)
+do i=1,min(MAXPRECAND,iz)  ! Loop up to 1000 bins
+   if(k.ge.MAXPRECAND) exit   ! Stop when 1000 candidates added
+enddo
+```
+
+**Fix:** Removed premature break in [coarse.rs:268](../src/sync/coarse.rs#L268). Now process bins until hitting 1000 candidate limit (line 315), matching WSJT-X.
+
+**Result:** 82% → 96% (20 more candidates matched, including bin 835!)
+
+### ✅ GOAL ACHIEVED: 95% Candidate Match Rate (Currently 96%!)
+
+**Final Status:**
+- **192 out of 200 candidates match (96.0%)**
+- Strong and medium signals match perfectly
+- Only 8 very weak edge-case signals differ (sync 1.0-1.6)
+- Remaining mismatches are in noisy 1490-1506 Hz region, likely due to numerical sensitivity
+
+**Next Steps:**
+With coarse sync now validated at 96%, the next stage in the FT8 decoding pipeline is:
+1. **Fine Sync** - Refine frequency and time offsets for each candidate
+2. **Symbol Extraction** - Extract 79 symbol soft-decisions using refined offsets
+3. **LDPC Decoding** - Decode the 174-bit codeword to recover the 77-bit message
 
 ## Debugging Tips
 

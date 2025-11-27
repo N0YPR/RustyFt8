@@ -8,3 +8,6 @@ mod test_spectra;
 
 #[path = "sync/test_sync2d.rs"]
 mod test_sync2d;
+
+#[path = "sync/diagnose_bin.rs"]
+mod diagnose_bin;

@@ -18,7 +18,8 @@ pub fn init_test_tracing() {
                 .with_target(true)
                 .with_line_number(true)
                 .with_test_writer()
-                .init();
+                .try_init()
+                .ok();  // Ignore error if already initialized
         }
     });
 
