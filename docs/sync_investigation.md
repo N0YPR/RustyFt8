@@ -197,10 +197,37 @@ enddo
 - Remaining mismatches are in noisy 1490-1506 Hz region, likely due to numerical sensitivity
 
 **Next Steps:**
-With coarse sync now validated at 96%, the next stage in the FT8 decoding pipeline is:
-1. **Fine Sync** - Refine frequency and time offsets for each candidate
-2. **Symbol Extraction** - Extract 79 symbol soft-decisions using refined offsets
-3. **LDPC Decoding** - Decode the 174-bit codeword to recover the 77-bit message
+With coarse sync now validated at 96%, proceed to fine sync validation.
+
+### ✅ COMPLETED: Fine Sync Validation (99% Time Match, 87% Frequency Match)
+
+**Test Date:** 2025-11-27
+
+See [fine_sync_validation.md](fine_sync_validation.md) for detailed analysis.
+
+**Critical Bug Found & Fixed:**
+- **Problem**: Systematic 0.5s time offset affecting ALL candidates (0% match rate)
+- **Root Cause**: Converting samples back to seconds was subtracting 0.5s, but WSJT-X outputs absolute time from t=0
+- **Fix**: Remove `-0.5` from time conversion in [src/sync/fine.rs:275](../src/sync/fine.rs#L275)
+- **Result**: Time match improved from 0% → **99%** ✅
+
+**Final Results:**
+- **Time Offset**: 99.0% within 50ms (mean: 0.010s, median: 0.005s) ✅
+- **Frequency**: 87.0% within 1.0 Hz (mean: 0.430 Hz, median: 0.112 Hz) ⚠️
+
+The remaining 13% frequency mismatches are primarily weak signals with low SNR where frequency estimation is inherently less reliable. Median error of 0.112 Hz is excellent.
+
+**Test Infrastructure:**
+- Created `tests/sync/test_fine_sync.f90` - Fortran reference generator
+- Created `tests/sync/fine_sync_ref.csv` - WSJT-X reference data (200 candidates)
+- Created `tests/sync/test_fine_sync.rs` - Rust validation test
+- All candidates validated against WSJT-X ft8b.f90
+
+**Next Steps:**
+With fine sync validated, the next stages in the FT8 decoding pipeline are:
+1. **Symbol Extraction** - Extract 79 symbol soft-decisions using refined frequency/time offsets
+2. **LDPC Decoding** - Decode the 174-bit codeword to recover the 77-bit message
+3. **Message Unpacking** - Decode the 77-bit payload to human-readable text
 
 ## Debugging Tips
 
@@ -237,13 +264,24 @@ gfortran -o tests/sync/test_sync2d tests/sync/test_sync2d.f90 \
 gfortran tests/sync/test_sync8.f90 \
   wsjtx/wsjtx-2.7.0/build/wsjtx-prefix/src/wsjtx-build/libwsjt_fort.a \
   -o tests/sync/test_sync8 -lfftw3f -lm -O2
+
+# test_fine_sync
+gfortran -c tests/sync/test_fine_sync.f90 -o tests/sync/test_fine_sync.o \
+  -I wsjtx/wsjtx-2.7.0/src/wsjtx/lib/ft8
+gfortran tests/sync/test_fine_sync.o \
+  wsjtx/wsjtx-2.7.0/build/wsjtx-prefix/src/wsjtx-build/libwsjt_fort.a \
+  wsjtx/wsjtx-2.7.0/build/wsjtx-prefix/src/wsjtx-build/libwsjt_cxx.a \
+  wsjtx/wsjtx-2.7.0/build/wsjtx-prefix/src/wsjtx-build/libqcp.a \
+  -o tests/sync/test_fine_sync \
+  -lfftw3f -lm -lstdc++ -O2
 ```
 
 ## References
 
-- WSJT-X sync8.f90: `wsjtx/wsjtx-2.7.0/src/wsjtx/lib/ft8/sync8.f90`
+- WSJT-X sync8.f90: `wsjtx/wsjtx-2.7.0/src/wsjtx/lib/ft8/sync8.f90` (coarse sync)
+- WSJT-X ft8b.f90: `wsjtx/wsjtx-2.7.0/src/wsjtx/lib/ft8/ft8b.f90` (fine sync & decoder)
 - FT8 parameters: `wsjtx/wsjtx-2.7.0/src/wsjtx/lib/ft8/ft8_params.f90`
-- RustyFt8 sync: `src/sync/spectra.rs`, `src/sync/coarse.rs`
+- RustyFt8 sync: `src/sync/spectra.rs`, `src/sync/coarse.rs`, `src/sync/fine.rs`
 
 ## Contributors
 
