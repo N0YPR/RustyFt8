@@ -69,9 +69,9 @@ impl Default for DecoderConfig {
             max_candidates: 1000, // Match WSJT-X MAXPRECAND (dual search generates more candidates)
             decode_top_n: 100, // Dual search generates ~2x candidates, need higher limit
             min_snr_db: -18,  // Allow decoding down to -18 dB (WSJT-X typical minimum)
-            enable_ap: false,  // AP disabled by default (requires callsign configuration)
-            mycall: None,
-            hiscall: None,
+            enable_ap: true,  // AP enabled by default (Type 1 CQ pattern works without callsigns)
+            mycall: None,     // Optional: configure for additional AP types (2-6)
+            hiscall: None,    // Optional: configure for additional AP types (2-6)
         }
     }
 }
