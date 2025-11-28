@@ -89,7 +89,7 @@ fn test_wsjt_x_exact_timing() {
                         ];
 
                         for (name, llr) in &methods {
-                            if let Some((bits, iters)) = ldpc::decode_hybrid(llr, ldpc::DecodeDepth::BpOnly) {
+                            if let Some((bits, iters, _nharderrors)) = ldpc::decode_hybrid(llr, ldpc::DecodeDepth::BpOnly) {
                                 let info_bits: BitVec<u8, Msb0> = bits.iter().take(77).collect();
                                 if let Ok(msg) = rustyft8::decode(&info_bits, None) {
                                     best_decoded = Some((name.to_string(), msg, iters));

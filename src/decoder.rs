@@ -52,6 +52,12 @@ pub struct DecoderConfig {
     pub decode_top_n: usize,
     /// Minimum SNR threshold in dB (rejects weak false positives)
     pub min_snr_db: i32,
+    /// Enable AP (a priori) decoding for weak signals
+    pub enable_ap: bool,
+    /// User's callsign for AP decoding (e.g., "K1BZM")
+    pub mycall: Option<String>,
+    /// DX station's callsign for AP decoding (e.g., "EA3GP")
+    pub hiscall: Option<String>,
 }
 
 impl Default for DecoderConfig {
@@ -63,6 +69,9 @@ impl Default for DecoderConfig {
             max_candidates: 1000, // Match WSJT-X MAXPRECAND (dual search generates more candidates)
             decode_top_n: 100, // Dual search generates ~2x candidates, need higher limit
             min_snr_db: -18,  // Allow decoding down to -18 dB (WSJT-X typical minimum)
+            enable_ap: false,  // AP disabled by default (requires callsign configuration)
+            mycall: None,
+            hiscall: None,
         }
     }
 }
@@ -320,6 +329,146 @@ where
                     }
                 }  // End for &scale loop
             }  // End for &(method_name, llr, nsym) loop (4 LLR methods)
+
+                // ===== AP (A Priori) Decoding Passes =====
+                // If normal decoding failed and AP is enabled, try AP-assisted decoding
+                // This extends decodable BER from ~10% (pure LDPC) to ~15-20% (AP + LDPC)
+                if config.enable_ap {
+                    use crate::ap::{ApDecoder, ApType};
+
+                    // Create AP decoder from configuration
+                    let ap_decoder = ApDecoder::new(
+                        config.mycall.clone(),
+                        config.hiscall.clone(),
+                    );
+
+                    // Try each AP type (1-6) in order of likelihood
+                    let ap_types = [
+                        ApType::CqAny,              // Type 1: CQ ??? ???
+                        ApType::MyCallAny,          // Type 2: MYCALL ??? ???
+                        ApType::MyCallDxCallAny,    // Type 3: MYCALL DXCALL ???
+                        ApType::MyCallDxCallRrr,    // Type 4: MYCALL DXCALL RRR
+                        ApType::MyCallDxCall73,     // Type 5: MYCALL DXCALL 73
+                        ApType::MyCallDxCallRr73,   // Type 6: MYCALL DXCALL RR73
+                    ];
+
+                    for ap_type in &ap_types {
+                        // Compute LLR magnitude for AP hints (max absolute value * 1.01)
+                        let llr_magnitude = llra.iter()
+                            .map(|x| x.abs())
+                            .max_by(|a, b| a.partial_cmp(b).unwrap())
+                            .unwrap_or(10.0) * 1.01;
+
+                        // Generate AP hints for this type
+                        let ap_hints = match ap_decoder.generate_ap_hints(*ap_type, llr_magnitude) {
+                            Some(hints) => hints,
+                            None => continue, // Skip if we can't generate hints for this type
+                        };
+
+                        let (apmask, llr_hints) = ap_hints;
+
+                        // Try AP decoding with each of the 4 LLR methods
+                        for &(method_name, base_llr, nsym) in &llr_methods {
+                            // Apply AP hints to the LLRs
+                            let mut llr_with_ap = base_llr.to_vec();
+                            for i in 0..174 {
+                                if apmask[i] {
+                                    llr_with_ap[i] = llr_hints[i];
+                                }
+                            }
+
+                            // Try decoding with AP mask
+                            // Use BpOnly first, then BpOsdUncoupled if that fails
+                            let decode_result = ldpc::decode_hybrid_with_ap(
+                                &llr_with_ap,
+                                Some(&apmask),
+                                ldpc::DecodeDepth::BpOnly
+                            ).or_else(|| {
+                                ldpc::decode_hybrid_with_ap(
+                                    &llr_with_ap,
+                                    Some(&apmask),
+                                    ldpc::DecodeDepth::BpOsdUncoupled
+                                )
+                            });
+
+                            if let Some((decoded_bits, iters, nharderrors)) = decode_result {
+                                // Same rejection filters as normal decoding
+                                if nharderrors > 36 {
+                                    continue;
+                                }
+
+                                let mut re_encoded_codeword = bitvec![u8, Msb0; 0; 174];
+                                ldpc::encode(&decoded_bits, &mut re_encoded_codeword);
+                                let mut tones = [0u8; 79];
+                                if symbol::map(&re_encoded_codeword, &mut tones).is_err() {
+                                    continue;
+                                }
+
+                                if tones.iter().all(|&t| t == 0) {
+                                    continue;
+                                }
+
+                                let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
+
+                                if let Ok(message) = crate::decode(&info_bits, None) {
+                                    if !message.is_empty() {
+                                        let tokens: Vec<&str> = message.split_whitespace().collect();
+                                        let is_valid_message = if tokens.len() >= 2 {
+                                            crate::message::is_valid_callsign(tokens[0]) &&
+                                            crate::message::is_valid_callsign(tokens[1])
+                                        } else {
+                                            tokens.first().map_or(false, |t| crate::message::is_valid_callsign(t))
+                                        };
+
+                                        if !is_valid_message {
+                                            continue;
+                                        }
+
+                                        let snr_db = if s8[0][0] != 0.0 {
+                                            sync::calculate_snr(&s8, &tones, Some(candidate_to_decode.baseline_noise))
+                                        } else {
+                                            if candidate_to_decode.sync_power > 0.001 {
+                                                let snr = (candidate_to_decode.sync_power.log10() * 10.0 - 27.0) as i32;
+                                                snr.max(-24).min(30)
+                                            } else {
+                                                -24
+                                            }
+                                        };
+
+                                        if nsync <= 10 && snr_db < -24 {
+                                            continue;
+                                        }
+
+                                        if snr_db < min_snr_threshold {
+                                            continue;
+                                        }
+
+                                        // AP decode succeeded!
+                                        eprintln!("  AP: Decoded with AP type {:?}, method={}, freq={:.1} Hz",
+                                                 ap_type, method_name, candidate_to_decode.frequency);
+
+                                        return Some(DecodeResult {
+                                            candidate_idx,
+                                            message: DecodedMessage {
+                                                message,
+                                                frequency: candidate_to_decode.frequency,
+                                                time_offset: candidate_to_decode.time_offset,
+                                                sync_power: candidate_to_decode.sync_power,
+                                                snr_db,
+                                                ldpc_iterations: iters,
+                                                llr_scale: 1.0, // AP uses unscaled LLRs
+                                                nsym,
+                                                tones,
+                                            },
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // ===== End AP Passes =====
+
             }  // End for candidate_to_decode loop
 
             None

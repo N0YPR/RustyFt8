@@ -20,7 +20,7 @@ use bitvec::prelude::*;
 use constants::{NM, NRW, M};
 
 pub use encode::encode;
-pub use decode::{decode, decode_with_snapshots};
+pub use decode::{decode, decode_with_snapshots, decode_with_ap};
 pub use osd::osd_decode;
 
 /// Decoding depth strategy (matches WSJT-X ndepth/maxosd settings)
@@ -94,22 +94,45 @@ fn compute_nharderrors(llr: &[f32]) -> usize {
 /// * `Some((message91, iterations, nharderrors))` - Decoded message, BP iteration count, and initial hard error count
 /// * `None` - If all decode attempts failed
 pub fn decode_hybrid(llr: &[f32], depth: DecodeDepth) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
+    decode_hybrid_with_ap(llr, None, depth)
+}
+
+/// Hybrid BP/OSD decoder with optional AP (a priori) mask
+///
+/// Same as `decode_hybrid` but accepts an AP mask for forced bit hints.
+/// If `apmask` is provided, bits marked as `true` in the mask will not participate
+/// in BP message passing - they remain fixed at their LLR hint values.
+///
+/// # Arguments
+/// * `llr` - Log-Likelihood Ratios for 174 bits (with AP hints already applied)
+/// * `apmask` - Optional boolean mask marking which bits are AP-forced
+/// * `depth` - Decoding depth strategy
+///
+/// # Returns
+/// * `Some((message91, iterations, nharderrors))` - Decoded message, BP iteration count, and initial hard error count
+/// * `None` - If all decode attempts failed
+pub fn decode_hybrid_with_ap(
+    llr: &[f32],
+    apmask: Option<&[bool]>,
+    depth: DecodeDepth
+) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
     let max_bp_iters = 50; // Increased from 30 to give BP more chances to converge
     let osd_order = 4; // Increased from 2 to handle signals with more bit errors
 
     match depth {
         DecodeDepth::BpOnly => {
             // BP only, no OSD fallback (fastest, fewest false positives)
-            decode(llr, max_bp_iters)
+            decode_with_ap(llr, apmask, max_bp_iters)
         }
 
         DecodeDepth::BpOsdUncoupled => {
             // Try BP first (no snapshots needed)
-            if let Some(result) = decode(llr, max_bp_iters) {
+            if let Some(result) = decode_with_ap(llr, apmask, max_bp_iters) {
                 return Some(result);
             }
 
             // BP failed, try OSD with channel LLRs only
+            // Note: OSD doesn't use AP mask, it works on raw LLRs
             if let Some(decoded) = osd_decode(llr, osd_order) {
                 // OSD succeeded - compute nharderrors from channel LLRs
                 let nharderrors = compute_nharderrors(llr);
@@ -120,7 +143,24 @@ pub fn decode_hybrid(llr: &[f32], depth: DecodeDepth) -> Option<(BitVec<u8, Msb0
         }
 
         DecodeDepth::BpOsdHybrid => {
-            // Full hybrid strategy with BP snapshots
+            // If AP mask is provided, use simpler strategy (no snapshots yet)
+            // TODO: Add AP mask support to decode_with_snapshots for full hybrid strategy
+            if apmask.is_some() {
+                // Try BP with AP first
+                if let Some(result) = decode_with_ap(llr, apmask, max_bp_iters) {
+                    return Some(result);
+                }
+
+                // BP+AP failed, try OSD with the AP-hinted LLRs
+                if let Some(decoded) = osd_decode(llr, osd_order) {
+                    let nharderrors = compute_nharderrors(llr);
+                    return Some((decoded, 0, nharderrors));
+                }
+
+                return None;
+            }
+
+            // Full hybrid strategy with BP snapshots (no AP)
             let save_at_iters = [1, 2, 3];
 
             // Try BP first with snapshot saving

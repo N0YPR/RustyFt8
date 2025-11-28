@@ -126,7 +126,7 @@ fn compare_working_vs_failing() {
         // Try LDPC decode
         let decode_result = ldpc::decode_hybrid(&llra, ldpc::DecodeDepth::BpOnly);
         match decode_result {
-            Some((bits, iters)) => {
+            Some((bits, iters, _nharderrors)) => {
                 let info_bits: BitVec<u8, Msb0> = bits.iter().take(77).collect();
                 match rustyft8::decode(&info_bits, None) {
                     Ok(decoded_msg) => {

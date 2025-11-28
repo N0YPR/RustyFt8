@@ -33,13 +33,32 @@ fn atanh_safe(x: f32) -> f32 {
 /// refine bit estimates by passing messages between bit nodes and check nodes.
 /// Decoding succeeds when all parity checks are satisfied AND the CRC is valid.
 pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
+    decode_with_ap(llr, None, max_iterations)
+}
+
+/// LDPC BP decoder with optional AP (a priori) mask
+///
+/// If `apmask` is provided, bits marked as `true` in the mask will not participate
+/// in BP message passing - they remain fixed at their LLR hint values.
+pub fn decode_with_ap(
+    llr: &[f32],
+    apmask: Option<&[bool]>,
+    max_iterations: usize
+) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
     if llr.len() != N {
         return None;
     }
 
+    // Validate AP mask if provided
+    if let Some(mask) = apmask {
+        if mask.len() != N {
+            return None;
+        }
+    }
+
     // Compute initial LLR quality metrics for debugging
-    let llr_mean = llr.iter().map(|x| x.abs()).sum::<f32>() / llr.len() as f32;
-    let llr_max = llr.iter().map(|x| x.abs()).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
+    let _llr_mean = llr.iter().map(|x| x.abs()).sum::<f32>() / llr.len() as f32;
+    let _llr_max = llr.iter().map(|x| x.abs()).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
 
     // Message arrays
     let mut toc = vec![vec![0.0f32; MAX_NRW]; M]; // Messages to checks
@@ -60,8 +79,20 @@ pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, u
     // Iterative decoding
     for iter in 0..=max_iterations {
         // Update bit log-likelihood ratios
+        // CRITICAL: AP-masked bits don't get updated - they stay fixed!
         for i in 0..N {
-            zn[i] = llr[i] + tov[i].iter().sum::<f32>();
+            if let Some(mask) = apmask {
+                if mask[i] {
+                    // AP bit: frozen at hint value (no BP update)
+                    zn[i] = llr[i];
+                } else {
+                    // Normal bit: regular BP update
+                    zn[i] = llr[i] + tov[i].iter().sum::<f32>();
+                }
+            } else {
+                // No AP mask: all bits get normal BP update
+                zn[i] = llr[i] + tov[i].iter().sum::<f32>();
+            }
         }
 
         // Make hard decisions
