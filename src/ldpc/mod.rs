@@ -17,6 +17,7 @@ mod decode;
 mod osd;
 
 use bitvec::prelude::*;
+use constants::{NM, NRW, M};
 
 pub use encode::encode;
 pub use decode::{decode, decode_with_snapshots};
@@ -31,6 +32,39 @@ pub enum DecodeDepth {
     BpOsdUncoupled,
     /// BP + OSD with BP snapshots (maxosd=2): Most aggressive, for strong candidates
     BpOsdHybrid,
+}
+
+/// Compute initial hard errors from channel LLRs (before any decoding)
+///
+/// This is used for WSJT-X's nharderrors metric which filters false positives.
+/// Makes hard decisions directly from LLRs and counts parity check violations.
+fn compute_nharderrors(llr: &[f32]) -> usize {
+    if llr.len() != 174 {
+        return 83; // Return maximum if invalid
+    }
+
+    // Make hard decisions from LLRs
+    let mut cw = BitVec::<u8, Msb0>::repeat(false, 174);
+    for i in 0..174 {
+        cw.set(i, llr[i] > 0.0);
+    }
+
+    // Count parity check violations
+    let mut ncheck = 0;
+    for i in 0..M {
+        let mut parity = 0u8;
+        for j in 0..NRW[i] {
+            let bit_idx = NM[i][j];
+            if cw[bit_idx] {
+                parity ^= 1;
+            }
+        }
+        if parity != 0 {
+            ncheck += 1;
+        }
+    }
+
+    ncheck
 }
 
 /// Hybrid BP/OSD decoder matching WSJT-X's strategy
@@ -57,9 +91,9 @@ pub enum DecodeDepth {
 /// * `depth` - Decoding depth strategy
 ///
 /// # Returns
-/// * `Some((message91, iterations))` - Decoded message and iteration count
+/// * `Some((message91, iterations, nharderrors))` - Decoded message, BP iteration count, and initial hard error count
 /// * `None` - If all decode attempts failed
-pub fn decode_hybrid(llr: &[f32], depth: DecodeDepth) -> Option<(BitVec<u8, Msb0>, usize)> {
+pub fn decode_hybrid(llr: &[f32], depth: DecodeDepth) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
     let max_bp_iters = 50; // Increased from 30 to give BP more chances to converge
     let osd_order = 4; // Increased from 2 to handle signals with more bit errors
 
@@ -77,7 +111,9 @@ pub fn decode_hybrid(llr: &[f32], depth: DecodeDepth) -> Option<(BitVec<u8, Msb0
 
             // BP failed, try OSD with channel LLRs only
             if let Some(decoded) = osd_decode(llr, osd_order) {
-                return Some((decoded, 0)); // Return 0 to indicate OSD decode
+                // OSD succeeded - compute nharderrors from channel LLRs
+                let nharderrors = compute_nharderrors(llr);
+                return Some((decoded, 0, nharderrors)); // iters=0 indicates OSD decode
             }
 
             None
@@ -89,24 +125,27 @@ pub fn decode_hybrid(llr: &[f32], depth: DecodeDepth) -> Option<(BitVec<u8, Msb0
 
             // Try BP first with snapshot saving
             match decode_with_snapshots(llr, max_bp_iters, &save_at_iters) {
-                Ok((decoded, iters, _snapshots)) => {
+                Ok((decoded, iters, nharderrors, _snapshots)) => {
                     // BP converged!
-                    return Some((decoded, iters));
+                    return Some((decoded, iters, nharderrors));
                 }
                 Err(snapshots) => {
-                    // BP failed, try OSD with each saved snapshot
+                    // BP failed, compute nharderrors once from channel LLRs
+                    let nharderrors = compute_nharderrors(llr);
+
+                    // Try OSD with each saved snapshot
                     for (idx, snapshot_llr) in snapshots.iter().enumerate() {
                         if let Some(decoded) = osd_decode(snapshot_llr, osd_order) {
                             eprintln!("  OSD succeeded with iteration {} LLRs (order {})",
                                       save_at_iters[idx], osd_order);
-                            return Some((decoded, 0));
+                            return Some((decoded, 0, nharderrors));
                         }
                     }
 
                     // All snapshot attempts failed, fall back to channel LLRs
                     if let Some(decoded) = osd_decode(llr, osd_order) {
                         eprintln!("  OSD succeeded with channel LLRs (order {})", osd_order);
-                        return Some((decoded, 0));
+                        return Some((decoded, 0, nharderrors));
                     }
                 }
             }

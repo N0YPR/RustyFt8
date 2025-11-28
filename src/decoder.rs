@@ -159,12 +159,17 @@ where
                 let mut s8 = [[0.0f32; 79]; 8];
 
                 // Extract ALL 4 LLR arrays in one pass (with independent normalization)
-                let extract_ok = sync::extract_symbols_all_llr(
+                let nsync = match sync::extract_symbols_all_llr(
                     signal, candidate_to_decode, &mut llra, &mut llrb, &mut llrc, &mut llrd, &mut s8
-                ).is_ok();
+                ) {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
 
-                if !extract_ok {
-                    continue;
+                // WSJT-X rejection filter #1: nsync must be > 6 (at least 7/21 Costas tones correct)
+                // This filters out candidates where sync quality is too low
+                if nsync <= 6 {
+                    continue;  // Reject weak sync candidates
                 }
 
                 // Try all 4 LLR methods with multiple scales (matching WSJT-X 4-pass strategy)
@@ -202,7 +207,13 @@ where
                             }
                         });
 
-                    if let Some((decoded_bits, iters)) = decode_result {
+                    if let Some((decoded_bits, iters, nharderrors)) = decode_result {
+                        // WSJT-X rejection filter #2: nharderrors must be <= 36
+                        // This filters out OSD false positives from extremely noisy candidates
+                        if nharderrors > 36 {
+                            continue;  // Reject candidates with too many initial hard errors
+                        }
+
                         // Re-encode the corrected message to get tones for signal subtraction
                         // (following WSJT-X: use LDPC-corrected tones, not original noisy demodulation)
                         let mut re_encoded_codeword = bitvec![u8, Msb0; 0; 174];
@@ -210,6 +221,12 @@ where
                         let mut tones = [0u8; 79];
                         if symbol::map(&re_encoded_codeword, &mut tones).is_err() {
                             continue; // Skip if tone mapping fails
+                        }
+
+                        // WSJT-X rejection filter #3: all-zero codeword check
+                        // OSD can sometimes produce all-zero codewords from noise
+                        if tones.iter().all(|&t| t == 0) {
+                            continue;  // Reject all-zero codewords
                         }
 
                         let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
@@ -258,6 +275,13 @@ where
                                         -24
                                     }
                                 };
+
+                                // WSJT-X rejection filter #4: Combined sync + SNR check
+                                // If sync quality is weak (nsync ≤ 10) AND SNR is very low (< -24 dB),
+                                // this is likely a false positive (WSJT-X ft8b.f90 line 456-459)
+                                if nsync <= 10 && snr_db < -24 {
+                                    continue;  // Reject weak sync + very low SNR
+                                }
 
                                 // Filter out weak decodes that are likely false positives
                                 if snr_db < min_snr_threshold {

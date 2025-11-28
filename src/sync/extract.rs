@@ -107,13 +107,13 @@ fn apply_phase_correction(cd: &mut [(f32, f32)], freq_offset_hz: f32, sample_rat
 /// * `llr` - Output buffer for 174 log-likelihood ratios
 ///
 /// # Returns
-/// Ok(()) on success, Err() if extraction fails
+/// Ok(nsync) on success with Costas sync quality (0-21), Err() if extraction fails
 pub fn extract_symbols(
     signal: &[f32],
     candidate: &Candidate,
     nsym: usize,
     llr: &mut [f32],
-) -> Result<(), String> {
+) -> Result<usize, String> {
     extract_symbols_impl(signal, candidate, nsym, llr, None, None)
 }
 
@@ -125,7 +125,7 @@ fn extract_symbols_impl(
     llr: &mut [f32],
     mut llr_ratio_out: Option<&mut [f32]>,  // Optional ratio LLR output (mut for reborrowing)
     s8_out: Option<&mut [[f32; 79]; 8]>,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     eprintln!("EXTRACT: freq={:.1} Hz, dt={:.2}s, nsym={}",
               candidate.frequency, candidate.time_offset, nsym);
 
@@ -801,7 +801,7 @@ fn extract_symbols_impl(
     eprintln!("  Extracted: nsync={}/21, mean_abs_LLR={:.2}, max_LLR={:.2}",
               nsync, llr_mean, llr_max);
 
-    Ok(())
+    Ok(nsync)
 }
 
 /// Calculate baseline noise floor from symbol power array
@@ -908,7 +908,7 @@ pub fn extract_symbols_with_powers(
     nsym: usize,
     llr: &mut [f32],
     s8_out: &mut [[f32; 79]; 8],
-) -> Result<(), String> {
+) -> Result<usize, String> {
     extract_symbols_impl(signal, candidate, nsym, llr, None, Some(s8_out))
 }
 
@@ -926,7 +926,7 @@ pub fn extract_symbols_dual_llr(
     llr_diff: &mut [f32],
     llr_ratio: &mut [f32],
     s8_out: &mut [[f32; 79]; 8],
-) -> Result<(), String> {
+) -> Result<usize, String> {
     extract_symbols_impl(signal, candidate, nsym, llr_diff, Some(llr_ratio), Some(s8_out))
 }
 
@@ -951,7 +951,7 @@ pub fn extract_symbols_dual_llr(
 /// * `s8_out` - Output: Symbol powers for SNR calculation (8×79)
 ///
 /// # Returns
-/// Ok(()) on success, Err() if extraction fails
+/// Ok(nsync) on success with Costas sync quality (0-21), Err() if extraction fails
 pub fn extract_symbols_all_llr(
     signal: &[f32],
     candidate: &Candidate,
@@ -960,9 +960,10 @@ pub fn extract_symbols_all_llr(
     llrc: &mut [f32],  // nsym=3 difference
     llrd: &mut [f32],  // nsym=1 ratio
     s8_out: &mut [[f32; 79]; 8],
-) -> Result<(), String> {
+) -> Result<usize, String> {
     // Extract nsym=1 with both difference and ratio methods
-    extract_symbols_impl(signal, candidate, 1, llra, Some(llrd), Some(s8_out))?;
+    // Capture nsync from the first extraction (all extractions use same signal, so nsync is same)
+    let nsync = extract_symbols_impl(signal, candidate, 1, llra, Some(llrd), Some(s8_out))?;
 
     // Extract nsym=2 (difference only, ratio not used by WSJT-X for nsym>1)
     extract_symbols_impl(signal, candidate, 2, llrb, None, None)?;
@@ -985,7 +986,7 @@ pub fn extract_symbols_all_llr(
         llrd[i] *= SCALEFAC;
     }
 
-    Ok(())
+    Ok(nsync)
 }
 
 /// Normalize LLR array (matching WSJT-X normalizebmet subroutine)

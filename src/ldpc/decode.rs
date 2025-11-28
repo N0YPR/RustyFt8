@@ -26,13 +26,13 @@ fn atanh_safe(x: f32) -> f32 {
 /// * `max_iterations` - Maximum number of decoding iterations (typically 20-50)
 ///
 /// # Returns
-/// * `Some((message, iterations))` - Decoded 91-bit message and iteration count if successful
+/// * `Some((message, iterations, nharderrors))` - Decoded message, BP iteration count, and initial hard error count
 /// * `None` - If decoding failed (max iterations reached or no valid codeword found)
 ///
 /// The decoder uses the sum-product algorithm (belief propagation) to iteratively
 /// refine bit estimates by passing messages between bit nodes and check nodes.
 /// Decoding succeeds when all parity checks are satisfied AND the CRC is valid.
-pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, usize)> {
+pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
     if llr.len() != N {
         return None;
     }
@@ -53,6 +53,9 @@ pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, u
             toc[j][i] = llr[bit_idx];
         }
     }
+
+    // Track initial hard errors (nharderrors) from channel LLRs (before BP starts)
+    let mut nharderrors = 0usize;
 
     // Iterative decoding
     for iter in 0..=max_iterations {
@@ -82,6 +85,11 @@ pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, u
             }
         }
 
+        // Save initial hard error count (before BP starts, at iteration 0)
+        if iter == 0 {
+            nharderrors = ncheck;
+        }
+
         // Log progress every 10 iterations or at key points
         // if iter == 0 || iter == 10 || iter == 20 || iter == max_iterations || ncheck == 0 {
         //     eprintln!("    BP iter {}: ncheck={}/83, llr_mean={:.2}, llr_max={:.2}",
@@ -92,9 +100,9 @@ pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, u
         if ncheck == 0 {
             let decoded = &cw[..K];
             if crc14_check(decoded) {
-                // Success! Return the decoded message
+                // Success! Return the decoded message and metrics
                 // eprintln!("    BP CONVERGED at iteration {} (CRC valid)", iter);
-                return Some((decoded.to_bitvec(), iter));
+                return Some((decoded.to_bitvec(), iter, nharderrors));
             } else {
                 // eprintln!("    BP iter {}: All parity OK but CRC FAILED", iter);
             }
@@ -158,13 +166,13 @@ pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, u
 /// * `save_at_iters` - Which iterations to save LLR snapshots (e.g., [1, 2, 3])
 ///
 /// # Returns
-/// * `Ok((message, iterations, snapshots))` - Decoded message, iteration count, and saved LLR snapshots
+/// * `Ok((message, iterations, nharderrors, snapshots))` - Decoded message, BP iteration count, initial hard errors, and saved LLR snapshots
 /// * `Err(snapshots)` - If BP failed, returns the saved LLR snapshots for OSD fallback
 pub fn decode_with_snapshots(
     llr: &[f32],
     max_iterations: usize,
     save_at_iters: &[usize],
-) -> Result<(BitVec<u8, Msb0>, usize, Vec<Vec<f32>>), Vec<Vec<f32>>> {
+) -> Result<(BitVec<u8, Msb0>, usize, usize, Vec<Vec<f32>>), Vec<Vec<f32>>> {
     if llr.len() != N {
         return Err(Vec::new());
     }
@@ -176,6 +184,9 @@ pub fn decode_with_snapshots(
 
     // Storage for LLR snapshots
     let mut snapshots: Vec<Vec<f32>> = Vec::new();
+
+    // Track initial hard errors (nharderrors) from channel LLRs (before BP starts)
+    let mut nharderrors = 0usize;
 
     // Initialize messages to checks with LLRs
     for j in 0..M {
@@ -218,12 +229,17 @@ pub fn decode_with_snapshots(
             }
         }
 
+        // Save initial hard error count (before BP starts, at iteration 0)
+        if iter == 0 {
+            nharderrors = ncheck;
+        }
+
         // If all parity checks satisfied, check CRC
         if ncheck == 0 {
             let decoded = &cw[..K];
             if crc14_check(decoded) {
-                // Success! Return the decoded message with any snapshots collected so far
-                return Ok((decoded.to_bitvec(), iter, snapshots));
+                // Success! Return the decoded message with metrics and any snapshots collected so far
+                return Ok((decoded.to_bitvec(), iter, nharderrors, snapshots));
             }
         }
 
