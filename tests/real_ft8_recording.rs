@@ -38,14 +38,15 @@ fn test_real_ft8_recording_210703_133430() {
     let signal_15s = normalize_signal_length(signal);
     // Increase decode_top_n and lower sync_threshold to find weaker signals
     // AP Type 1 (CQ pattern) enabled without callsign configuration (like WSJT-X)
-    let config = DecoderConfig {
-        decode_top_n: 150,  // Attempt all found candidates
-        sync_threshold: 0.4,  // Lower from 0.5 to find more candidates
-        max_candidates: 150,  // Increase to find more weaker signals
-        enable_ap: true,     // AP enabled by default (Type 1 works without callsigns)
-        // No mycall/hiscall configured - fair comparison with WSJT-X
-        ..DecoderConfig::default()
-    };
+    // let config = DecoderConfig {
+    //     decode_top_n: 150,  // Attempt all found candidates
+    //     sync_threshold: 0.4,  // Lower from 0.5 to find more candidates
+    //     max_candidates: 150,  // Increase to find more weaker signals
+    //     enable_ap: true,     // AP enabled by default (Type 1 works without callsigns)
+    //     // No mycall/hiscall configured - fair comparison with WSJT-X
+    //     ..DecoderConfig::default()
+    // };
+    let config = DecoderConfig::default();
 
     let mut decoded_messages: Vec<DecodedMessage> = Vec::new();
     // Use single-pass decoding (multi-pass creates false positives from subtraction artifacts)
