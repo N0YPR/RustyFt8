@@ -374,7 +374,7 @@ fn extract_symbols_impl(
     // Data symbols: 7-36 (29 symbols) and 43-71 (29 symbols) = 58 symbols × 3 bits = 174 bits
 
     // Debug flags for specific signals (disabled - enable for investigation)
-    let debug_k1bzm = false && candidate.frequency > 2694.0 && candidate.frequency < 2696.0;
+    let debug_k1bzm = false && candidate.frequency > 2694.0 && candidate.frequency < 2697.0;
     let debug_w1fc = false && candidate.frequency > 2571.0 && candidate.frequency < 2573.0;
 
     // DIAGNOSTIC: Extract and display tone sequence for K1BZM
