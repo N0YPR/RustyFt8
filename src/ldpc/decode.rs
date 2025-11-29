@@ -358,7 +358,7 @@ mod tests {
 
         // Should succeed on first iteration (iter=0) since it's perfect
         assert!(result.is_some());
-        let (decoded, iterations) = result.unwrap();
+        let (decoded, iterations, _errors) = result.unwrap();
         assert_eq!(decoded.len(), 91);
         assert_eq!(iterations, 0); // Should decode immediately
 
@@ -403,11 +403,108 @@ mod tests {
 
         // Should successfully correct the errors
         assert!(result.is_some());
-        let (decoded, _iterations) = result.unwrap();
+        let (decoded, _iterations, _errors) = result.unwrap();
 
         // Verify the decoded message matches the original (before errors)
         for i in 0..77 {
             assert_eq!(decoded[i], msg_str.chars().nth(i).unwrap() == '1');
+        }
+    }
+
+    /// Test LDPC decoder with real-world LLR values from WSJT-X
+    ///
+    /// This test uses pre-decode LLR values extracted from WSJT-X's ft8b.f90
+    /// for the message "N1PJT HB9CQK -10" at -10 dB SNR.
+    ///
+    /// The LLR values were extracted BEFORE LDPC error correction, right after
+    /// symbol demodulation. WSJT-X successfully decodes this message with 20
+    /// hard errors corrected by LDPC.
+    ///
+    /// Source: tests/test_data/210703_133430.wav at 465.625 Hz, time offset 0.75s
+    /// Modified Fortran source: tests/sync/ft8b_llr_extract.f90
+    ///
+    /// This test is currently expected to FAIL - it serves as a benchmark for
+    /// improving the LDPC decoder to match WSJT-X's performance.
+    #[test]
+    #[ignore] // Remove #[ignore] once LDPC decoder is improved
+    fn test_decode_real_wsjt_x_llr_n1pjt_hb9cqk() {
+        // Pre-decode LLR values from WSJT-X (before LDPC correction)
+        // Frequency: 465.625 Hz, time offset: 0.75s, sync: 1.79e+09
+        // SNR: -10 dB
+        let llr: Vec<f32> = vec![
+            -2.614, 1.750, -2.774, 2.361, -2.361, 2.361, 4.480, 2.092, 2.092, 1.677,
+            -1.675, 1.677, -0.938, -0.938, -0.938, -3.427, 3.317, 3.533, -3.359, -1.968,
+            -3.417, 3.421, 1.874, -1.874, 1.709, 1.853, 1.964, 2.468, -2.344, 2.344,
+            -0.471, -2.309, -0.471, -1.426, -1.426, -0.750, 1.397, 0.107, 1.397, -2.459,
+            2.622, -2.622, 2.025, 1.079, 1.876, -0.492, 0.492, 0.492, 0.186, 2.169,
+            0.186, 2.068, 0.803, 0.803, 1.394, 2.408, -1.394, -0.716, -1.858, 1.858,
+            1.192, 2.985, 1.192, 2.746, 2.064, -2.064, 3.776, -2.896, 1.634, 0.265,
+            -0.265, 0.265, -1.545, 1.545, -1.545, -1.253, -0.353, 1.253, 1.245, 2.141,
+            -1.245, 2.407, -2.407, -2.407, 3.042, 1.642, 1.642, 3.754, 3.639, -3.825,
+            2.849, 2.436, -2.436, 1.871, 2.428, -1.871, -1.599, -1.599, -2.075, 1.628,
+            -1.684, -1.783, -1.527, -0.883, 0.883, 0.599, 0.599, -0.599, -1.718, -1.718,
+            -1.718, -2.560, 2.901, -2.813, 3.306, 2.579, 3.271, 4.096, -3.763, -3.763,
+            -4.323, -4.323, 4.323, 3.633, 4.194, -3.633, 4.588, -4.700, 4.581, 3.792,
+            -3.629, -4.319, 2.415, 3.128, 2.415, 1.634, -1.634, 1.634, 1.350, -0.784,
+            -1.350, 0.371, 0.371, -0.371, -0.947, 1.291, 0.265, 1.799, 1.799, 1.799,
+            -3.115, -3.177, -2.993, -3.635, 3.635, -3.635, -4.903, 4.903, -4.903, 5.170,
+            4.648, 5.057, 5.760, -5.760, 5.760, 6.260, 6.173, 4.425, -5.373, -5.030,
+            5.373, -5.785, 5.785, -5.916,
+        ];
+
+        // Expected decoded message bits (from WSJT-X successful decode)
+        let expected_bits: Vec<u8> = vec![
+            0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0,
+            0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0,
+            1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1,
+            1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1,
+        ];
+
+        // Expected message text
+        let expected_message = "N1PJT HB9CQK -10";
+
+        println!("\n=== Testing LDPC Decode for Real WSJT-X Signal ===");
+        println!("Message: {}", expected_message);
+        println!("SNR: -10 dB");
+        println!("LLR stats: mean={:.2}, max={:.2}",
+            llr.iter().map(|x| x.abs()).sum::<f32>() / llr.len() as f32,
+            llr.iter().map(|x| x.abs()).fold(0.0f32, f32::max));
+
+        // Decode using RustyFt8's LDPC decoder
+        let result = decode(&llr, 50);
+
+        match result {
+            Some((decoded_bits, iterations, errors_corrected)) => {
+                println!("✓ LDPC decode succeeded!");
+                println!("  Iterations: {}", iterations);
+                println!("  Errors corrected: {}", errors_corrected);
+
+                // Convert BitVec to Vec<u8> for comparison
+                let message: Vec<u8> = decoded_bits.iter().by_vals().take(77)
+                    .map(|b| if b { 1 } else { 0 })
+                    .collect();
+
+                let matching_bits: usize = message.iter()
+                    .zip(expected_bits.iter())
+                    .filter(|(a, b)| a == b)
+                    .count();
+
+                println!("  Bit accuracy: {}/{} ({:.1}%)",
+                    matching_bits, expected_bits.len(),
+                    100.0 * matching_bits as f32 / expected_bits.len() as f32);
+
+                // Verify exact match
+                assert_eq!(message, expected_bits,
+                    "Decoded bits should match WSJT-X output exactly");
+
+                println!("\n✓ Test passed! RustyFt8 LDPC decoder matches WSJT-X performance.");
+            }
+            None => {
+                panic!("\nLDPC decode failed for real WSJT-X signal.\n\
+                       WSJT-X successfully decoded this -10 dB message with 20 hard errors.\n\
+                       This indicates the LDPC decoder needs improvement.\n\
+                       LLR values are from: tests/test_data/210703_133430.wav");
+            }
         }
     }
 }

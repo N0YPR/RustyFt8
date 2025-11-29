@@ -15,19 +15,16 @@ fn test_real_ft8_recording_210703_133430() {
     // Run this specific test with:
     // cargo test --release --test real_ft8_recording test_real_ft8_recording_210703_133430 -- --ignored --nocapture
     //
-    // This test uses a real FT8 recording validated against WSJT-X jt9 output.
-    // WSJT-X decodes 22 messages total from this recording (SNR range: 16 to -24 dB).
+    // This test validates RustyFt8 against all 22 messages that WSJT-X decodes from this recording.
+    // WSJT-X decodes these using (SNR range: 16 to -24 dB):
+    // - Pure LDPC for 9 strong signals (SNR: -16 to 16 dB)
+    // - AP with callsign hash table for 10 weak signals (requires mycall/hiscall or hash)
+    // - OSD (Ordered Statistics Decoding) for 3 extremely weak signals (SNR <= -20 dB)
     //
-    // Without mycall/hiscall configured (fair comparison with WSJT-X):
-    // - Pure LDPC: 9 messages
-    // - AP Type 1 (CQ pattern): May decode additional weak CQ messages
-    //
-    // WSJT-X achieves 22 decodes using:
-    // - Pure LDPC for strong signals
-    // - AP with hash table of recently heard callsigns for weaker signals
-    // - Multiple AP passes with different callsign combinations
-    //
-    // RustyFt8 currently implements AP Type 1 only (no callsign hash table yet).
+    // RustyFt8 must implement to pass:
+    // - Pure LDPC (already implemented) ✓
+    // - AP decoding with callsign hash table (needed for 10 messages)
+    // - OSD for extremely weak signals (needed for 3 messages)
 
     let wav_path = "tests/test_data/210703_133430.wav";
     let signal = read_wav_file(wav_path)
@@ -61,9 +58,13 @@ fn test_real_ft8_recording_210703_133430() {
     println!("\nTotal decoded: {} messages", count);
     println!("WSJT-X reference: 22 messages");
 
-    // Expected messages - baseline pure LDPC capability
-    // These 9 messages should decode without any AP configuration
+    // All 22 messages that WSJT-X decodes from this recording
+    // These include messages decoded with various techniques:
+    // - Pure LDPC for strong signals (9 messages)
+    // - AP with callsign hash table for weak signals (10 messages)
+    // - Extremely weak signals requiring OSD (3 messages, SNR <= -20 dB)
     let expected_messages = vec![
+        // Pure LDPC baseline (9 messages)
         "W1FC F5BZB -08",           // SNR: 16 dB (pure LDPC)
         "WM3PEN EA6VQ -09",         // SNR: 12 dB (pure LDPC)
         "CQ F5RXL IN94",            // SNR: -2 dB (pure LDPC)
@@ -73,26 +74,24 @@ fn test_real_ft8_recording_210703_133430() {
         "W1DIG SV9CVY -14",         // SNR: -7 dB (pure LDPC)
         "W0RSJ EA3BMU RR73",        // SNR: -16 dB (pure LDPC)
         "XE2X HA2NP RR73",          // SNR: -11 dB (pure LDPC)
+
+        // Messages requiring AP with callsign hash table (10 messages)
+        "N1PJT HB9CQK -10",         // Requires AP with N1PJT or HB9CQK
+        "KD2UGC F6GCP R-23",        // Requires AP with KD2UGC or F6GCP
+        "A92EE F5PSR -14",          // Requires AP with A92EE or F5PSR
+        "K1BZM EA3GP -09",          // Requires AP with K1BZM and EA3GP
+        "K1BZM EA3CJ JN01",         // Requires AP with K1BZM and EA3CJ
+        "WA2FZW DL5AXX RR73",       // Requires AP with WA2FZW or DL5AXX
+        "N1API HA6FQ -23",          // Requires AP with N1API or HA6FQ
+        "N1API F2VX 73",            // Requires AP with N1API or F2VX
+        "CQ DX DL8YHR JO41",        // Weak CQ, needs AP Type 1 or better tuning
+        "CQ EA2BFM IN83",           // Weak CQ, needs AP Type 1 or better tuning
+
+        // Extremely weak signals requiring OSD (3 messages, SNR <= -20 dB)
+        "K1JT HA5WA 73",            // SNR: -20 dB (requires OSD)
+        "K1BZM DK8NE -10",          // SNR: -20 dB (requires OSD)
+        "TU; 7N9RST EI8TRF 589 5732", // SNR: -24 dB (requires OSD)
     ];
-
-    // Messages not decodable without callsign hash table:
-    // WSJT-X decodes these using AP with a hash table of recently heard callsigns.
-    // RustyFt8 would need to implement callsign hash table + multi-pass AP to decode:
-    // - "N1PJT HB9CQK -10" (requires AP with N1PJT or HB9CQK)
-    // - "KD2UGC F6GCP R-23" (requires AP with KD2UGC or F6GCP)
-    // - "A92EE F5PSR -14" (requires AP with A92EE or F5PSR)
-    // - "K1BZM EA3GP -09" (requires AP with K1BZM and EA3GP)
-    // - "K1BZM EA3CJ JN01" (requires AP with K1BZM and EA3CJ)
-    // - "WA2FZW DL5AXX RR73" (requires AP with WA2FZW or DL5AXX)
-    // - "N1API HA6FQ -23" (requires AP with N1API or HA6FQ)
-    // - "N1API F2VX 73" (requires AP with N1API or F2VX)
-    // - "CQ DX DL8YHR JO41" (weak CQ, needs AP Type 1 or better tuning)
-    // - "CQ EA2BFM IN83" (weak CQ, needs AP Type 1 or better tuning)
-
-    // Extremely weak signals (SNR <= -20 dB) not required - these need OSD:
-    // "K1JT HA5WA 73" (SNR: -20 dB)
-    // "K1BZM DK8NE -10" (SNR: -20 dB)
-    // "TU; 7N9RST EI8TRF 589 5732" (SNR: -24 dB)
 
     // Verify we decoded at least some messages
     assert!(!decoded_messages.is_empty(), "Should decode at least one message from real recording");
@@ -119,9 +118,15 @@ fn test_real_ft8_recording_210703_133430() {
     }
 
     if !missing.is_empty() {
-        eprintln!("\n❌ Missing expected messages: {:?}", missing);
-        eprintln!("Decoded messages: {:?}", decoded_texts);
-        panic!("Failed to decode {} expected strong signals", missing.len());
+        eprintln!("\n❌ Missing expected messages ({} of {}):", missing.len(), expected_messages.len());
+        for msg in &missing {
+            eprintln!("  - {}", msg);
+        }
+        eprintln!("\nDecoded messages ({}):", decoded_texts.len());
+        for msg in &decoded_texts {
+            eprintln!("  - {}", msg);
+        }
+        panic!("Failed to decode {} of {} expected WSJT-X messages", missing.len(), expected_messages.len());
     }
 
     // Report false positives (messages not in WSJT-X output at all)
@@ -137,11 +142,11 @@ fn test_real_ft8_recording_210703_133430() {
         }
     }
 
-    println!("\n✓ Successfully decoded all {} expected baseline signals (pure LDPC)", expected_messages.len());
+    println!("\n✓ Successfully decoded all {} expected WSJT-X messages!", expected_messages.len());
     println!("  Total decoded: {} messages ({} expected + {} additional)",
         count, expected_messages.len(), false_positives.len());
-    println!("\n  WSJT-X baseline: 22 messages (pure LDPC + AP with callsign hash table)");
-    println!("  RustyFt8: {} messages (pure LDPC only, no callsign hash table yet)", count);
+    println!("\n  WSJT-X: 22 messages (9 pure LDPC + 10 AP with callsign hash + 3 OSD)");
+    println!("  RustyFt8: {} messages", count);
 }
 
 #[test]
