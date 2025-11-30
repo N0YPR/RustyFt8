@@ -150,7 +150,7 @@ fn diagnose_2695_hz_candidate() {
                 println!("  Testing NEGATED LLRs (sign inversion test):");
                 for &scale in &[1.0, 1.5] {
                     let mut llr_neg: Vec<f32> = llra.iter().map(|&x| -x * scale).collect();
-                    if let Some((bits, iters)) = ldpc::decode_hybrid(&llr_neg, ldpc::DecodeDepth::BpOsdHybrid) {
+                    if let Some((bits, iters, _ntype)) = ldpc::decode_hybrid(&llr_neg, ldpc::DecodeDepth::BpOsdHybrid) {
                         let info_bits: BitVec<u8, Msb0> = bits.iter().take(77).collect();
                         if let Ok(msg) = rustyft8::decode(&info_bits, None) {
                             println!("    ✓✓✓ DECODED WITH NEGATED LLRs [llra×-{}]: \"{}\" (iters={})",
@@ -167,7 +167,7 @@ fn diagnose_2695_hz_candidate() {
                         // Try BP only first
                         bp_attempts += 1;
                         match ldpc::decode_hybrid(&llr_scaled, ldpc::DecodeDepth::BpOnly) {
-                            Some((bits, iters)) => {
+                            Some((bits, iters, _ntype)) => {
                                 bp_successes += 1;
                                 let info_bits: BitVec<u8, Msb0> = bits.iter().take(77).collect();
                                 match rustyft8::decode(&info_bits, None) {
@@ -187,7 +187,7 @@ fn diagnose_2695_hz_candidate() {
                         // Try with OSD
                         osd_attempts += 1;
                         match ldpc::decode_hybrid(&llr_scaled, ldpc::DecodeDepth::BpOsdHybrid) {
-                            Some((bits, iters)) => {
+                            Some((bits, iters, _ntype)) => {
                                 osd_successes += 1;
                                 let info_bits: BitVec<u8, Msb0> = bits.iter().take(77).collect();
                                 match rustyft8::decode(&info_bits, None) {

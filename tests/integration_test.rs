@@ -260,6 +260,9 @@ fn test_roundtrip_near_threshold() {
         max_candidates: 20,
         decode_top_n: 3,      // Minimal decoding for speed
         min_snr_db: -18,
+        enable_ap: false,
+        mycall: None,
+        hiscall: None,
     };
     test_roundtrip_with_config("CQ W1ABC FN42", -15.0, true, &fast_config);
 }
@@ -319,6 +322,9 @@ fn test_multi_signal_decode() {
         max_candidates: 50,
         decode_top_n: 10,  // Need a few more for multi-signal
         min_snr_db: -20,
+        enable_ap: false,
+        mycall: None,
+        hiscall: None,
     };
     let mut decoded_messages = Vec::new();
 

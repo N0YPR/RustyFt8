@@ -492,7 +492,9 @@ mod tests {
         // Decode using hybrid BP+OSD strategy like WSJT-X (BP first, then OSD fallback)
         // This uses DecodeDepth::BpOsdHybrid which matches WSJT-X's maxosd=2
         use crate::ldpc::{decode_hybrid, DecodeDepth};
+        println!("Calling decode_hybrid with BpOsdHybrid...");
         let result = decode_hybrid(&llr, DecodeDepth::BpOsdHybrid);
+        println!("decode_hybrid returned: {}", if result.is_some() { "Some" } else { "None" });
 
         match result {
             Some((decoded_bits, iterations, errors_corrected)) => {

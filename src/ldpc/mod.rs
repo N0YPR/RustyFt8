@@ -117,7 +117,7 @@ pub fn decode_hybrid_with_ap(
     depth: DecodeDepth
 ) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
     let max_bp_iters = 50; // Increased from 30 to give BP more chances to converge
-    let osd_order = 4; // Increased from 2 to handle signals with more bit errors
+    let osd_order = 3; // Try order-3 - WSJT-X may use higher order for weak signals
 
     match depth {
         DecodeDepth::BpOnly => {
