@@ -120,6 +120,19 @@ pub fn osd_decode(llr: &[f32], max_order: usize) -> Option<BitVec<u8, Msb0>> {
         return None;
     }
 
+    let debug = std::env::var("OSD_DEBUG").is_ok();
+    if debug {
+        let llr_mean = llr.iter().map(|x| x.abs()).sum::<f32>() / llr.len() as f32;
+        let llr_max = llr.iter().map(|x| x.abs()).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
+        eprintln!("\n=== OSD_DECODE called ===");
+        eprintln!("  max_order: {}", max_order);
+        eprintln!("  LLR mean(abs): {:.3}, max(abs): {:.3}", llr_mean, llr_max);
+        eprintln!("\n  NOTE: Current implementation is incomplete!");
+        eprintln!("  WSJT-X uses exhaustive combination search with pruning,");
+        eprintln!("  but we only test flipping the last 30 unreliable bits.");
+        eprintln!("  This is the root cause of decode failures.");
+    }
+
     // Step 1: Create reliability ordering (most reliable first)
     let mut col_order: Vec<usize> = (0..N).collect();
     col_order.sort_by(|&a, &b| {
@@ -150,7 +163,14 @@ pub fn osd_decode(llr: &[f32], max_order: usize) -> Option<BitVec<u8, Msb0>> {
     // Extract message and check CRC
     let message91: BitVec<u8, Msb0> = unpermuted[0..K].to_bitvec();
     if crc14_check(&message91) {
+        if debug {
+            eprintln!("  ✓ Order-0 SUCCESS (hard decisions)");
+        }
         return Some(message91);
+    }
+
+    if debug {
+        eprintln!("  ✗ Order-0 failed (CRC bad)");
     }
 
     if max_order == 0 {
@@ -160,6 +180,10 @@ pub fn osd_decode(llr: &[f32], max_order: usize) -> Option<BitVec<u8, Msb0>> {
     // Order-1: Try flipping single unreliable bits
     // Focus on the last 30 bits (least reliable information positions)
     let flip_start = K.saturating_sub(30);
+
+    if debug {
+        eprintln!("  Trying Order-1 (flipping {} bits)...", K - flip_start);
+    }
 
     for flip_idx in flip_start..K {
         let mut test_info = info_bits.to_bitvec();
@@ -176,12 +200,23 @@ pub fn osd_decode(llr: &[f32], max_order: usize) -> Option<BitVec<u8, Msb0>> {
 
         let test_msg: BitVec<u8, Msb0> = unpermuted[0..K].to_bitvec();
         if crc14_check(&test_msg) {
+            if debug {
+                eprintln!("  ✓ Order-1 SUCCESS (flipped bit {})", flip_idx);
+            }
             return Some(test_msg);
         }
     }
 
+    if debug {
+        eprintln!("  ✗ Order-1 failed");
+    }
+
     if max_order < 2 {
         return None;
+    }
+
+    if debug {
+        eprintln!("  Trying Order-2 (flipping pairs)...");
     }
 
     // Order-2: Try flipping pairs of unreliable bits
@@ -209,9 +244,16 @@ pub fn osd_decode(llr: &[f32], max_order: usize) -> Option<BitVec<u8, Msb0>> {
 
             let test_msg: BitVec<u8, Msb0> = unpermuted[0..K].to_bitvec();
             if crc14_check(&test_msg) {
+                if debug {
+                    eprintln!("  ✓ Order-2 SUCCESS (flipped bits {},{})", idx_i, idx_j);
+                }
                 return Some(test_msg);
             }
         }
+    }
+
+    if debug {
+        eprintln!("  ✗ Order-2 failed - OSD decode FAILED");
     }
 
     None
