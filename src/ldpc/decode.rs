@@ -5,12 +5,37 @@ use bitvec::vec::BitVec;
 use crate::crc::crc14_check;
 use super::constants::*;
 
-/// Safe implementation of atanh with clipping to avoid NaN/infinity
+/// Piecewise linear approximation of atanh used by WSJT-X
+///
+/// This is NOT the mathematical atanh function! WSJT-X uses a piecewise
+/// linear approximation that has been tuned for LDPC decoding performance.
+/// The approximation differs by 10-40% from mathematical atanh in typical
+/// operating ranges, and caps output at ±7.0 for numerical stability.
+///
+/// The function uses 5 linear segments:
+/// - |x| ≤ 0.664: y = x / 0.83
+/// - 0.664 < |x| ≤ 0.9217: y = sign(x) * (|x| - 0.4064) / 0.322
+/// - 0.9217 < |x| ≤ 0.9951: y = sign(x) * (|x| - 0.8378) / 0.0524
+/// - 0.9951 < |x| ≤ 0.9998: y = sign(x) * (|x| - 0.9914) / 0.0012
+/// - |x| > 0.9998: y = sign(x) * 7.0
+///
+/// Reference: wsjtx/lib/platanh.f90
 #[inline]
-fn atanh_safe(x: f32) -> f32 {
-    // Clip x to valid range (-1, 1) with small margin
-    let x_clipped = x.clamp(-0.999999, 0.999999);
-    0.5 * f32::ln((1.0 + x_clipped) / (1.0 - x_clipped))
+fn platanh(x: f32) -> f32 {
+    let isign = if x < 0.0 { -1.0 } else { 1.0 };
+    let z = x.abs();
+
+    if z <= 0.664 {
+        x / 0.83
+    } else if z <= 0.9217 {
+        isign * (z - 0.4064) / 0.322
+    } else if z <= 0.9951 {
+        isign * (z - 0.8378) / 0.0524
+    } else if z <= 0.9998 {
+        isign * (z - 0.9914) / 0.0012
+    } else {
+        isign * 7.0
+    }
 }
 
 /// Decode a 174-bit codeword using LDPC(174,91) belief propagation
@@ -121,12 +146,6 @@ pub fn decode_with_ap(
             nharderrors = ncheck;
         }
 
-        // Log progress every 10 iterations or at key points
-        // if iter == 0 || iter == 10 || iter == 20 || iter == max_iterations || ncheck == 0 {
-        //     eprintln!("    BP iter {}: ncheck={}/83, llr_mean={:.2}, llr_max={:.2}",
-        //              iter, ncheck, llr_mean, llr_max);
-        // }
-
         // If all parity checks satisfied, check CRC
         if ncheck == 0 {
             let decoded = &cw[..K];
@@ -176,8 +195,8 @@ pub fn decode_with_ap(
                     }
                 }
 
-                // Apply atanh to get the message
-                tov[j][i] = 2.0 * atanh_safe(-product);
+                // Apply platanh (WSJT-X's piecewise linear approximation) to get the message
+                tov[j][i] = 2.0 * platanh(-product);
             }
         }
     }
@@ -310,8 +329,8 @@ pub fn decode_with_snapshots(
                     }
                 }
 
-                // Apply atanh to get the message
-                tov[j][i] = 2.0 * atanh_safe(-product);
+                // Apply platanh (WSJT-X's piecewise linear approximation) to get the message
+                tov[j][i] = 2.0 * platanh(-product);
             }
         }
     }
@@ -470,8 +489,10 @@ mod tests {
             llr.iter().map(|x| x.abs()).sum::<f32>() / llr.len() as f32,
             llr.iter().map(|x| x.abs()).fold(0.0f32, f32::max));
 
-        // Decode using RustyFt8's LDPC decoder
-        let result = decode(&llr, 50);
+        // Decode using hybrid BP+OSD strategy like WSJT-X (BP first, then OSD fallback)
+        // This uses DecodeDepth::BpOsdHybrid which matches WSJT-X's maxosd=2
+        use crate::ldpc::{decode_hybrid, DecodeDepth};
+        let result = decode_hybrid(&llr, DecodeDepth::BpOsdHybrid);
 
         match result {
             Some((decoded_bits, iterations, errors_corrected)) => {
