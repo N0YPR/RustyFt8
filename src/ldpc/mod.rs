@@ -172,53 +172,33 @@ pub fn decode_hybrid_with_ap(
             // BP failed - compute initial parity check violations
             let nharderrors = compute_nharderrors(llr);
 
-            // Try damped BP with various damping factors
-            // Damping can help when standard BP oscillates
-            for &damping in &[0.25, 0.5] {
-                if let Some((decoded, iters, _)) = decode_damped(llr, max_bp_iters + 20, damping) {
-                    return Some((decoded, iters, nharderrors));
-                }
-            }
-
-            // Try BP with scaled LLRs (helps when LLR magnitudes are off)
-            for &scale in &[0.5, 0.75, 1.5, 2.0] {
-                let scaled: Vec<f32> = llr.iter().map(|v| v * scale).collect();
-                if let Some((decoded, iters, _)) = decode_with_ap(&scaled, None, max_bp_iters) {
-                    return Some((decoded, iters, nharderrors));
-                }
-            }
-
             // Check if OSD is worth trying
             // Note: nharderrors here is parity check violations, not bit errors.
             // For weak signals with 15-20 bit errors, parity violations can exceed 40.
-            // We use a higher threshold (50) to allow OSD a chance on difficult signals.
             if nharderrors > 50 {
                 // Too many parity violations - OSD won't help
                 return None;
             }
 
-            // CRITICAL: Try OSD with BP-accumulated LLR snapshots first (WSJT-X style)
+            // CRITICAL: Try OSD with BP-accumulated LLR snapshots (WSJT-X style)
             // This is the key to decoding difficult signals like N1PJT!
             // The accumulated LLRs have a smoothing effect that improves OSD performance.
-            // First try ndeep=3 on all snapshots (fast), then ndeep=4 on first snapshot only.
+            // Try ndeep=3 on all snapshots first (fast), then ndeep=4 on first snapshot only.
             for snapshot in &bp_snapshots {
                 if let Some(decoded) = osd_decode_wsjt(snapshot, 3) {
                     return Some((decoded, 0, nharderrors));
                 }
             }
-            // If ndeep=3 failed on all snapshots, try ndeep=4 on first snapshot only (slower)
+            // If ndeep=3 failed, try ndeep=4 on first snapshot only (slower but thorough)
             if let Some(snapshot) = bp_snapshots.first() {
                 if let Some(decoded) = osd_decode_wsjt(snapshot, 4) {
                     return Some((decoded, 0, nharderrors));
                 }
             }
 
-            // Fallback: try OSD with channel LLRs (less effective but sometimes works)
-            // Progressive OSD: try order 1 first (fast), then order 2 (thorough)
-            for order in 1..=2 {
-                if let Some(decoded) = osd_decode(llr, order) {
-                    return Some((decoded, 0, nharderrors));
-                }
+            // Fallback: try OSD order-1 with channel LLRs (very fast, 91 patterns)
+            if let Some(decoded) = osd_decode(llr, 1) {
+                return Some((decoded, 0, nharderrors));
             }
 
             None

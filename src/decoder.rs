@@ -189,7 +189,6 @@ where
                     //    - Top 30: BpOsdUncoupled (order 1 only, 91 patterns)
                     //    - Rest: no OSD (rely on BP only)
                     // OSD is pre-filtered by nharderrors > 50 check inside decode_hybrid
-                    // Note: Weak signals like N1PJT can rank as low as 20, need broader OSD
                     let decode_result = ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
                         .or_else(|| {
                             if candidate_idx < 10 {
