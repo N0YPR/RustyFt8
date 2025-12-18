@@ -2,21 +2,15 @@ use bitvec::prelude::*;
 use crate::message::CallsignHashCache;
 use crate::message::callsign::unpack_callsign;
 use crate::message::grid::decode_grid;
-use crate::message::text_encoding::decode_callsign_base38;
+// Note: decode_callsign_base38 removed - NonStandardCall is i3=4, handled by decode_type4
 use crate::message::constants::{NTOKENS, MAX22};
 
 /// Decode Type 1 messages (i3=1)
+/// Standard message format: n28a(28) + ipa(1) + n28b(28) + ipb(1) + ir(1) + igrid4(15) + i3(3) = 77 bits
 pub fn decode_type1(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
-    // Check n3 subtype
-    let n3: u8 = bits[3..6].load_be();
-    
-    if n3 == 4 {
-        // NonStandardCall message (i3=1, n3=4)
-        decode_type1_nonstandard(bits, cache)
-    } else {
-        // Standard Type 1 message
-        decode_type1_standard(bits, cache)
-    }
+    // Type 1 is always a standard message - no n3 subtype check needed
+    // NonStandardCall is i3=4, not (i3=1, n3=4)
+    decode_type1_standard(bits, cache)
 }
 
 /// Decode Type 1 Standard message
@@ -108,38 +102,4 @@ fn decode_type1_standard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashC
     } else {
         Ok(format!("{} {} {}", final_call1, call2, grid_or_report))
     }
-}
-
-/// Decode Type 1.4 NonStandardCall message
-fn decode_type1_nonstandard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
-    let mut bit_index = 0;
-    
-    // Skip i3 (3 bits)
-    bit_index += 3;
-    
-    // Skip n3 (3 bits)
-    bit_index += 3;
-    
-    // n12: 12-bit hash (bits 6-17)
-    let _n12: u16 = bits[bit_index..bit_index + 12].load_be();
-    bit_index += 12;
-    
-    // c58: Encoded text (bits 18-75, 58 bits)
-    let c58: u64 = bits[bit_index..bit_index + 58].load_be();
-
-    // Decode the text
-    let text = decode_callsign_base38(c58)?;
-    
-    // Extract compound callsign and add to cache
-    let parts: Vec<&str> = text.split_whitespace().collect();
-    if parts.len() >= 2 {
-        let _compound_callsign = parts[1];
-        if let Some(cache_ref) = cache {
-            // Note: cache is immutable here, can't insert
-            // The cache should have been populated during encoding
-            let _ = cache_ref;  // Suppress unused warning
-        }
-    }
-    
-    Ok(text.trim_end().to_string())
 }

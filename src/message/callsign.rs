@@ -7,8 +7,9 @@ use crate::message::constants::{NTOKENS, MAX22, CHARSET_A1, CHARSET_A2, CHARSET_
 
 /// Validate that a callsign follows basic amateur radio callsign rules.
 ///
-/// Valid callsigns have the pattern: [1-2 letters][1 digit][1-3 letters][optional /suffix]
-/// Examples: W1ABC, K1JT, EA3AGB, N1API/P, DL8YHR/R
+/// Valid callsigns have the pattern: [prefix][area digit][suffix][optional /modifier]
+/// where prefix is 1-2 alphanumeric chars, area digit is a single digit, and suffix is 1-3 letters.
+/// Examples: W1ABC, K1JT, EA3AGB, A92EE (Bahrain), 9Y4XYZ (Trinidad), 5B1ABC (Cyprus)
 ///
 /// Returns true if the callsign is structurally valid.
 pub fn is_valid_callsign(callsign: &str) -> bool {
@@ -39,37 +40,41 @@ pub fn is_valid_callsign(callsign: &str) -> bool {
     }
 
     let chars: Vec<char> = base_call.chars().collect();
+    let n = chars.len();
 
-    // Find the digit (must have exactly one)
-    let digit_positions: Vec<usize> = chars.iter().enumerate()
-        .filter(|(_, c)| c.is_ascii_digit())
-        .map(|(i, _)| i)
-        .collect();
-
-    if digit_positions.len() != 1 {
-        return false;  // Must have exactly one digit
+    // Find the LAST digit - this is the "area digit" in amateur callsigns
+    // This matches pack_callsign behavior and handles callsigns like:
+    // - A92EE (Bahrain): prefix=A9, area=2, suffix=EE
+    // - 9Y4XYZ (Trinidad): prefix=9Y, area=4, suffix=XYZ
+    // - 5B1ABC (Cyprus): prefix=5B, area=1, suffix=ABC
+    let mut area_digit_pos = None;
+    for i in (1..n).rev() {
+        if chars[i].is_ascii_digit() {
+            area_digit_pos = Some(i);
+            break;
+        }
     }
 
-    let digit_pos = digit_positions[0];
+    let digit_pos = match area_digit_pos {
+        Some(pos) if pos >= 1 && pos <= 2 => pos,
+        _ => return false,  // No valid area digit found
+    };
 
-    // Prefix: 1-2 letters before the digit
-    if digit_pos == 0 || digit_pos > 2 {
-        return false;
-    }
-
+    // Prefix: 1-2 chars before the area digit (can be letters or digits)
+    // Examples: W, K, EA, A9, 9Y, 5B
     for i in 0..digit_pos {
-        if !chars[i].is_ascii_alphabetic() {
+        if !chars[i].is_ascii_alphanumeric() {
             return false;
         }
     }
 
-    // Suffix: 1-3 letters after the digit
-    let suffix_len = chars.len() - digit_pos - 1;
+    // Suffix: 1-3 letters after the area digit
+    let suffix_len = n - digit_pos - 1;
     if suffix_len < 1 || suffix_len > 3 {
         return false;
     }
 
-    for i in (digit_pos + 1)..chars.len() {
+    for i in (digit_pos + 1)..n {
         if !chars[i].is_ascii_alphabetic() {
             return false;
         }
