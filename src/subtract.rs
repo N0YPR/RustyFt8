@@ -160,38 +160,46 @@ pub fn subtract_ft8_signal(
     frequency: f32,
     time_offset: f32,
 ) -> Result<(), String> {
-    // Search for best time alignment (±60 samples, every 15 samples)
-    let search_offsets = [-60, -45, -30, -15, 0, 15, 30, 45, 60];
-    let mut best_offset = 0i32;
-    let mut best_power_after = f64::INFINITY; // Track minimum power after subtraction
+    // Use 3-point parabolic interpolation for time refinement (matching WSJT-X)
+    // This is much faster than exhaustive search: 4 evaluations vs 13
 
-    // Try each offset and measure power reduction
-    for &offset_samples in &search_offsets {
+    // Helper to measure power after subtraction at a given offset
+    let measure_power = |offset_samples: i32| -> Result<f64, String> {
         let test_time = time_offset + (offset_samples as f32 / SAMPLE_RATE);
         let mut audio_copy = audio.to_vec();
-
-        // Try subtracting at this offset
         subtract_ft8_signal_internal(&mut audio_copy, tones, frequency, test_time, false)?;
 
-        // Measure power after subtraction (using absolute time)
-        let absolute_test_time = test_time + 0.5;
-        let nstart = (absolute_test_time * SAMPLE_RATE) as i32;
-        let mut power_after = 0.0f64;
+        let nstart = (test_time * SAMPLE_RATE) as i32;
+        let mut power = 0.0f64;
         for i in 0..NFRAME.min(audio_copy.len()) {
             let j_signed = nstart + i as i32;
             if j_signed >= 0 && (j_signed as usize) < audio_copy.len() {
-                power_after += (audio_copy[j_signed as usize] as f64).powi(2);
+                power += (audio_copy[j_signed as usize] as f64).powi(2);
             }
         }
+        Ok(power)
+    };
 
-        // Pick offset that gives minimum power after subtraction
-        if power_after < best_power_after {
-            best_power_after = power_after;
-            best_offset = offset_samples;
-        }
-    }
+    // Evaluate at -90, 0, +90 samples (3 evaluations)
+    let sq_minus = measure_power(-90)?;
+    let sq_zero = measure_power(0)?;
+    let sq_plus = measure_power(90)?;
 
-    // Apply subtraction with best offset
+    // Parabolic interpolation to find minimum (WSJT-X peakup subroutine)
+    // For points at x=-1, x=0, x=1 with values y0, y1, y2:
+    // Minimum at dx = (y0 - y2) / (2 * (y0 - 2*y1 + y2))
+    let denom = sq_minus - 2.0 * sq_zero + sq_plus;
+    let best_offset = if denom.abs() > 1e-10 {
+        let dx = (sq_minus - sq_plus) / (2.0 * denom);
+        // dx is in units of 90 samples, clamp to [-1, 1]
+        let dx_clamped = dx.clamp(-1.0, 1.0);
+        (90.0 * dx_clamped).round() as i32
+    } else {
+        // Flat response, use center
+        0
+    };
+
+    // Apply subtraction with interpolated offset (1 more evaluation)
     let refined_time = time_offset + (best_offset as f32 / SAMPLE_RATE);
     if best_offset != 0 {
         eprintln!("  Time refinement: {:+3} samples ({:+.3} ms)",
@@ -224,10 +232,9 @@ fn subtract_ft8_signal_internal(
     )?;
 
     // Calculate start position in audio (can be negative)
-    // CRITICAL: time_offset is relative to 0.5s, not 0.0s! (see fine_sync.rs:152)
-    // The downsampled buffer starts at 0.0 but represents audio from 0.5s onward
-    let absolute_time = time_offset + 0.5;
-    let nstart = (absolute_time * SAMPLE_RATE) as i32;
+    // time_offset from fine_sync is ABSOLUTE time from t=0 (see fine_sync.rs:289)
+    // Previously we incorrectly added 0.5 here, but fine_sync already outputs absolute time
+    let nstart = (time_offset * SAMPLE_RATE) as i32;
 
     // Initialize filter
     let nfft = audio.len().next_power_of_two().max(NFRAME.next_power_of_two());

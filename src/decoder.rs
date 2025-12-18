@@ -68,7 +68,7 @@ impl Default for DecoderConfig {
             sync_threshold: 0.5,
             max_candidates: 1000, // Match WSJT-X MAXPRECAND (dual search generates more candidates)
             decode_top_n: 100, // Dual search generates ~2x candidates, need higher limit
-            min_snr_db: -18,  // Allow decoding down to -18 dB (WSJT-X typical minimum)
+            min_snr_db: -25,  // Allow decoding down to -25 dB for weak OSD signals
             enable_ap: true,  // AP enabled by default (Type 1 CQ pattern works without callsigns)
             mycall: None,     // Optional: configure for additional AP types (2-6)
             hiscall: None,    // Optional: configure for additional AP types (2-6)
@@ -110,8 +110,8 @@ where
     }
 
     // LLR scaling factors to try (optimized order - most common values first)
-    // Expanded range to help decode weaker signals
-    let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 1.25, 0.9, 1.1, 1.3, 1.7, 2.5, 3.0, 4.0, 5.0, 0.6, 0.8];
+    // Reduced from 16 to 6 for performance - these cover the typical useful range
+    let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 2.5];
     // Disable nsym=2/3: creates more false positives than correct decodes
     // Testing showed: nsym=1 gives 8 correct + 1 false positive (11%)
     //                 nsym=1/2/3 gives 8 correct + 2 false positives (20%)
@@ -199,28 +199,34 @@ where
                     // eprintln!("  LDPC_ATTEMPT: freq={:.1} Hz, dt={:.2}s, method={}, scale={:.1}, rank={}",
                     //          refined.frequency, refined.time_offset, method_name, scale, candidate_idx);
 
-                    // Progressive decoding strategy (matching WSJT-X):
-                    // 1. Try BP-only first (maxosd=-1) - fast, minimal false positives
-                    // 2. If BP fails, try BP+OSD uncoupled (maxosd=0) - moderate aggression
-                    // 3. For top 20 candidates, try full hybrid OSD (maxosd=2) - most aggressive
-                    // This balances finding weak signals vs limiting false positives
+                    // Progressive decoding strategy:
+                    // 1. Try BP-only first - fast, minimal false positives
+                    // 2. If BP fails, try OSD based on candidate rank:
+                    //    - Top 10: BpOsdHybrid (accumulated LLR snapshots + ndeep 3-4)
+                    //    - Top 30: BpOsdUncoupled (order 1 only, 91 patterns)
+                    //    - Rest: no OSD (rely on BP only)
+                    // OSD is pre-filtered by nharderrors > 50 check inside decode_hybrid
+                    // Note: Weak signals like N1PJT can rank as low as 20, need broader OSD
                     let decode_result = ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
-                        .or_else(|| ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled))
                         .or_else(|| {
-                            // Only use aggressive hybrid OSD for strongest candidates
-                            // Limit to top 20 to minimize false positives from spurious candidates
-                            if candidate_idx < 20 {
+                            if candidate_idx < 10 {
+                                // Top 10 candidates: try thorough OSD with accumulated snapshots
                                 ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
+                            } else if candidate_idx < 30 {
+                                // Candidates 10-29: try fast OSD (order 1 only)
+                                ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
                             } else {
                                 None
                             }
                         });
 
                     if let Some((decoded_bits, iters, nharderrors)) = decode_result {
-                        // WSJT-X rejection filter #2: nharderrors must be <= 36
-                        // This filters out OSD false positives from extremely noisy candidates
-                        if nharderrors > 36 {
-                            continue;  // Reject candidates with too many initial hard errors
+                        // WSJT-X rejection filter #2: nharderrors threshold
+                        // Note: nharderrors is parity check violations, not bit errors.
+                        // For weak signals decoded via OSD, parity violations can be 40-50.
+                        // We use a higher threshold (50) to allow OSD-decoded signals through.
+                        if nharderrors > 50 {
+                            continue;  // Reject candidates with too many parity violations
                         }
 
                         // Re-encode the corrected message to get tones for signal subtraction
@@ -444,9 +450,6 @@ where
                                         }
 
                                         // AP decode succeeded!
-                                        eprintln!("  AP: Decoded with AP type {:?}, method={}, freq={:.1} Hz",
-                                                 ap_type, method_name, candidate_to_decode.frequency);
-
                                         return Some(DecodeResult {
                                             candidate_idx,
                                             message: DecodedMessage {

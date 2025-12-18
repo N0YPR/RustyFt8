@@ -126,8 +126,9 @@ fn extract_symbols_impl(
     mut llr_ratio_out: Option<&mut [f32]>,  // Optional ratio LLR output (mut for reborrowing)
     s8_out: Option<&mut [[f32; 79]; 8]>,
 ) -> Result<usize, String> {
-    eprintln!("EXTRACT: freq={:.1} Hz, dt={:.2}s, nsym={}",
-              candidate.frequency, candidate.time_offset, nsym);
+    // Debug output disabled for performance
+    // eprintln!("EXTRACT: freq={:.1} Hz, dt={:.2}s, nsym={}",
+    //           candidate.frequency, candidate.time_offset, nsym);
 
     if llr.len() < 174 {
         return Err(format!("LLR buffer too small"));
@@ -186,11 +187,10 @@ fn extract_symbols_impl(
 
         // Apply best correction to working buffer
         if best_correction.abs() > 0.001 {
-            eprintln!("    Phase correction: {:.3} Hz (sync: {:.3} -> {:.3})",
-                     best_correction, initial_sync, best_sync);
+            // Debug output disabled for performance
+            // eprintln!("    Phase correction: {:.3} Hz (sync: {:.3} -> {:.3})",
+            //          best_correction, initial_sync, best_sync);
             apply_phase_correction(&mut cd, best_correction, actual_sample_rate);
-        } else if nsym >= 2 {
-            eprintln!("    Phase correction: NONE (sync={:.3})", initial_sync);
         }
     }
 
@@ -253,17 +253,7 @@ fn extract_symbols_impl(
     for k in 0..NN {
         // Symbol starts at: start_offset + k * nsps_down samples
         let i1 = start_offset + (k as i32) * (nsps_down as i32);
-
-        // Check bounds (per-symbol, matching WSJT-X sync8d.f90)
-        if i1 < 0 || (i1 as usize + nsps_down) > cd.len() {
-            // Symbol is out of bounds (signal starts before recording or extends past end)
-            // This is normal for negative DT signals - set symbol to zero
-            for tone in 0..8 {
-                cs[tone][k] = (0.0, 0.0);
-                s8[tone][k] = 0.0;
-            }
-            continue;
-        }
+        let i2 = i1 + (nsps_down as i32);
 
         // Zero the FFT buffer
         for j in 0..NFFT_SYM {
@@ -271,14 +261,27 @@ fn extract_symbols_impl(
             sym_imag[j] = 0.0;
         }
 
-        // Copy symbol to FFT buffer, centered if needed
-        for j in 0..nsps_down {
-            let idx = i1 as usize + j;
-            let fft_idx = j + fft_offset;
-            if fft_idx < NFFT_SYM {
-                sym_real[fft_idx] = cd[idx].0;
-                sym_imag[fft_idx] = cd[idx].1;
+        // Handle partial symbols (WSJT-X does this - zero-pads out-of-bounds regions)
+        if i2 <= 0 || i1 >= cd.len() as i32 {
+            // Symbol completely out of bounds - stays zero (already zeroed above)
+            for tone in 0..8 {
+                cs[tone][k] = (0.0, 0.0);
+                s8[tone][k] = 0.0;
             }
+            continue;
+        }
+
+        // Copy in-bounds portion of symbol, zero-padding out-of-bounds regions
+        for j in 0..nsps_down {
+            let idx = i1 + (j as i32);
+            if idx >= 0 && (idx as usize) < cd.len() {
+                let fft_idx = j + fft_offset;
+                if fft_idx < NFFT_SYM {
+                    sym_real[fft_idx] = cd[idx as usize].0;
+                    sym_imag[fft_idx] = cd[idx as usize].1;
+                }
+            }
+            // else: stays zero (out of bounds sample)
         }
 
         // Perform FFT
@@ -795,11 +798,11 @@ fn extract_symbols_impl(
         eprintln!("  {} NORM: std_dev={:.5}, mean_after_norm={:.5}", signal_name, std_dev, mean_norm_llr);
     }
 
-    // Log quality metrics
-    let llr_mean = llr.iter().map(|x| x.abs()).sum::<f32>() / llr.len() as f32;
-    let llr_max = llr.iter().map(|x| x.abs()).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
-    eprintln!("  Extracted: nsync={}/21, mean_abs_LLR={:.2}, max_LLR={:.2}",
-              nsync, llr_mean, llr_max);
+    // Debug output disabled for performance
+    // let llr_mean = llr.iter().map(|x| x.abs()).sum::<f32>() / llr.len() as f32;
+    // let llr_max = llr.iter().map(|x| x.abs()).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
+    // eprintln!("  Extracted: nsync={}/21, mean_abs_LLR={:.2}, max_LLR={:.2}",
+    //           nsync, llr_mean, llr_max);
 
     Ok(nsync)
 }

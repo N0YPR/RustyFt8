@@ -76,40 +76,54 @@ pub fn sync_downsampled(
         }
 
         // Correlate with signal at three Costas positions
+        // Handle partial symbols with zero-padding
         let mut z1 = (0.0f32, 0.0f32);
         let mut z2 = (0.0f32, 0.0f32);
         let mut z3 = (0.0f32, 0.0f32);
 
-        if i1 >= 0 && (i1 as usize + NSPS_DOWN - 1) < cd.len() {
+        // Costas 1: Handle partial symbol (may start before buffer)
+        let i1_end = i1 + (NSPS_DOWN as i32);
+        if i1_end > 0 && i1 < cd.len() as i32 {
             for j in 0..NSPS_DOWN {
-                let idx = i1 as usize + j;
-                let (sr, si) = cd[idx];
-                let (wr, wi) = wave[j];
-                // Complex conjugate multiply: signal * conj(wave)
-                z1.0 += sr * wr + si * wi;
-                z1.1 += si * wr - sr * wi;
+                let idx = i1 + (j as i32);
+                if idx >= 0 && (idx as usize) < cd.len() {
+                    let (sr, si) = cd[idx as usize];
+                    let (wr, wi) = wave[j];
+                    // Complex conjugate multiply: signal * conj(wave)
+                    z1.0 += sr * wr + si * wi;
+                    z1.1 += si * wr - sr * wi;
+                }
+                // else: treat as zero (out of bounds)
             }
             total_valid_costas += 1;
         }
 
-        if i2 >= 0 && (i2 as usize + NSPS_DOWN - 1) < cd.len() {
+        // Costas 2: Handle partial symbol
+        let i2_end = i2 + (NSPS_DOWN as i32);
+        if i2_end > 0 && i2 < cd.len() as i32 {
             for j in 0..NSPS_DOWN {
-                let idx = i2 as usize + j;
-                let (sr, si) = cd[idx];
-                let (wr, wi) = wave[j];
-                z2.0 += sr * wr + si * wi;
-                z2.1 += si * wr - sr * wi;
+                let idx = i2 + (j as i32);
+                if idx >= 0 && (idx as usize) < cd.len() {
+                    let (sr, si) = cd[idx as usize];
+                    let (wr, wi) = wave[j];
+                    z2.0 += sr * wr + si * wi;
+                    z2.1 += si * wr - sr * wi;
+                }
             }
             total_valid_costas += 1;
         }
 
-        if i3 >= 0 && (i3 as usize + NSPS_DOWN - 1) < cd.len() {
+        // Costas 3: Handle partial symbol
+        let i3_end = i3 + (NSPS_DOWN as i32);
+        if i3_end > 0 && i3 < cd.len() as i32 {
             for j in 0..NSPS_DOWN {
-                let idx = i3 as usize + j;
-                let (sr, si) = cd[idx];
-                let (wr, wi) = wave[j];
-                z3.0 += sr * wr + si * wi;
-                z3.1 += si * wr - sr * wi;
+                let idx = i3 + (j as i32);
+                if idx >= 0 && (idx as usize) < cd.len() {
+                    let (sr, si) = cd[idx as usize];
+                    let (wr, wi) = wave[j];
+                    z3.0 += sr * wr + si * wi;
+                    z3.1 += si * wr - sr * wi;
+                }
             }
             total_valid_costas += 1;
         }
@@ -148,8 +162,9 @@ pub fn fine_sync(
     signal: &[f32],
     candidate: &Candidate,
 ) -> Result<Candidate, String> {
-    eprintln!("FINE_SYNC: freq={:.1} Hz, dt_in={:.2}s, sync_in={:.3}",
-              candidate.frequency, candidate.time_offset, candidate.sync_power);
+    // Debug output disabled for performance
+    // eprintln!("FINE_SYNC: freq={:.1} Hz, dt_in={:.2}s, sync_in={:.3}",
+    //           candidate.frequency, candidate.time_offset, candidate.sync_power);
 
     // Downsample centered on candidate frequency
     // Buffer size must match NFFT_OUT in downsample.rs (3200)
@@ -185,13 +200,14 @@ pub fn fine_sync(
 
     // eprintln!("  Time search: best_time_samples={}, best_sync={:.3}", best_time, best_sync);
 
-    // Fine frequency search: ±2.5 Hz in 0.5 Hz steps (matching WSJT-X)
+    // Fine frequency search: ±4.0 Hz in 0.5 Hz steps
+    // Expanded from ±2.5 Hz to handle larger coarse sync errors (up to 3.4 Hz observed)
     // Unlike phase rotation, we RE-DOWNSAMPLE at each test frequency
     // This ensures perfect centering at baseband, critical for nsym=2
     let mut best_freq = candidate.frequency;
-    let mut sync_scores: Vec<(f32, f32)> = Vec::with_capacity(11); // Store (freq, sync) pairs
+    let mut sync_scores: Vec<(f32, f32)> = Vec::with_capacity(17); // Store (freq, sync) pairs
 
-    for df in -5..=5 {
+    for df in -8..=8 {
         let freq_offset = df as f32 * 0.5; // 0.5 Hz steps
         let test_freq = candidate.frequency + freq_offset;
 
@@ -274,8 +290,9 @@ pub fn fine_sync(
     // Use final_sample_rate since we re-downsampled at best_freq
     let refined_time = best_time as f32 / final_sample_rate;
 
-    eprintln!("  REFINED: freq_in={:.1} -> freq_out={:.1} Hz, dt_out={:.2}s, sync_coarse={:.3} (preserved)",
-              candidate.frequency, best_freq, refined_time, candidate.sync_power);
+    // Debug output disabled for performance
+    // eprintln!("  REFINED: freq_in={:.1} -> freq_out={:.1} Hz, dt_out={:.2}s, sync_coarse={:.3} (preserved)",
+    //           candidate.frequency, best_freq, refined_time, candidate.sync_power);
 
     // CRITICAL: Preserve coarse sync score (matching WSJT-X ft8b.f90)
     // WSJT-X uses fine sync ONLY to refine frequency and time, NOT for ranking

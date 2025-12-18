@@ -20,8 +20,8 @@ use bitvec::prelude::*;
 use constants::{NM, NRW, M};
 
 pub use encode::encode;
-pub use decode::{decode, decode_with_snapshots, decode_with_ap};
-pub use osd::osd_decode;
+pub use decode::{decode, decode_with_snapshots, decode_with_ap, decode_damped};
+pub use osd::{osd_decode, osd_decode_wsjt};
 
 /// Decoding depth strategy (matches WSJT-X ndepth/maxosd settings)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +83,8 @@ fn compute_nharderrors(llr: &[f32]) -> usize {
 ///
 /// **BpOsdHybrid** (maxosd=2):
 /// - Run BP for 30 iterations, saving snapshots at iterations 1, 2, 3
-/// - If BP fails, try OSD with each snapshot
+/// - If BP fails, try damped BP with various parameters
+/// - If still failing, try OSD with BP snapshots
 /// - Most aggressive, explores different solution space regions
 ///
 /// # Arguments
@@ -116,8 +117,7 @@ pub fn decode_hybrid_with_ap(
     apmask: Option<&[bool]>,
     depth: DecodeDepth
 ) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
-    let max_bp_iters = 50; // Increased from 30 to give BP more chances to converge
-    let osd_order = 3; // Try order-3 - WSJT-X may use higher order for weak signals
+    let max_bp_iters = 30; // Standard BP iterations (WSJT-X uses 30)
 
     match depth {
         DecodeDepth::BpOnly => {
@@ -131,62 +131,93 @@ pub fn decode_hybrid_with_ap(
                 return Some(result);
             }
 
-            // BP failed, try OSD with channel LLRs only
-            // Note: OSD doesn't use AP mask, it works on raw LLRs
-            if let Some(decoded) = osd_decode(llr, osd_order) {
-                // OSD succeeded - compute nharderrors from channel LLRs
-                let nharderrors = compute_nharderrors(llr);
-                return Some((decoded, 0, nharderrors)); // iters=0 indicates OSD decode
+            // BP failed - check if OSD is worth trying
+            let nharderrors = compute_nharderrors(llr);
+            if nharderrors > 36 {
+                // Too many hard errors - OSD won't help, skip it
+                return None;
+            }
+
+            // Try OSD order-1 (91 patterns, very fast)
+            if let Some(decoded) = osd_decode(llr, 1) {
+                return Some((decoded, 0, nharderrors));
             }
 
             None
         }
 
         DecodeDepth::BpOsdHybrid => {
-            // If AP mask is provided, use simpler strategy (no snapshots yet)
-            // TODO: Add AP mask support to decode_with_snapshots for full hybrid strategy
+            // Try BP first, capturing accumulated LLR snapshots for OSD fallback
+            // WSJT-X saves accumulated LLRs (zsum = zsum + zn) at iterations 1, 2, 3
+            let save_at_iters = [1, 2, 3];
+            let bp_snapshots: Vec<Vec<f32>>;
+
             if apmask.is_some() {
-                // Try BP with AP first
                 if let Some(result) = decode_with_ap(llr, apmask, max_bp_iters) {
                     return Some(result);
                 }
-
-                // BP+AP failed, try OSD with the AP-hinted LLRs
-                if let Some(decoded) = osd_decode(llr, osd_order) {
-                    let nharderrors = compute_nharderrors(llr);
-                    return Some((decoded, 0, nharderrors));
+                bp_snapshots = Vec::new(); // No snapshots with AP mask
+            } else {
+                // Try BP with snapshots
+                match decode_with_snapshots(llr, max_bp_iters, &save_at_iters) {
+                    Ok((decoded, iters, nharderrors, _)) => {
+                        return Some((decoded, iters, nharderrors));
+                    }
+                    Err(snapshots) => {
+                        bp_snapshots = snapshots; // Captured accumulated LLRs for OSD
+                    }
                 }
+            }
 
+            // BP failed - compute initial parity check violations
+            let nharderrors = compute_nharderrors(llr);
+
+            // Try damped BP with various damping factors
+            // Damping can help when standard BP oscillates
+            for &damping in &[0.25, 0.5] {
+                if let Some((decoded, iters, _)) = decode_damped(llr, max_bp_iters + 20, damping) {
+                    return Some((decoded, iters, nharderrors));
+                }
+            }
+
+            // Try BP with scaled LLRs (helps when LLR magnitudes are off)
+            for &scale in &[0.5, 0.75, 1.5, 2.0] {
+                let scaled: Vec<f32> = llr.iter().map(|v| v * scale).collect();
+                if let Some((decoded, iters, _)) = decode_with_ap(&scaled, None, max_bp_iters) {
+                    return Some((decoded, iters, nharderrors));
+                }
+            }
+
+            // Check if OSD is worth trying
+            // Note: nharderrors here is parity check violations, not bit errors.
+            // For weak signals with 15-20 bit errors, parity violations can exceed 40.
+            // We use a higher threshold (50) to allow OSD a chance on difficult signals.
+            if nharderrors > 50 {
+                // Too many parity violations - OSD won't help
                 return None;
             }
 
-            // Full hybrid strategy with BP snapshots (no AP)
-            let save_at_iters = [1, 2, 3];
-
-            // Try BP first with snapshot saving
-            match decode_with_snapshots(llr, max_bp_iters, &save_at_iters) {
-                Ok((decoded, iters, nharderrors, _snapshots)) => {
-                    // BP converged!
-                    return Some((decoded, iters, nharderrors));
+            // CRITICAL: Try OSD with BP-accumulated LLR snapshots first (WSJT-X style)
+            // This is the key to decoding difficult signals like N1PJT!
+            // The accumulated LLRs have a smoothing effect that improves OSD performance.
+            // First try ndeep=3 on all snapshots (fast), then ndeep=4 on first snapshot only.
+            for snapshot in &bp_snapshots {
+                if let Some(decoded) = osd_decode_wsjt(snapshot, 3) {
+                    return Some((decoded, 0, nharderrors));
                 }
-                Err(snapshots) => {
-                    // BP failed, compute nharderrors once from channel LLRs
-                    let nharderrors = compute_nharderrors(llr);
+            }
+            // If ndeep=3 failed on all snapshots, try ndeep=4 on first snapshot only (slower)
+            if let Some(snapshot) = bp_snapshots.first() {
+                if let Some(decoded) = osd_decode_wsjt(snapshot, 4) {
+                    return Some((decoded, 0, nharderrors));
+                }
+            }
 
-                    // Try OSD with each saved snapshot
-                    for (idx, snapshot_llr) in snapshots.iter().enumerate() {
-                        if let Some(decoded) = osd_decode(snapshot_llr, osd_order) {
-                            eprintln!("  OSD succeeded with iteration {} LLRs (order {})",
-                                      save_at_iters[idx], osd_order);
-                            return Some((decoded, 0, nharderrors));
-                        }
-                    }
-
-                    // All snapshot attempts failed, fall back to channel LLRs
-                    if let Some(decoded) = osd_decode(llr, osd_order) {
-                        eprintln!("  OSD succeeded with channel LLRs (order {})", osd_order);
-                        return Some((decoded, 0, nharderrors));
-                    }
+            // Fallback: try OSD with channel LLRs (less effective but sometimes works)
+            // Progressive OSD: try order 1 first (fast), then order 2 (thorough)
+            for order in 1..=2 {
+                if let Some(decoded) = osd_decode(llr, order) {
+                    return Some((decoded, 0, nharderrors));
                 }
             }
 
