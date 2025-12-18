@@ -4,6 +4,7 @@
 //! Reference recordings are compared against WSJT-X output for validation.
 
 use rustyft8::{decode_ft8, decode_ft8_multipass, DecoderConfig, DecodedMessage};
+use std::time::Instant;
 
 #[path = "test_utils.rs"]
 mod test_utils;
@@ -38,6 +39,7 @@ fn test_real_ft8_recording_210703_133430() {
 
     let mut decoded_messages: Vec<DecodedMessage> = Vec::new();
     // Use multipass decoding with signal subtraction (3 passes)
+    let start_time = Instant::now();
     let count = decode_ft8_multipass(&signal_15s, &config, 3, |msg| {
         println!("Decoded: {} @ {:.1} Hz, DT={:.2}s, SNR={} dB, sync={:.2}, LDPC iters={}",
             msg.message, msg.frequency, msg.time_offset, msg.snr_db,
@@ -45,6 +47,7 @@ fn test_real_ft8_recording_210703_133430() {
         decoded_messages.push(msg);
         true
     }).expect("Decode failed");
+    let decode_duration = start_time.elapsed();
 
     println!("\nTotal decoded: {} messages", count);
     println!("WSJT-X reference: 22 messages");
@@ -154,6 +157,16 @@ fn test_real_ft8_recording_210703_133430() {
     println!("  Progress toward WSJT-X parity: {}/22 ({:.0}%)",
         required_messages.len() - missing_required.len() + advanced_decoded.len(),
         100.0 * (required_messages.len() - missing_required.len() + advanced_decoded.len()) as f32 / 22.0);
+
+    // Performance check: ensure decode completes within time limit
+    // Current baseline: ~55s on reference hardware
+    // Limit set to 90s to allow for slower CI machines while catching major regressions
+    let max_duration_secs = 90;
+    let actual_secs = decode_duration.as_secs();
+    println!("  Decode time: {}s (limit: {}s)", actual_secs, max_duration_secs);
+    assert!(actual_secs <= max_duration_secs,
+        "Performance regression: decode took {}s, limit is {}s",
+        actual_secs, max_duration_secs);
 }
 
 #[test]
