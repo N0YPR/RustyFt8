@@ -183,20 +183,13 @@ pub fn decode_hybrid_with_ap(
             // CRITICAL: Try OSD with BP-accumulated LLR snapshots (WSJT-X style)
             // This is the key to decoding difficult signals like N1PJT!
             // The accumulated LLRs have a smoothing effect that improves OSD performance.
-            // Try ndeep=3 on all snapshots first (fast), then ndeep=4 on first snapshot only.
             for snapshot in &bp_snapshots {
                 if let Some(decoded) = osd_decode_wsjt(snapshot, 3) {
                     return Some((decoded, 0, nharderrors));
                 }
             }
-            // If ndeep=3 failed, try ndeep=4 on first snapshot only (slower but thorough)
-            if let Some(snapshot) = bp_snapshots.first() {
-                if let Some(decoded) = osd_decode_wsjt(snapshot, 4) {
-                    return Some((decoded, 0, nharderrors));
-                }
-            }
-
             // Fallback: try OSD order-1 with channel LLRs (very fast, 91 patterns)
+            // Note: ndeep=4 removed - tries 2.8M patterns but doesn't improve decode rate
             if let Some(decoded) = osd_decode(llr, 1) {
                 return Some((decoded, 0, nharderrors));
             }

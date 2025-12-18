@@ -6,6 +6,7 @@
 use crate::{ldpc, symbol, sync};
 use bitvec::prelude::*;
 use rayon::prelude::*;
+use std::time::Instant;
 
 /// Decoded FT8 message with metadata
 #[derive(Debug, Clone)]
@@ -108,6 +109,9 @@ where
     if candidates.is_empty() {
         return Ok(0);
     }
+
+    let num_candidates = candidates.len().min(config.decode_top_n);
+    eprintln!("Processing {} candidates (of {} found)", num_candidates, candidates.len());
 
     // LLR scaling factors to try (optimized order - most common values first)
     let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5];
@@ -516,6 +520,7 @@ where
     let mut all_decoded_messages: Vec<String> = Vec::new();
 
     for pass_num in 0..max_passes {
+        let pass_start = Instant::now();
         eprintln!("\n=== Pass {} ===", pass_num + 1);
 
         // Keep same config for all passes to avoid false positives from subtraction artifacts
@@ -542,7 +547,7 @@ where
 
         let pass_count = pass_decodes.len();
         total_decodes += pass_count;
-        eprintln!("Pass {} decoded: {} new messages", pass_num + 1, pass_count);
+        eprintln!("Pass {} decoded: {} new messages in {:.2}s", pass_num + 1, pass_count, pass_start.elapsed().as_secs_f64());
 
         // Stop if no new signals found
         if pass_count == 0 {
