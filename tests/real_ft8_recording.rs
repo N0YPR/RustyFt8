@@ -18,13 +18,14 @@ fn test_real_ft8_recording_210703_133430() {
     // This test validates RustyFt8 against WSJT-X using multipass decoding with signal subtraction.
     // WSJT-X decodes 22 messages from this recording (SNR range: 16 to -24 dB).
     //
-    // RustyFt8 currently decodes 11 messages using:
+    // RustyFt8 currently decodes 16 messages using:
     // - Pure LDPC for 9 strong signals
     // - Signal subtraction to reveal 2 additional masked signals
+    // - OSD with accumulated LLR snapshots for 5 weak signals (including N1PJT)
     //
     // Future improvements needed for WSJT-X parity:
-    // - AP decoding with callsign hash table (for 10 more messages)
-    // - OSD for extremely weak signals (for 3 more messages, SNR <= -20 dB)
+    // - AP decoding with callsign hash table (for 3 more messages)
+    // - Deeper OSD for extremely weak signals (for 3 more messages, SNR <= -20 dB)
 
     let wav_path = "tests/test_data/210703_133430.wav";
     let signal = read_wav_file(wav_path)
@@ -48,8 +49,8 @@ fn test_real_ft8_recording_210703_133430() {
     println!("\nTotal decoded: {} messages", count);
     println!("WSJT-X reference: 22 messages");
 
-    // Required messages (11 total) - these MUST decode for the test to pass
-    // 9 pure LDPC + 2 revealed by signal subtraction
+    // Required messages (16 total) - these MUST decode for the test to pass
+    // All messages currently decoded by RustyFt8
     let required_messages = vec![
         // Pure LDPC (9 messages)
         "W1FC F5BZB -08",
@@ -64,20 +65,21 @@ fn test_real_ft8_recording_210703_133430() {
         // Revealed by signal subtraction (2 messages)
         "K1BZM EA3CJ JN01",
         "WA2FZW DL5AXX RR73",
-    ];
-
-    // Additional messages requiring advanced features (not required for test to pass)
-    let advanced_messages = vec![
-        // Messages requiring AP with callsign hash table
+        // OSD decodes with accumulated LLR snapshots (5 messages)
         "N1PJT HB9CQK -10",
         "KD2UGC F6GCP R-23",
-        "A92EE F5PSR -14",
         "K1BZM EA3GP -09",
         "N1API HA6FQ -23",
+        "CQ EA2BFM IN83",
+    ];
+
+    // Additional messages requiring advanced features (not yet decoded)
+    let advanced_messages = vec![
+        // Messages requiring AP with callsign hash table
+        "A92EE F5PSR -14",
         "N1API F2VX 73",
         "CQ DX DL8YHR JO41",
-        "CQ EA2BFM IN83",
-        // Extremely weak signals requiring OSD (SNR <= -20 dB)
+        // Extremely weak signals requiring deeper OSD (SNR <= -20 dB)
         "K1JT HA5WA 73",
         "K1BZM DK8NE -10",
         "TU; 7N9RST EI8TRF 589 5732",
