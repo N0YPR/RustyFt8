@@ -149,7 +149,8 @@ pub fn decode_hybrid_with_ap(
         DecodeDepth::BpOsdHybrid => {
             // Try BP first, capturing accumulated LLR snapshots for OSD fallback
             // WSJT-X saves accumulated LLRs (zsum = zsum + zn) at iterations 1, 2, 3
-            let save_at_iters = [1, 2, 3];
+            // We use only 1 snapshot for speed (iter 1 is sufficient)
+            let save_at_iters = [1];
             let bp_snapshots: Vec<Vec<f32>>;
 
             if apmask.is_some() {
