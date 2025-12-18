@@ -49,7 +49,7 @@ fn test_real_ft8_recording_210703_133430() {
     }).expect("Decode failed");
     let decode_duration = start_time.elapsed();
 
-    println!("\nTotal decoded: {} messages", count);
+    println!("\nTotal decoded: {} messages in {:.2}s", count, decode_duration.as_secs_f64());
     println!("WSJT-X reference: 22 messages");
 
     // Required messages (16 total) - these MUST decode for the test to pass
