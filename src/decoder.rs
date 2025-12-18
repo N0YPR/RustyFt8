@@ -110,7 +110,7 @@ where
     }
 
     // LLR scaling factors to try (optimized order - most common values first)
-    let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 2.5];
+    let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5];
     // Disable nsym=2/3: creates more false positives than correct decodes
     // Testing showed: nsym=1 gives 8 correct + 1 false positive (11%)
     //                 nsym=1/2/3 gives 8 correct + 2 false positives (20%)
