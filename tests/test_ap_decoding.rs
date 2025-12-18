@@ -31,6 +31,7 @@ fn test_ap_decoding_k1bzm() {
         enable_ap: false,
         mycall: None,
         hiscall: None,
+        max_passes: 1,
     };
 
     let decode_count_no_ap = Arc::new(AtomicUsize::new(0));
@@ -67,6 +68,7 @@ fn test_ap_decoding_k1bzm() {
         enable_ap: true,
         mycall: Some("K1BZM".to_string()),  // Receiver callsign
         hiscall: Some("EA3GP".to_string()), // DX station callsign
+        max_passes: 1,
     };
 
     let decode_count_with_ap = Arc::new(AtomicUsize::new(0));
@@ -146,6 +148,7 @@ fn test_ap_with_cq_only() {
         enable_ap: true,
         mycall: None,     // No callsigns configured
         hiscall: None,    // AP will only use Type 1 (CQ pattern)
+        max_passes: 1,
     };
 
     let decode_count = Arc::new(AtomicUsize::new(0));

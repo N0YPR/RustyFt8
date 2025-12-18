@@ -12,6 +12,7 @@
 
 use crate::pulse;
 use rustfft::{FftPlanner, num_complex::Complex};
+use tracing::{debug, trace};
 
 const SAMPLE_RATE: f32 = 12000.0;
 const NSPS: usize = 1920;
@@ -202,8 +203,7 @@ pub fn subtract_ft8_signal(
     // Apply subtraction with interpolated offset (1 more evaluation)
     let refined_time = time_offset + (best_offset as f32 / SAMPLE_RATE);
     if best_offset != 0 {
-        eprintln!("  Time refinement: {:+3} samples ({:+.3} ms)",
-            best_offset, best_offset as f32 * 1000.0 / SAMPLE_RATE);
+        trace!(samples = best_offset, ms = best_offset as f32 * 1000.0 / SAMPLE_RATE, "Time refinement applied");
     }
 
     subtract_ft8_signal_internal(audio, tones, frequency, refined_time, true)
@@ -259,21 +259,15 @@ fn subtract_ft8_signal_internal(
     // Low-pass filter to get smoothed amplitude estimate
     filter.apply(&mut camp, NFRAME)?;
 
-    // DEBUG: Check synthesized signal and estimated amplitude (disabled)
-    let _debug = false;
-    if _debug && report_power {
-        // Check reference signal power
+    // Check synthesized signal and estimated amplitude (trace level)
+    if report_power {
         let cref_power: f64 = cref.iter()
             .map(|(r, i)| (r*r + i*i) as f64)
             .sum();
-
-        // Check estimated amplitude (camp after filtering)
         let camp_mag: f64 = camp.iter().take(NFRAME)
             .map(|c| (c.re*c.re + c.im*c.im) as f64)
             .sum();
-
-        eprintln!("  DEBUG: cref_power={:.3e}, camp_mag={:.3e}",
-                  cref_power, camp_mag);
+        trace!(cref_power, camp_mag, "Reference and amplitude power");
     }
 
     // Calculate power before subtraction (for debugging)
@@ -308,8 +302,8 @@ fn subtract_ft8_signal_internal(
         }
     }
 
-    if _debug && report_power {
-        eprintln!("  DEBUG: reconstructed_power={:.3e}", reconstructed_power);
+    if report_power {
+        trace!(reconstructed_power, "Reconstructed signal power");
     }
 
     // Calculate power after subtraction (for debugging)
@@ -325,11 +319,8 @@ fn subtract_ft8_signal_internal(
     // Report power reduction (only if requested)
     if report_power && power_before > 0.0 {
         let reduction_db = 10.0 * (power_after / power_before).log10();
-        if _debug {
-            eprintln!("  DEBUG: power_before={:.3e}, power_after={:.3e}",
-                      power_before, power_after);
-        }
-        eprintln!("  Subtraction @ {:.1} Hz: {:.1} dB power change", frequency, reduction_db);
+        trace!(power_before, power_after, "Power before/after subtraction");
+        debug!(frequency, reduction_db, "Signal subtraction complete");
     }
 
     Ok(())

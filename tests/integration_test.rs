@@ -263,6 +263,7 @@ fn test_roundtrip_near_threshold() {
         enable_ap: false,
         mycall: None,
         hiscall: None,
+        max_passes: 1,        // Single pass for fast tests
     };
     test_roundtrip_with_config("CQ W1ABC FN42", -15.0, true, &fast_config);
 }
@@ -325,6 +326,7 @@ fn test_multi_signal_decode() {
         enable_ap: false,
         mycall: None,
         hiscall: None,
+        max_passes: 1,     // Single pass for fast tests
     };
     let mut decoded_messages = Vec::new();
 

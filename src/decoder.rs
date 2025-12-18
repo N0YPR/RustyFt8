@@ -7,6 +7,7 @@ use crate::{ldpc, symbol, sync};
 use bitvec::prelude::*;
 use rayon::prelude::*;
 use std::time::Instant;
+use tracing::{debug, info, warn};
 
 /// Decoded FT8 message with metadata
 #[derive(Debug, Clone)]
@@ -59,6 +60,8 @@ pub struct DecoderConfig {
     pub mycall: Option<String>,
     /// DX station's callsign for AP decoding (e.g., "EA3GP")
     pub hiscall: Option<String>,
+    /// Maximum decode passes (1 = single pass, >1 = multipass with signal subtraction)
+    pub max_passes: usize,
 }
 
 impl Default for DecoderConfig {
@@ -73,6 +76,7 @@ impl Default for DecoderConfig {
             enable_ap: true,  // AP enabled by default (Type 1 CQ pattern works without callsigns)
             mycall: None,     // Optional: configure for additional AP types (2-6)
             hiscall: None,    // Optional: configure for additional AP types (2-6)
+            max_passes: 3,    // Multipass with subtraction (like WSJT-X)
         }
     }
 }
@@ -81,6 +85,9 @@ impl Default for DecoderConfig {
 ///
 /// This follows the WSJT-X pattern: messages are reported immediately as found, not batched.
 /// Duplicate messages (same text from same candidate) are automatically filtered.
+///
+/// When `config.max_passes > 1`, performs multi-pass decoding with signal subtraction
+/// to reveal weaker signals masked by stronger ones.
 ///
 /// The callback can return `false` to stop decoding early (e.g., after finding expected signals).
 ///
@@ -94,6 +101,73 @@ impl Default for DecoderConfig {
 ///
 /// Total number of unique messages decoded
 pub fn decode_ft8<F>(signal: &[f32], config: &DecoderConfig, mut callback: F) -> Result<usize, &'static str>
+where
+    F: FnMut(DecodedMessage) -> bool,
+{
+    if config.max_passes <= 1 {
+        // Single pass - direct decode
+        return decode_ft8_single_pass(signal, config, callback);
+    }
+
+    // Multi-pass decoding with signal subtraction
+    let mut working_signal = signal.to_vec();
+    let mut total_decodes = 0;
+    let mut all_decoded_messages: Vec<String> = Vec::new();
+
+    for pass_num in 0..config.max_passes {
+        let pass_start = Instant::now();
+        info!(pass = pass_num + 1, "Starting decode pass");
+
+        let mut pass_decodes = Vec::new();
+
+        // Decode signals in current audio
+        decode_ft8_single_pass(&working_signal, config, |msg| {
+            // Only report new messages (deduplication across passes)
+            if !all_decoded_messages.contains(&msg.message) {
+                all_decoded_messages.push(msg.message.clone());
+                pass_decodes.push(msg.clone());
+
+                // Report to user
+                let should_continue = callback(msg);
+                if !should_continue {
+                    return false;
+                }
+            }
+            true
+        })?;
+
+        let pass_count = pass_decodes.len();
+        total_decodes += pass_count;
+        info!(pass = pass_num + 1, decoded = pass_count, elapsed_secs = pass_start.elapsed().as_secs_f64(), "Pass complete");
+
+        // Stop if no new signals found
+        if pass_count == 0 {
+            debug!("No new signals found, stopping multipass");
+            break;
+        }
+
+        // Subtract decoded signals (if not last pass)
+        if pass_num < config.max_passes - 1 {
+            debug!(count = pass_count, "Subtracting decoded signals from audio");
+            for decoded in &pass_decodes {
+                if let Err(e) = crate::subtract::subtract_ft8_signal(
+                    &mut working_signal,
+                    &decoded.tones,
+                    decoded.frequency,
+                    decoded.time_offset,
+                ) {
+                    warn!(error = %e, "Signal subtraction failed");
+                }
+            }
+        }
+    }
+
+    info!(total = total_decodes, "Multipass decode complete");
+    Ok(total_decodes)
+}
+
+/// Single-pass decode (internal helper)
+fn decode_ft8_single_pass<F>(signal: &[f32], config: &DecoderConfig, mut callback: F) -> Result<usize, &'static str>
 where
     F: FnMut(DecodedMessage) -> bool,
 {
@@ -111,15 +185,10 @@ where
     }
 
     let num_candidates = candidates.len().min(config.decode_top_n);
-    eprintln!("Processing {} candidates (of {} found)", num_candidates, candidates.len());
+    debug!(processing = num_candidates, found = candidates.len(), "Processing candidates");
 
     // LLR scaling factors to try (optimized order - most common values first)
     let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5];
-    // Disable nsym=2/3: creates more false positives than correct decodes
-    // Testing showed: nsym=1 gives 8 correct + 1 false positive (11%)
-    //                 nsym=1/2/3 gives 8 correct + 2 false positives (20%)
-    // Need better phase tracking or LLR quality before nsym=2/3 is useful
-    let nsym_values = [1];
 
     // Process all candidates in parallel, collecting successful decodes
     let min_snr_threshold = config.min_snr_db;
@@ -183,9 +252,6 @@ where
                         *v *= scale;
                     }
 
-                    // eprintln!("  LDPC_ATTEMPT: freq={:.1} Hz, dt={:.2}s, method={}, scale={:.1}, rank={}",
-                    //          refined.frequency, refined.time_offset, method_name, scale, candidate_idx);
-
                     // Progressive decoding strategy:
                     // 1. Try BP-only first - fast, minimal false positives
                     // 2. If BP fails, try OSD based on candidate rank:
@@ -233,17 +299,6 @@ where
                         let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
 
                         if let Ok(message) = crate::decode(&info_bits, None) {
-                            // Debug: log LDPC decoder type and LLR method (disabled by default)
-                            let _debug_ldpc = false;
-                            if _debug_ldpc {
-                                let decode_type = if iters == 0 {
-                                    "OSD"
-                                } else {
-                                    "BP"
-                                };
-                                eprintln!("  LDPC: {} iters={}, method={}, freq={:.1} Hz, nsym={}, scale={:.1}",
-                                         decode_type, iters, method_name, refined.frequency, nsym, scale);
-                            }
                             if !message.is_empty() {
                                 // Validate that the message contains valid callsigns
                                 // This filters out OSD false positives (garbage decoded from noise)
@@ -489,90 +544,6 @@ where
     }
 
     Ok(decode_count)
-}
-
-/// Decode all FT8 signals with multi-pass subtraction (like WSJT-X)
-///
-/// Performs multiple decode passes, subtracting decoded signals between passes
-/// to reveal weaker signals that were masked by stronger ones.
-///
-/// # Arguments
-///
-/// * `signal` - 15-second audio recording at 12 kHz sample rate
-/// * `config` - Decoder configuration
-/// * `max_passes` - Maximum number of decode passes (typically 2-3)
-/// * `callback` - Called immediately for each decoded message. Returns `true` to continue, `false` to stop.
-///
-/// # Returns
-///
-/// Total number of unique messages decoded across all passes
-pub fn decode_ft8_multipass<F>(
-    signal: &[f32],
-    config: &DecoderConfig,
-    max_passes: usize,
-    mut callback: F,
-) -> Result<usize, &'static str>
-where
-    F: FnMut(DecodedMessage) -> bool,
-{
-    let mut working_signal = signal.to_vec();
-    let mut total_decodes = 0;
-    let mut all_decoded_messages: Vec<String> = Vec::new();
-
-    for pass_num in 0..max_passes {
-        let pass_start = Instant::now();
-        eprintln!("\n=== Pass {} ===", pass_num + 1);
-
-        // Keep same config for all passes to avoid false positives from subtraction artifacts
-        // (Lowering sync threshold makes it easier to find spurious peaks in residuals)
-        let pass_config = config.clone();
-
-        let mut pass_decodes = Vec::new();
-
-        // Decode signals in current audio
-        decode_ft8(&working_signal, &pass_config, |msg| {
-            // Only report new messages (deduplication)
-            if !all_decoded_messages.contains(&msg.message) {
-                all_decoded_messages.push(msg.message.clone());
-                pass_decodes.push(msg.clone());
-
-                // Report to user
-                let should_continue = callback(msg);
-                if !should_continue {
-                    return false;
-                }
-            }
-            true
-        })?;
-
-        let pass_count = pass_decodes.len();
-        total_decodes += pass_count;
-        eprintln!("Pass {} decoded: {} new messages in {:.2}s", pass_num + 1, pass_count, pass_start.elapsed().as_secs_f64());
-
-        // Stop if no new signals found
-        if pass_count == 0 {
-            eprintln!("No new signals found, stopping");
-            break;
-        }
-
-        // Subtract decoded signals (if not last pass)
-        if pass_num < max_passes - 1 {
-            eprintln!("Subtracting {} signals from audio...", pass_count);
-            for decoded in &pass_decodes {
-                if let Err(e) = crate::subtract::subtract_ft8_signal(
-                    &mut working_signal,
-                    &decoded.tones,
-                    decoded.frequency,
-                    decoded.time_offset,
-                ) {
-                    eprintln!("Warning: Signal subtraction failed: {}", e);
-                }
-            }
-        }
-    }
-
-    eprintln!("\n=== Total: {} unique messages decoded ===\n", total_decodes);
-    Ok(total_decodes)
 }
 
 #[cfg(test)]

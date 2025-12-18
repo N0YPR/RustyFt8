@@ -3,7 +3,7 @@
 //! Tests the decoder against actual FT8 recordings to validate real-world performance.
 //! Reference recordings are compared against WSJT-X output for validation.
 
-use rustyft8::{decode_ft8, decode_ft8_multipass, DecoderConfig, DecodedMessage};
+use rustyft8::{decode_ft8, DecoderConfig, DecodedMessage};
 use std::time::Instant;
 
 #[path = "test_utils.rs"]
@@ -13,62 +13,38 @@ use test_utils::{read_wav_file, normalize_signal_length};
 #[test]
 #[ignore] // Slow test - run with: cargo test -- --ignored
 fn test_real_ft8_recording_210703_133430() {
-    // Run this specific test with:
-    // cargo test --release --test real_ft8_recording test_real_ft8_recording_210703_133430 -- --ignored --nocapture
-    //
-    // This test validates RustyFt8 against WSJT-X using multipass decoding with signal subtraction.
+    // Validates RustyFt8 against WSJT-X using multipass decoding with signal subtraction.
     // WSJT-X decodes 22 messages from this recording (SNR range: 16 to -24 dB).
     //
-    // RustyFt8 currently decodes 16 messages using:
-    // - Pure LDPC for 9 strong signals
-    // - Signal subtraction to reveal 2 additional masked signals
-    // - OSD with accumulated LLR snapshots for 5 weak signals (including N1PJT)
-    //
-    // Future improvements needed for WSJT-X parity:
-    // - AP decoding with callsign hash table (for 3 more messages)
-    // - Deeper OSD for extremely weak signals (for 3 more messages, SNR <= -20 dB)
+    // Run with: cargo test --release --test real_ft8_recording test_real_ft8_recording_210703_133430 -- --ignored
 
     let wav_path = "tests/test_data/210703_133430.wav";
-    let signal = read_wav_file(wav_path)
-        .expect("Failed to read WAV file");
-
-    println!("Read {} samples from {}", signal.len(), wav_path);
-
+    let signal = read_wav_file(wav_path).expect("Failed to read WAV file");
     let signal_15s = normalize_signal_length(signal);
     let config = DecoderConfig::default();
 
     let mut decoded_messages: Vec<DecodedMessage> = Vec::new();
-    // Use multipass decoding with signal subtraction (3 passes)
     let start_time = Instant::now();
-    let count = decode_ft8_multipass(&signal_15s, &config, 3, |msg| {
-        println!("Decoded: {} @ {:.1} Hz, DT={:.2}s, SNR={} dB, sync={:.2}, LDPC iters={}",
-            msg.message, msg.frequency, msg.time_offset, msg.snr_db,
-            msg.sync_power, msg.ldpc_iterations);
+    let _count = decode_ft8(&signal_15s, &config, |msg| {
         decoded_messages.push(msg);
         true
     }).expect("Decode failed");
     let decode_duration = start_time.elapsed();
 
-    println!("\nTotal decoded: {} messages in {:.2}s", count, decode_duration.as_secs_f64());
-    println!("WSJT-X reference: 22 messages");
-
-    // Required messages (16 total) - these MUST decode for the test to pass
-    // All messages currently decoded by RustyFt8
-    let required_messages = vec![
-        // Pure LDPC (9 messages)
+    // Messages that MUST decode for the test to pass
+    let required_messages = [
         "W1FC F5BZB -08",
         "WM3PEN EA6VQ -09",
         "CQ F5RXL IN94",
         "K1JT HA0DU KN07",
+        "A92EE F5PSR -14",
         "N1JFU EA6EE R-07",
         "K1JT EA3AGB -15",
         "W1DIG SV9CVY -14",
         "W0RSJ EA3BMU RR73",
         "XE2X HA2NP RR73",
-        // Revealed by signal subtraction (2 messages)
         "K1BZM EA3CJ JN01",
         "WA2FZW DL5AXX RR73",
-        // OSD decodes with accumulated LLR snapshots (5 messages)
         "N1PJT HB9CQK -10",
         "KD2UGC F6GCP R-23",
         "K1BZM EA3GP -09",
@@ -76,25 +52,21 @@ fn test_real_ft8_recording_210703_133430() {
         "CQ EA2BFM IN83",
     ];
 
-    // Additional messages requiring advanced features (not yet decoded)
-    let advanced_messages = vec![
-        // Messages requiring AP with callsign hash table
-        "A92EE F5PSR -14",
+    // Messages not yet decoded (tracking progress toward WSJT-X parity)
+    let todo_messages = [
         "N1API F2VX 73",
         "CQ DX DL8YHR JO41",
-        // Extremely weak signals requiring deeper OSD (SNR <= -20 dB)
         "K1JT HA5WA 73",
         "K1BZM DK8NE -10",
         "TU; 7N9RST EI8TRF 589 5732",
     ];
 
-    // All expected messages (for reporting)
-    let all_expected: Vec<&str> = required_messages.iter().chain(advanced_messages.iter()).cloned().collect();
+    let all_expected: Vec<&str> = required_messages.iter()
+        .chain(todo_messages.iter())
+        .cloned()
+        .collect();
 
-    // Verify we decoded at least some messages
-    assert!(!decoded_messages.is_empty(), "Should decode at least one message from real recording");
-
-    // Verify all decoded messages are valid (non-empty, reasonable parameters)
+    // Verify decoded messages are valid
     for msg in &decoded_messages {
         assert!(!msg.message.is_empty(), "Decoded message should not be empty");
         assert!(msg.frequency > 0.0 && msg.frequency < 4000.0,
@@ -103,70 +75,40 @@ fn test_real_ft8_recording_210703_133430() {
             "SNR {} dB should be in reasonable range", msg.snr_db);
     }
 
-    // Check that we decoded the required signals
     let decoded_texts: Vec<String> = decoded_messages.iter()
         .map(|m| m.message.clone())
         .collect();
 
-    let mut missing_required = Vec::new();
-    for expected in &required_messages {
-        if !decoded_texts.contains(&expected.to_string()) {
-            missing_required.push(*expected);
-        }
-    }
+    let missing_required: Vec<_> = required_messages.iter()
+        .filter(|msg| !decoded_texts.contains(&msg.to_string()))
+        .collect();
 
-    // Check how many advanced messages we decoded (for progress tracking)
-    let advanced_decoded: Vec<_> = advanced_messages.iter()
+    let todo_decoded: Vec<_> = todo_messages.iter()
         .filter(|msg| decoded_texts.contains(&msg.to_string()))
         .collect();
 
-    // Report false positives (messages not in WSJT-X output at all)
     let false_positives: Vec<_> = decoded_texts.iter()
         .filter(|msg| !all_expected.contains(&msg.as_str()))
         .collect();
 
-    // Print summary
-    println!("\n=== Decode Summary ===");
-    println!("Required:          {}/{}", required_messages.len() - missing_required.len(), required_messages.len());
-    println!("Advanced (AP/OSD): {}/{}", advanced_decoded.len(), advanced_messages.len());
-    println!("Total decoded:     {}", decoded_texts.len());
-    println!("False positives:   {}", false_positives.len());
+    // Fail if any required messages are missing
+    assert!(missing_required.is_empty(),
+        "Missing {} required messages: {:?}\nDecoded: {:?}",
+        missing_required.len(), missing_required, decoded_texts);
 
-    if !missing_required.is_empty() {
-        eprintln!("\n❌ Missing REQUIRED messages ({}):", missing_required.len());
-        for msg in &missing_required {
-            eprintln!("  - {}", msg);
-        }
-        eprintln!("\nDecoded messages ({}):", decoded_texts.len());
-        for msg in &decoded_texts {
-            eprintln!("  - {}", msg);
-        }
-        panic!("Failed to decode {} of {} required messages",
-               missing_required.len(), required_messages.len());
-    }
+    // Fail if there are false positives
+    assert!(false_positives.is_empty(),
+        "Unexpected messages decoded (false positives): {:?}", false_positives);
 
-    if !false_positives.is_empty() {
-        println!("\nNote: {} additional message(s) decoded (not in WSJT-X output):",
-            false_positives.len());
-        for fp in &false_positives {
-            println!("  - {}", fp);
-        }
-    }
+    // Promote any todo_messages that now decode to required_messages
+    assert!(todo_decoded.is_empty(),
+        "TODO messages now decoding (move to required_messages): {:?}", todo_decoded);
 
-    println!("\n✓ Successfully decoded all {} required messages!", required_messages.len());
-    println!("  Progress toward WSJT-X parity: {}/22 ({:.0}%)",
-        required_messages.len() - missing_required.len() + advanced_decoded.len(),
-        100.0 * (required_messages.len() - missing_required.len() + advanced_decoded.len()) as f32 / 22.0);
-
-    // Performance check: ensure decode completes within time limit
-    // Current baseline: ~55s on reference hardware
-    // Limit set to 90s to allow for slower CI machines while catching major regressions
+    // Performance regression check
     let max_duration_secs = 90;
-    let actual_secs = decode_duration.as_secs();
-    println!("  Decode time: {}s (limit: {}s)", actual_secs, max_duration_secs);
-    assert!(actual_secs <= max_duration_secs,
+    assert!(decode_duration.as_secs() <= max_duration_secs,
         "Performance regression: decode took {}s, limit is {}s",
-        actual_secs, max_duration_secs);
+        decode_duration.as_secs(), max_duration_secs);
 }
 
 #[test]

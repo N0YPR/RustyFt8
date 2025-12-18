@@ -128,10 +128,18 @@ pub fn authenticate(username: &str, password: &str) -> Result<User, AuthError> {
 ```
 
 ### Logging Standards
+- **NEVER use println! or eprintln!**: Always use `tracing` macros instead
 - **Structured logging**: Use `tracing` for structured logging
 - **Log levels**: Use appropriate levels (trace, debug, info, warn, error)
 - **Contextual logging**: Include relevant context with spans
 - **Performance**: Use logging guards for expensive operations
+
+**Log level guidelines:**
+- `trace!` - Detailed debug info (symbol extraction, LLR values, timing)
+- `debug!` - Useful debug info (candidate processing, sync results)
+- `info!` - High-level progress (decode passes, results summary)
+- `warn!` - Non-fatal errors (subtraction failed, timeout)
+- `error!` - Fatal errors that stop processing
 
 ```rust
 use tracing::{info, debug, error, instrument};
@@ -221,6 +229,7 @@ fn platform_specific_function() {
 - ❌ Don't create unnecessary allocations
 - ❌ Don't write untested code
 - ❌ Don't use global mutable state
+- ❌ Don't use `println!` or `eprintln!` for debug output - use `tracing` instead
 
 ## Development Workflow
 

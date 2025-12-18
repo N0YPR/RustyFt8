@@ -7,6 +7,7 @@ use super::downsample::downsample_200hz;
 use super::fine::sync_downsampled;
 use super::fft::fft_real;
 use super::COSTAS_PATTERN;
+use tracing::trace;
 
 /// Compute symbol peak power to help with timing alignment
 ///
@@ -376,81 +377,6 @@ fn extract_symbols_impl(
     // FT8 uses 79 symbols × 3 bits/symbol = 237 bits, but only 174 are used
     // Data symbols: 7-36 (29 symbols) and 43-71 (29 symbols) = 58 symbols × 3 bits = 174 bits
 
-    // Debug flags for specific signals (disabled - enable for investigation)
-    let debug_k1bzm = false && candidate.frequency > 2694.0 && candidate.frequency < 2697.0;
-    let debug_w1fc = false && candidate.frequency > 2571.0 && candidate.frequency < 2573.0;
-
-    // DIAGNOSTIC: Extract and display tone sequence for K1BZM
-    if debug_k1bzm {
-        eprintln!("\n=== TONE EXTRACTION DEBUG: K1BZM @ {:.1} Hz ===", candidate.frequency);
-
-        // Extract all 79 tones
-        let mut extracted_tones = [0u8; 79];
-        for k in 0..79 {
-            let mut max_power = 0.0f32;
-            let mut max_tone = 0;
-            for tone in 0..8 {
-                if s8[tone][k] > max_power {
-                    max_power = s8[tone][k];
-                    max_tone = tone;
-                }
-            }
-            extracted_tones[k] = max_tone as u8;
-        }
-
-        // Expected tones for "K1BZM EA3GP -09" from ft8code
-        let expected_tones = [
-            3,1,4,0,6,5,2, // Costas 1
-            0,3,2,2,7,0,7,3,0,0,4,4,6,0,6,2,0,5,5,1,7,4,6,3,5,3,7,5,5, // Data 1
-            3,1,4,0,6,5,2, // Costas 2
-            5,7,7,6,1,7,2,5,1,3,0,7,0,1,3,1,2,5,3,0,0,4,2,5,4,3,2,4,0, // Data 2
-            3,1,4,0,6,5,2, // Costas 3
-        ];
-
-        // DETAILED DEBUG: Show all FFT bin powers for symbols 28-44 (around error cluster and Costas 2)
-        eprintln!("\nDETAILED FFT BIN POWERS (symbols 28-44):");
-        eprintln!("Legend: [Got] (Exp) other | Tone0 Tone1 Tone2 Tone3 Tone4 Tone5 Tone6 Tone7");
-        for k in 28..45 {
-            let exp = expected_tones[k];
-            let got = extracted_tones[k];
-            let is_costas = (k >= 36 && k <= 42);
-            let marker = if got != exp { "*ERR*" } else { "  OK " };
-            let section = if is_costas { "COS2" } else { "DATA" };
-
-            eprint!("Sym[{:2}] {}: exp={} got={} {} | ", k, section, exp, got, marker);
-            for tone in 0..8 {
-                let pwr = s8[tone][k];
-                if tone == got as usize && tone == exp as usize {
-                    eprint!("[{:.3}] ", pwr); // Correct detection
-                } else if tone == got as usize {
-                    eprint!("[{:.3}]!", pwr); // Wrong detection
-                } else if tone == exp as usize {
-                    eprint!("({:.3}) ", pwr); // Missed expected
-                } else {
-                    eprint!(" {:.3}  ", pwr);
-                }
-            }
-            eprintln!();
-        }
-
-        // Compare and show errors
-        let mut errors = 0;
-        eprintln!("\nTone comparison (Extracted vs Expected):");
-        for k in 0..79 {
-            if extracted_tones[k] != expected_tones[k] {
-                let exp_power = s8[expected_tones[k] as usize][k];
-                let got_power = s8[extracted_tones[k] as usize][k];
-                let ratio = got_power / exp_power.max(0.0001);
-                eprintln!("  Sym[{}]: Got {} (pwr={:.3}) Expected {} (pwr={:.3}) Ratio={:.1}x ERROR",
-                         k, extracted_tones[k], got_power, expected_tones[k], exp_power, ratio);
-                errors += 1;
-            }
-        }
-        eprintln!("Tone accuracy: {}/79 correct ({:.1}% accuracy, {} errors)",
-                 79 - errors, (79 - errors) as f32 / 79.0 * 100.0, errors);
-        eprintln!("===\n");
-    }
-
     // Gray code mapping for decoding
     // GRAY_MAP: 3-bit index -> tone (used in encoding)
     // GRAY_MAP_INV: tone -> 3-bit index (used in decoding - what we need!)
@@ -488,15 +414,6 @@ fn extract_symbols_impl(
                 for tone in 0..8 {
                     let index = GRAY_MAP_INV[tone];  // Convert tone to 3-bit index
                     s2[index as usize] = s8[tone][ks];
-                }
-
-                // Debug first few data symbols for K1BZM/W1FC
-                // ks starts at 7 (k=1 + base_offset=7 - 1), so check ks < 12 for first 5 symbols
-                if (debug_k1bzm || debug_w1fc) && ks < 12 {
-                    let signal_name = if debug_k1bzm { "K1BZM" } else { "W1FC" };
-                    let s2_mean: f32 = s2.iter().sum::<f32>() / s2.len() as f32;
-                    let s2_max = s2.iter().cloned().fold(0.0f32, f32::max);
-                    eprintln!("  {} sym[{}]: s2_mean={:.5}, s2_max={:.5}", signal_name, ks, s2_mean, s2_max);
                 }
 
                 // Extract 3 bits from this symbol
@@ -723,18 +640,6 @@ fn extract_symbols_impl(
         }
     }
 
-    // Debug specific signals' raw LLRs before normalization
-    let debug_signal = debug_k1bzm || debug_w1fc;
-
-    if debug_signal {
-        let mean_raw_llr: f32 = llr.iter().map(|x| x.abs()).sum::<f32>() / 174.0;
-        let max_raw_llr = llr.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
-        let min_raw_llr = llr.iter().map(|x| x.abs()).fold(f32::MAX, f32::min);
-        let signal_name = if debug_k1bzm { "K1BZM" } else { "W1FC" };
-        eprintln!("  {} RAW LLRs: mean={:.5}, max={:.5}, min={:.5}",
-                 signal_name, mean_raw_llr, max_raw_llr, min_raw_llr);
-    }
-
     // Normalize difference method LLRs by standard deviation (match WSJT-X normalizebmet)
     let mut sum = 0.0f32;
     let mut sum_sq = 0.0f32;
@@ -789,13 +694,6 @@ fn extract_symbols_impl(
         for i in 0..174 {
             llr_ratio[i] *= 2.83;
         }
-    }
-
-    // Debug after normalization
-    if debug_signal {
-        let mean_norm_llr: f32 = llr.iter().map(|x| x.abs()).sum::<f32>() / 174.0;
-        let signal_name = if debug_k1bzm { "K1BZM" } else { "W1FC" };
-        eprintln!("  {} NORM: std_dev={:.5}, mean_after_norm={:.5}", signal_name, std_dev, mean_norm_llr);
     }
 
     // Debug output disabled for performance
@@ -1085,8 +983,6 @@ pub fn estimate_frequency_from_phase(
     // Measure phase for each of 3 Costas arrays
     let mut costas_data: Vec<(usize, f32, usize)> = Vec::new(); // (start_idx, phase, valid_count)
 
-    let _debug_phase = false; // Set to true to enable phase measurement debugging
-
     for costas_start in [0, 36, 72] {
         let mut phase_sum = 0.0;
         let mut weight_sum = 0.0;
@@ -1136,10 +1032,14 @@ pub fn estimate_frequency_from_phase(
         if valid_tones >= 5 && weight_sum > 0.0 {
             let avg_phase = phase_sum / weight_sum;
             costas_data.push((costas_start, avg_phase, valid_tones));
-            if _debug_phase {
-                eprintln!("  Costas {} @ symbols {}-{}: valid_tones={}/7, avg_phase={:.3} rad",
-                         costas_data.len(), costas_start, costas_start+6, valid_tones, avg_phase);
-            }
+            trace!(
+                costas_idx = costas_data.len(),
+                symbols_start = costas_start,
+                symbols_end = costas_start + 6,
+                valid_tones,
+                avg_phase,
+                "Costas array phase measurement"
+            );
         }
     }
 
@@ -1195,19 +1095,27 @@ pub fn estimate_frequency_from_phase(
     const SYMBOL_DURATION: f32 = 0.16; // seconds per symbol
     let time_separation = symbol_separation * SYMBOL_DURATION;
 
-    if _debug_phase {
-        eprintln!("  Using Costas pair: symbols {}-{} to {}-{} (quality={}/14, separation={} symbols)",
-                 start1, start1+6, start2, start2+6, best_quality, symbol_separation as usize);
-        eprintln!("  Phase drift: {:.3} rad over {:.2}s", phase_drift, time_separation);
-    }
+    trace!(
+        pair_start1 = start1,
+        pair_end1 = start1 + 6,
+        pair_start2 = start2,
+        pair_end2 = start2 + 6,
+        quality = best_quality,
+        separation_symbols = symbol_separation as usize,
+        phase_drift,
+        time_separation,
+        "Using Costas pair for phase measurement"
+    );
 
     // Calculate frequency offset: Δf = Δφ / (2π × Δt)
     let freq_offset = phase_drift / (2.0 * std::f32::consts::PI * time_separation);
 
-    if _debug_phase {
-        eprintln!("  Freq offset calculation: phase_drift={:.3} rad / (2π × {:.2}s) = {:.3} Hz",
-                 phase_drift, time_separation, freq_offset);
-    }
+    trace!(
+        phase_drift,
+        time_separation,
+        freq_offset,
+        "Frequency offset from phase drift"
+    );
 
     // Sanity check: offset should be < 2 Hz for typical fine sync errors
     if freq_offset.abs() > 2.0 {
