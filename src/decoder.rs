@@ -110,7 +110,6 @@ where
     }
 
     // LLR scaling factors to try (optimized order - most common values first)
-    // Reduced from 16 to 6 for performance - these cover the typical useful range
     let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5, 2.5];
     // Disable nsym=2/3: creates more false positives than correct decodes
     // Testing showed: nsym=1 gives 8 correct + 1 false positive (11%)
@@ -130,67 +129,51 @@ where
             // Fine sync on this candidate
             let refined = sync::fine_sync(signal, candidate).ok()?;
 
-            // Try phase-based frequency refinement first
-            // This improves accuracy from 0.2 Hz to <0.05 Hz by measuring
-            // phase progression of Costas arrays
-            let mut candidates_to_try = vec![refined.clone()];
-
-            if let Ok(refined_freq) = sync::estimate_frequency_from_phase(signal, &refined) {
+            // Try phase-based frequency refinement
+            // This improves accuracy from 0.2 Hz to <0.05 Hz by measuring phase progression
+            let candidate_to_decode = if let Ok(refined_freq) = sync::estimate_frequency_from_phase(signal, &refined) {
                 let freq_correction = refined_freq - refined.frequency;
-
                 // Only use refinement if correction is reasonable and significant
-                // Sanity: < 1 Hz (avoid wild corrections), > 0.01 Hz (worth re-extracting)
                 if freq_correction.abs() < 1.0 && freq_correction.abs() > 0.01 {
                     let mut refined_candidate = refined.clone();
                     refined_candidate.frequency = refined_freq;
-
-                    // Try refined candidate first (better frequency), then original
-                    candidates_to_try = vec![refined_candidate, refined.clone()];
-
-                    // Debug output (disabled by default)
-                    let _debug_phase_refine = false;
-                    if _debug_phase_refine {
-                        eprintln!("PHASE_REFINE: freq_initial={:.1} Hz -> freq_refined={:.1} Hz (correction={:+.3} Hz)",
-                                 refined.frequency, refined_freq, freq_correction);
-                    }
+                    refined_candidate
+                } else {
+                    refined.clone()
                 }
+            } else {
+                refined.clone()
+            };
+
+            // Extract ALL 4 LLR arrays in one pass (with independent normalization)
+            // WSJT-X uses 4 separate passes: llra (nsym=1 diff), llrb (nsym=2), llrc (nsym=3), llrd (nsym=1 ratio)
+            let mut llra = vec![0.0f32; 174];
+            let mut llrb = vec![0.0f32; 174];
+            let mut llrc = vec![0.0f32; 174];
+            let mut llrd = vec![0.0f32; 174];
+            let mut s8 = [[0.0f32; 79]; 8];
+
+            let nsync = match sync::extract_symbols_all_llr(
+                signal, &candidate_to_decode, &mut llra, &mut llrb, &mut llrc, &mut llrd, &mut s8
+            ) {
+                Ok(n) => n,
+                Err(_) => return None,
+            };
+
+            // WSJT-X rejection filter #1: nsync must be > 6 (at least 7/21 Costas tones correct)
+            if nsync <= 6 {
+                return None;
             }
 
-            // Try multi-pass decoding with ALL 4 LLR methods (matching WSJT-X exactly)
-            // WSJT-X uses 4 separate passes with independent normalization:
-            // Pass 1: llra (nsym=1 difference), Pass 2: llrb (nsym=2), Pass 3: llrc (nsym=3), Pass 4: llrd (nsym=1 ratio)
-            // Try all candidate frequencies (refined first if available, then original)
-            for candidate_to_decode in &candidates_to_try {
-                let mut llra = vec![0.0f32; 174];   // nsym=1 difference
-                let mut llrb = vec![0.0f32; 174];   // nsym=2 difference
-                let mut llrc = vec![0.0f32; 174];   // nsym=3 difference
-                let mut llrd = vec![0.0f32; 174];   // nsym=1 ratio
-                let mut s8 = [[0.0f32; 79]; 8];
+            // Try LLR methods with multiple scales
+            // Only use nsym=1 methods for performance - nsym=2/3 rarely help
+            let llr_methods: [(&str, &[f32], usize); 2] = [
+                ("nsym1_ratio", &llrd[..], 1),  // Most reliable
+                ("nsym1_diff", &llra[..], 1),   // Second best
+            ];
 
-                // Extract ALL 4 LLR arrays in one pass (with independent normalization)
-                let nsync = match sync::extract_symbols_all_llr(
-                    signal, candidate_to_decode, &mut llra, &mut llrb, &mut llrc, &mut llrd, &mut s8
-                ) {
-                    Ok(n) => n,
-                    Err(_) => continue,
-                };
-
-                // WSJT-X rejection filter #1: nsync must be > 6 (at least 7/21 Costas tones correct)
-                // This filters out candidates where sync quality is too low
-                if nsync <= 6 {
-                    continue;  // Reject weak sync candidates
-                }
-
-                // Try all 4 LLR methods with multiple scales (matching WSJT-X 4-pass strategy)
-                let llr_methods: [(&str, &[f32], usize); 4] = [
-                    ("nsym1_diff", &llra[..], 1),   // Pass 1
-                    ("nsym2_diff", &llrb[..], 2),   // Pass 2
-                    ("nsym3_diff", &llrc[..], 3),   // Pass 3
-                    ("nsym1_ratio", &llrd[..], 1),  // Pass 4
-                ];
-
-                for &(method_name, llr, nsym) in &llr_methods {
-                    for &scale in &scaling_factors {
+            for &(method_name, llr, nsym) in &llr_methods {
+                for &scale in &scaling_factors {
                     let mut scaled_llr: Vec<f32> = llr.to_vec();
                     for v in scaled_llr.iter_mut() {
                         *v *= scale;
@@ -336,143 +319,134 @@ where
                 }  // End for &scale loop
             }  // End for &(method_name, llr, nsym) loop (4 LLR methods)
 
-                // ===== AP (A Priori) Decoding Passes =====
-                // If normal decoding failed and AP is enabled, try AP-assisted decoding
-                // This extends decodable BER from ~10% (pure LDPC) to ~15-20% (AP + LDPC)
-                if config.enable_ap {
-                    use crate::ap::{ApDecoder, ApType};
+            // ===== AP (A Priori) Decoding Passes =====
+            // If normal decoding failed and AP is enabled, try AP-assisted decoding
+            // This extends decodable BER from ~10% (pure LDPC) to ~15-20% (AP + LDPC)
+            if config.enable_ap {
+                use crate::ap::{ApDecoder, ApType};
 
-                    // Create AP decoder from configuration
-                    let ap_decoder = ApDecoder::new(
-                        config.mycall.clone(),
-                        config.hiscall.clone(),
-                    );
+                // Create AP decoder from configuration
+                let ap_decoder = ApDecoder::new(
+                    config.mycall.clone(),
+                    config.hiscall.clone(),
+                );
 
-                    // Try each AP type (1-6) in order of likelihood
-                    let ap_types = [
-                        ApType::CqAny,              // Type 1: CQ ??? ???
-                        ApType::MyCallAny,          // Type 2: MYCALL ??? ???
-                        ApType::MyCallDxCallAny,    // Type 3: MYCALL DXCALL ???
-                        ApType::MyCallDxCallRrr,    // Type 4: MYCALL DXCALL RRR
-                        ApType::MyCallDxCall73,     // Type 5: MYCALL DXCALL 73
-                        ApType::MyCallDxCallRr73,   // Type 6: MYCALL DXCALL RR73
-                    ];
+                // Try each AP type (1-6) in order of likelihood
+                let ap_types = [
+                    ApType::CqAny,              // Type 1: CQ ??? ???
+                    ApType::MyCallAny,          // Type 2: MYCALL ??? ???
+                    ApType::MyCallDxCallAny,    // Type 3: MYCALL DXCALL ???
+                    ApType::MyCallDxCallRrr,    // Type 4: MYCALL DXCALL RRR
+                    ApType::MyCallDxCall73,     // Type 5: MYCALL DXCALL 73
+                    ApType::MyCallDxCallRr73,   // Type 6: MYCALL DXCALL RR73
+                ];
 
-                    for ap_type in &ap_types {
-                        // Compute LLR magnitude for AP hints (max absolute value * 1.01)
-                        let llr_magnitude = llra.iter()
-                            .map(|x| x.abs())
-                            .max_by(|a, b| a.partial_cmp(b).unwrap())
-                            .unwrap_or(10.0) * 1.01;
+                for ap_type in &ap_types {
+                    // Compute LLR magnitude for AP hints (max absolute value * 1.01)
+                    let llr_magnitude = llra.iter()
+                        .map(|x| x.abs())
+                        .max_by(|a, b| a.partial_cmp(b).unwrap())
+                        .unwrap_or(10.0) * 1.01;
 
-                        // Generate AP hints for this type
-                        let ap_hints = match ap_decoder.generate_ap_hints(*ap_type, llr_magnitude) {
-                            Some(hints) => hints,
-                            None => continue, // Skip if we can't generate hints for this type
-                        };
+                    // Generate AP hints for this type
+                    let ap_hints = match ap_decoder.generate_ap_hints(*ap_type, llr_magnitude) {
+                        Some(hints) => hints,
+                        None => continue, // Skip if we can't generate hints for this type
+                    };
 
-                        let (apmask, llr_hints) = ap_hints;
+                    let (apmask, llr_hints) = ap_hints;
 
-                        // Try AP decoding with each of the 4 LLR methods
-                        for &(method_name, base_llr, nsym) in &llr_methods {
-                            // Apply AP hints to the LLRs
-                            let mut llr_with_ap = base_llr.to_vec();
-                            for i in 0..174 {
-                                if apmask[i] {
-                                    llr_with_ap[i] = llr_hints[i];
-                                }
+                    // Try AP decoding with each of the 4 LLR methods
+                    for &(method_name, base_llr, nsym) in &llr_methods {
+                        // Apply AP hints to the LLRs
+                        let mut llr_with_ap = base_llr.to_vec();
+                        for i in 0..174 {
+                            if apmask[i] {
+                                llr_with_ap[i] = llr_hints[i];
+                            }
+                        }
+
+                        // Try decoding with AP mask - BP only (fast)
+                        let decode_result = ldpc::decode_hybrid_with_ap(
+                            &llr_with_ap,
+                            Some(&apmask),
+                            ldpc::DecodeDepth::BpOnly
+                        );
+
+                        if let Some((decoded_bits, iters, nharderrors)) = decode_result {
+                            // Same rejection filters as normal decoding
+                            if nharderrors > 36 {
+                                continue;
                             }
 
-                            // Try decoding with AP mask
-                            // Use BpOnly first, then BpOsdUncoupled if that fails
-                            let decode_result = ldpc::decode_hybrid_with_ap(
-                                &llr_with_ap,
-                                Some(&apmask),
-                                ldpc::DecodeDepth::BpOnly
-                            ).or_else(|| {
-                                ldpc::decode_hybrid_with_ap(
-                                    &llr_with_ap,
-                                    Some(&apmask),
-                                    ldpc::DecodeDepth::BpOsdUncoupled
-                                )
-                            });
+                            let mut re_encoded_codeword = bitvec![u8, Msb0; 0; 174];
+                            ldpc::encode(&decoded_bits, &mut re_encoded_codeword);
+                            let mut tones = [0u8; 79];
+                            if symbol::map(&re_encoded_codeword, &mut tones).is_err() {
+                                continue;
+                            }
 
-                            if let Some((decoded_bits, iters, nharderrors)) = decode_result {
-                                // Same rejection filters as normal decoding
-                                if nharderrors > 36 {
-                                    continue;
-                                }
+                            if tones.iter().all(|&t| t == 0) {
+                                continue;
+                            }
 
-                                let mut re_encoded_codeword = bitvec![u8, Msb0; 0; 174];
-                                ldpc::encode(&decoded_bits, &mut re_encoded_codeword);
-                                let mut tones = [0u8; 79];
-                                if symbol::map(&re_encoded_codeword, &mut tones).is_err() {
-                                    continue;
-                                }
+                            let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
 
-                                if tones.iter().all(|&t| t == 0) {
-                                    continue;
-                                }
+                            if let Ok(message) = crate::decode(&info_bits, None) {
+                                if !message.is_empty() {
+                                    let tokens: Vec<&str> = message.split_whitespace().collect();
+                                    let is_valid_message = if tokens.len() >= 2 {
+                                        crate::message::is_valid_callsign(tokens[0]) &&
+                                        crate::message::is_valid_callsign(tokens[1])
+                                    } else {
+                                        tokens.first().map_or(false, |t| crate::message::is_valid_callsign(t))
+                                    };
 
-                                let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
-
-                                if let Ok(message) = crate::decode(&info_bits, None) {
-                                    if !message.is_empty() {
-                                        let tokens: Vec<&str> = message.split_whitespace().collect();
-                                        let is_valid_message = if tokens.len() >= 2 {
-                                            crate::message::is_valid_callsign(tokens[0]) &&
-                                            crate::message::is_valid_callsign(tokens[1])
-                                        } else {
-                                            tokens.first().map_or(false, |t| crate::message::is_valid_callsign(t))
-                                        };
-
-                                        if !is_valid_message {
-                                            continue;
-                                        }
-
-                                        let snr_db = if s8[0][0] != 0.0 {
-                                            sync::calculate_snr(&s8, &tones, Some(candidate_to_decode.baseline_noise))
-                                        } else {
-                                            if candidate_to_decode.sync_power > 0.001 {
-                                                let snr = (candidate_to_decode.sync_power.log10() * 10.0 - 27.0) as i32;
-                                                snr.max(-24).min(30)
-                                            } else {
-                                                -24
-                                            }
-                                        };
-
-                                        if nsync <= 10 && snr_db < -24 {
-                                            continue;
-                                        }
-
-                                        if snr_db < min_snr_threshold {
-                                            continue;
-                                        }
-
-                                        // AP decode succeeded!
-                                        return Some(DecodeResult {
-                                            candidate_idx,
-                                            message: DecodedMessage {
-                                                message,
-                                                frequency: candidate_to_decode.frequency,
-                                                time_offset: candidate_to_decode.time_offset,
-                                                sync_power: candidate_to_decode.sync_power,
-                                                snr_db,
-                                                ldpc_iterations: iters,
-                                                llr_scale: 1.0, // AP uses unscaled LLRs
-                                                nsym,
-                                                tones,
-                                            },
-                                        });
+                                    if !is_valid_message {
+                                        continue;
                                     }
+
+                                    let snr_db = if s8[0][0] != 0.0 {
+                                        sync::calculate_snr(&s8, &tones, Some(candidate_to_decode.baseline_noise))
+                                    } else {
+                                        if candidate_to_decode.sync_power > 0.001 {
+                                            let snr = (candidate_to_decode.sync_power.log10() * 10.0 - 27.0) as i32;
+                                            snr.max(-24).min(30)
+                                        } else {
+                                            -24
+                                        }
+                                    };
+
+                                    if nsync <= 10 && snr_db < -24 {
+                                        continue;
+                                    }
+
+                                    if snr_db < min_snr_threshold {
+                                        continue;
+                                    }
+
+                                    // AP decode succeeded!
+                                    return Some(DecodeResult {
+                                        candidate_idx,
+                                        message: DecodedMessage {
+                                            message,
+                                            frequency: candidate_to_decode.frequency,
+                                            time_offset: candidate_to_decode.time_offset,
+                                            sync_power: candidate_to_decode.sync_power,
+                                            snr_db,
+                                            ldpc_iterations: iters,
+                                            llr_scale: 1.0, // AP uses unscaled LLRs
+                                            nsym,
+                                            tones,
+                                        },
+                                    });
                                 }
                             }
                         }
                     }
                 }
-                // ===== End AP Passes =====
-
-            }  // End for candidate_to_decode loop
+            }
+            // ===== End AP Passes =====
 
             None
         })
