@@ -27,6 +27,8 @@
   "features": {},
   "updateContentCommand": "",
   "containerEnv": {
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "ANTHROPIC_AUTH_TOKEN": "dummy",
     "CARGO_TERM_COLOR": "always",
     "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
     "SSL_CERT_DIR": "/etc/ssl/certs",
