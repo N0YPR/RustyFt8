@@ -10,7 +10,7 @@
 //! 4. Reconstruct: signal(t) = 2 * Re{cref(t) * cfilt(t)}
 //! 5. Subtract from audio
 
-use crate::pulse;
+use super::pulse;
 use rustfft::{FftPlanner, num_complex::Complex};
 use tracing::{debug, trace};
 

@@ -2,7 +2,7 @@
 //!
 //! Tests the complete pipeline at various SNR levels to verify end-to-end functionality
 
-use rustyft8::{crc, encode, ldpc, pulse, symbol, decode_ft8, DecoderConfig};
+use rustyft8::{crc, encode, ldpc, sync::pulse, symbol, decode_ft8, DecoderConfig};
 use rustyft8::message::CallsignHashCache;
 use bitvec::prelude::*;
 use std::f32;

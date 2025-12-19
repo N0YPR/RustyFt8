@@ -75,10 +75,10 @@ fn gfsk_pulse(bt: f32, t: f32) -> f32 {
 ///
 /// # Example
 /// ```
-/// use rustyft8::pulse;
+/// use rustyft8::sync::pulse;
 ///
-/// let mut pulse = vec![0.0f32; 3 * 1920];
-/// pulse::compute_pulse(&mut pulse, 2.0, 1920)?;
+/// let mut pulse_buf = vec![0.0f32; 3 * 1920];
+/// pulse::compute_pulse(&mut pulse_buf, 2.0, 1920)?;
 /// // Reuse this pulse buffer for multiple waveform generations
 /// # Ok::<(), String>(())
 /// ```
@@ -115,7 +115,7 @@ pub fn compute_pulse(pulse: &mut [f32], bt: f32, nsps: usize) -> Result<(), Stri
 ///
 /// # Example
 /// ```no_run
-/// use rustyft8::pulse;
+/// use rustyft8::sync::pulse;
 ///
 /// let symbols = [0u8; 79];
 /// let mut pulse_buf = vec![0.0f32; 3 * 1920];
@@ -241,7 +241,7 @@ pub fn generate_waveform(
 ///
 /// # Example
 /// ```no_run
-/// use rustyft8::pulse;
+/// use rustyft8::sync::pulse;
 ///
 /// let symbols = [0u8; 79];
 /// let mut pulse_buf = vec![0.0f32; 3 * 1920];

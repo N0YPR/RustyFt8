@@ -150,7 +150,7 @@ where
         if pass_num < config.max_passes - 1 {
             debug!(count = pass_count, "Subtracting decoded signals from audio");
             for decoded in &pass_decodes {
-                if let Err(e) = crate::subtract::subtract_ft8_signal(
+                if let Err(e) = crate::sync::subtract_ft8_signal(
                     &mut working_signal,
                     &decoded.tones,
                     decoded.frequency,

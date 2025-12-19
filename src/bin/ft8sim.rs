@@ -27,7 +27,7 @@
 //!   # Signal at 1000 Hz with 0.5s delay
 //!   ft8sim -f 1000 -d 0.5 "CQ SOTA N0YPR DM42" output.wav
 
-use rustyft8::{crc, encode, ldpc, pulse, symbol};
+use rustyft8::{crc, encode, ldpc, sync::pulse, symbol};
 use rustyft8::message::CallsignHashCache;
 use hound;
 use bitvec::prelude::*;

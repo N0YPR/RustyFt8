@@ -32,6 +32,8 @@ mod coarse;
 pub mod fine;
 pub mod extract;
 pub mod synthesize;
+pub mod pulse;
+mod subtract;
 
 /// Candidate signal found during coarse sync
 #[derive(Debug, Clone, Copy)]
@@ -52,7 +54,8 @@ pub use fine::{fine_sync, sync_downsampled};
 pub use extract::{extract_symbols, extract_symbols_with_powers, extract_symbols_dual_llr, extract_symbols_all_llr, calculate_snr, estimate_frequency_from_phase};
 pub use downsample::downsample_200hz;
 pub use spectra::{compute_spectra, compute_sync2d, compute_baseline};
-pub use synthesize::{synthesize_ft8_signal, subtract_ft8_signal};
+pub use synthesize::synthesize_ft8_signal;
+pub use subtract::subtract_ft8_signal;
 
 /// Costas 7x7 tone pattern used in FT8
 pub const COSTAS_PATTERN: [u8; 7] = [3, 1, 4, 0, 6, 5, 2];
