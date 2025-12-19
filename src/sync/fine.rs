@@ -286,9 +286,10 @@ pub fn fine_sync(
 
     // Convert back to seconds (matching WSJT-X ft8b.f90 line 151)
     // WSJT-X: xdt=(ibest-1)*dt2, where dt2=1/fs2
-    // Output is ABSOLUTE time from t=0, NOT relative to 0.5s
+    // Input time_offset is relative to 0.5s start, so subtract 0.5s to convert
+    // from absolute sample position back to relative time offset
     // Use final_sample_rate since we re-downsampled at best_freq
-    let refined_time = best_time as f32 / final_sample_rate;
+    let refined_time = best_time as f32 / final_sample_rate - 0.5;
 
     // Debug output disabled for performance
     // eprintln!("  REFINED: freq_in={:.1} -> freq_out={:.1} Hz, dt_out={:.2}s, sync_coarse={:.3} (preserved)",

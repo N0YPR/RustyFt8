@@ -232,9 +232,9 @@ fn subtract_ft8_signal_internal(
     )?;
 
     // Calculate start position in audio (can be negative)
-    // time_offset from fine_sync is ABSOLUTE time from t=0 (see fine_sync.rs:289)
-    // Previously we incorrectly added 0.5 here, but fine_sync already outputs absolute time
-    let nstart = (time_offset * SAMPLE_RATE) as i32;
+    // time_offset is RELATIVE to 0.5s start (FT8 convention: dt=0 means signal starts at t=0.5s)
+    // Add 0.5s to convert to absolute sample position
+    let nstart = ((time_offset + 0.5) * SAMPLE_RATE) as i32;
 
     // Initialize filter
     let nfft = audio.len().next_power_of_two().max(NFRAME.next_power_of_two());
@@ -365,7 +365,7 @@ mod tests {
         let audio_len = 15 * 12000; // 15 seconds
         let mut audio = vec![0.0f32; audio_len];
 
-        // Place signal at 0.5 seconds
+        // Place signal at 0.5 seconds (this is the FT8 start time)
         let start = (0.5 * 12000.0) as usize;
         for (i, &sample) in clean_signal.iter().enumerate() {
             if start + i < audio_len {
@@ -379,8 +379,9 @@ mod tests {
             .map(|&x| x * x)
             .sum();
 
-        // Subtract the signal (time_offset matches where signal was placed)
-        let result = subtract_ft8_signal(&mut audio, &tones, 1500.0, 0.5);
+        // Subtract the signal
+        // time_offset is RELATIVE to 0.5s FT8 start, so 0.0 = signal at 0.5s absolute
+        let result = subtract_ft8_signal(&mut audio, &tones, 1500.0, 0.0);
         assert!(result.is_ok());
 
         // Measure power after subtraction

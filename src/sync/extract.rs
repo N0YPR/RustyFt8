@@ -152,9 +152,9 @@ fn extract_symbols_impl(
     let actual_sample_rate = downsample_200hz(signal, candidate.frequency, &mut cd)?;
 
     // Convert time offset to sample index
-    // NOTE: candidate.time_offset is ABSOLUTE time from t=0 (matching WSJT-X ft8b.f90 line 151)
-    // DO NOT add 0.5s - fine sync outputs absolute time, not relative to 0.5s start
-    let time_offset_samples = (candidate.time_offset * actual_sample_rate) as i32;
+    // candidate.time_offset is RELATIVE to 0.5s start (FT8 convention: dt=0 means signal starts at t=0.5s)
+    // Add 0.5s to convert to absolute position in the downsampled buffer
+    let time_offset_samples = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
 
     let mut best_correction = 0.0f32;
 
@@ -199,10 +199,9 @@ fn extract_symbols_impl(
     let nsps_down = (actual_sample_rate * SYMBOL_DURATION).round() as usize;
 
     // Convert time offset to sample index and refine it locally
-    // NOTE: candidate.time_offset is ABSOLUTE time from t=0 (from fine_sync)
-    // fine_sync already added +0.5 internally (fine.rs:167) when converting from coarse sync
-    // DO NOT add +0.5 again here!
-    let initial_offset = (candidate.time_offset * actual_sample_rate) as i32;
+    // candidate.time_offset is RELATIVE to 0.5s start (FT8 convention)
+    // Add 0.5s to convert to absolute position in the downsampled buffer
+    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
 
 
     // Do a comprehensive fine time search to find optimal symbol timing
@@ -975,9 +974,9 @@ pub fn estimate_frequency_from_phase(
     const NFFT_SYM: usize = 32;
 
     // Calculate start offset in downsampled signal
-    // NOTE: candidate.time_offset is ABSOLUTE time from t=0 (from fine_sync)
-    // DO NOT add +0.5 - fine_sync already did this internally
-    let dt = candidate.time_offset;
+    // candidate.time_offset is RELATIVE to 0.5s start (FT8 convention)
+    // Add 0.5s to convert to absolute position in the downsampled buffer
+    let dt = candidate.time_offset + 0.5;
     let start_offset = (dt * 200.0) as i32; // Convert to sample index
 
     // Measure phase for each of 3 Costas arrays

@@ -255,17 +255,17 @@ where
                     // Progressive decoding strategy:
                     // 1. Try BP-only first - fast, minimal false positives
                     // 2. If BP fails, try OSD based on candidate rank:
-                    //    - Top 10: BpOsdHybrid (accumulated LLR snapshots + ndeep 3-4)
-                    //    - Top 30: BpOsdUncoupled (order 1 only, 91 patterns)
+                    //    - Top 40: BpOsdHybrid (accumulated LLR snapshots + ndeep 3-4)
+                    //    - Top 60: BpOsdUncoupled (order 1 only, 91 patterns)
                     //    - Rest: no OSD (rely on BP only)
                     // OSD is pre-filtered by nharderrors > 50 check inside decode_hybrid
                     let decode_result = ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
                         .or_else(|| {
-                            if candidate_idx < 10 {
-                                // Top 10 candidates: try thorough OSD with accumulated snapshots
+                            if candidate_idx < 40 {
+                                // Top 40 candidates: try thorough OSD with accumulated snapshots
                                 ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
-                            } else if candidate_idx < 30 {
-                                // Candidates 10-29: try fast OSD (order 1 only)
+                            } else if candidate_idx < 60 {
+                                // Candidates 40-59: try fast OSD (order 1 only)
                                 ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
                             } else {
                                 None
@@ -304,11 +304,20 @@ where
                                 // This filters out OSD false positives (garbage decoded from noise)
                                 let tokens: Vec<&str> = message.split_whitespace().collect();
 
-                                // For standard messages, require ALL callsigns to be valid
-                                // First 2 tokens are typically callsigns or "CQ"
+                                // For standard messages, require valid callsigns in expected positions
+                                // Handle directed CQ specially: "CQ DX CALL GRID" has modifier in position 1
                                 let is_valid_message = if tokens.len() >= 2 {
-                                    crate::message::is_valid_callsign(tokens[0]) &&
-                                    crate::message::is_valid_callsign(tokens[1])
+                                    if tokens[0] == "CQ" && tokens.len() >= 3 && !crate::message::is_valid_callsign(tokens[1]) {
+                                        // Directed CQ: "CQ XX CALL ..." - XX is a modifier (DX, SOTA, POTA, etc.)
+                                        // tokens[1] is NOT a valid callsign (e.g., "DX", "SOTA", "POTA")
+                                        // Validate the actual callsign in position 2
+                                        crate::message::is_valid_callsign(tokens[2])
+                                    } else {
+                                        // Standard message: validate first two tokens
+                                        // This handles both "CALL1 CALL2 ..." and "CQ CALL GRID"
+                                        crate::message::is_valid_callsign(tokens[0]) &&
+                                        crate::message::is_valid_callsign(tokens[1])
+                                    }
                                 } else {
                                     // Short messages - require at least the first token to be valid
                                     tokens.first().map_or(false, |t| crate::message::is_valid_callsign(t))
@@ -453,9 +462,15 @@ where
                             if let Ok(message) = crate::decode(&info_bits, None) {
                                 if !message.is_empty() {
                                     let tokens: Vec<&str> = message.split_whitespace().collect();
+                                    // Handle directed CQ specially: "CQ DX CALL GRID" has modifier in position 1
                                     let is_valid_message = if tokens.len() >= 2 {
-                                        crate::message::is_valid_callsign(tokens[0]) &&
-                                        crate::message::is_valid_callsign(tokens[1])
+                                        if tokens[0] == "CQ" && tokens.len() >= 3 && !crate::message::is_valid_callsign(tokens[1]) {
+                                            // Directed CQ: tokens[1] is a modifier, validate callsign in position 2
+                                            crate::message::is_valid_callsign(tokens[2])
+                                        } else {
+                                            crate::message::is_valid_callsign(tokens[0]) &&
+                                            crate::message::is_valid_callsign(tokens[1])
+                                        }
                                     } else {
                                         tokens.first().map_or(false, |t| crate::message::is_valid_callsign(t))
                                     };

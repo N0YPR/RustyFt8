@@ -50,12 +50,12 @@ fn test_real_ft8_recording_210703_133430() {
         "K1BZM EA3GP -09",
         "N1API HA6FQ -23",
         "CQ EA2BFM IN83",
+        "CQ DX DL8YHR JO41",
     ];
 
     // Messages not yet decoded (tracking progress toward WSJT-X parity)
     let todo_messages = [
         "N1API F2VX 73",
-        "CQ DX DL8YHR JO41",
         "K1JT HA5WA 73",
         "K1BZM DK8NE -10",
         "TU; 7N9RST EI8TRF 589 5732",
