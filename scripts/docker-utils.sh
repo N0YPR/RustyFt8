@@ -144,7 +144,7 @@ get_branch_suffix() {
 #   REGISTRY - Registry URL (default: ghcr.io/<username>)
 #   TARGET - Build target (default: devcontainer)
 #   PLATFORM - Platform (default: auto-detected)
-#   IMAGE_TAG - Image tag (default: Dockerfile hash)
+#   IMAGE_TAG - Image tag (default: latest)
 #   PULL_RETRIES - Number of pull retries (default: 3)
 pull_or_build() {
     set -e
@@ -166,20 +166,20 @@ pull_or_build() {
 
     # Calculate Dockerfile hash for tagging
     local DOCKERFILE_HASH=$(calculate_dockerfile_hash ./Dockerfile)
-    local IMAGE_TAG="${IMAGE_TAG:-latest}"
 
-    # Construct full image name with branch suffix
+    # Construct full image name with hash-based tag
     local FULL_IMAGE_NAME
     if [[ -n "$REGISTRY" ]]; then
-        FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
+        FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
     else
-        FULL_IMAGE_NAME="${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
+        FULL_IMAGE_NAME="${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
     fi
 
     echo "========================================="
     echo "Pull or Build Docker Image"
     echo "========================================="
-    echo "Image Name: ${FULL_IMAGE_NAME}"
+    echo "Image Name: ${IMAGE_NAME}"
+    echo "Image Tag: ${FULL_IMAGE_NAME}"
     echo "Target: ${TARGET}"
     echo "Platform: ${PLATFORM}"
     echo "Dockerfile Hash: ${DOCKERFILE_HASH}"
@@ -188,35 +188,34 @@ pull_or_build() {
     fi
     echo "========================================="
 
-    # Try to pull the image with retry logic
+    # Try to pull the hash-tagged image
     echo ""
-    echo "Attempting to pull image (up to ${PULL_RETRIES} attempts)..."
+    echo "Checking for image matching current Dockerfile hash..."
+    echo "Attempting to pull ${FULL_IMAGE_NAME} (up to ${PULL_RETRIES} attempts)..."
     if retry_with_backoff "$PULL_RETRIES" docker pull "${FULL_IMAGE_NAME}"; then
-        echo "✓ Successfully pulled ${FULL_IMAGE_NAME}"
+        echo "✓ Successfully pulled image matching current Dockerfile hash"
 
-        # Tag with additional aliases for convenience
-        docker tag "${FULL_IMAGE_NAME}" "${IMAGE_NAME}:${IMAGE_TAG}"
+        # Tag with local alias for convenience
         docker tag "${FULL_IMAGE_NAME}" "${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
-        echo "✓ Tagged as ${IMAGE_NAME}:${IMAGE_TAG} and ${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
+        echo "✓ Tagged locally as ${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
         return 0
     else
-        echo "✗ Pull failed or image not found in registry"
+        echo "✗ No image found matching current Dockerfile hash"
         echo ""
-        echo "Building image locally..."
+        echo "Building image locally with current Dockerfile..."
 
-        # Build the image
+        # Build the image with hash-based tag only
         docker build \
             --target "${TARGET}" \
             --platform "${PLATFORM}" \
             -t "${FULL_IMAGE_NAME}" \
-            -t "${IMAGE_NAME}:${IMAGE_TAG}" \
             -t "${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}" \
             .
 
         echo ""
         echo "✓ Successfully built ${FULL_IMAGE_NAME}"
-        echo "✓ Tagged as ${IMAGE_NAME}:${IMAGE_TAG} and ${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
+        echo "✓ Local tag: ${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
         return 0
     fi
@@ -228,7 +227,6 @@ pull_or_build() {
 # Environment variables:
 #   IMAGE_NAME - Image name (default: auto-detected from git)
 #   REGISTRY - Registry URL (default: ghcr.io/<username>)
-#   IMAGE_TAG - Image tag (default: Dockerfile hash)
 push_image() {
     set -e
 
@@ -247,7 +245,6 @@ push_image() {
 
     # Calculate Dockerfile hash for tagging
     local DOCKERFILE_HASH=$(calculate_dockerfile_hash ./Dockerfile)
-    local IMAGE_TAG="${IMAGE_TAG:-latest}"
 
     # Validate registry is configured
     if [[ -z "$REGISTRY" ]]; then
@@ -256,8 +253,8 @@ push_image() {
         return 1
     fi
 
-    # Construct full image name with branch suffix
-    local FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
+    # Construct full image name with hash-based tag
+    local FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
     echo "========================================="
     echo "Push Docker Image"
@@ -281,16 +278,29 @@ push_image() {
     return 0
 }
 
-# Check if Docker image exists in registry
+# Check if Docker image exists in registry (deprecated - use image_exists_hash instead)
 # Args:
 #   $1 - Build target (optional, defaults to TARGET env var or 'devcontainer')
 # Environment variables:
 #   IMAGE_NAME - Image name (default: auto-detected from git)
 #   REGISTRY - Registry URL (default: ghcr.io/<username>)
-#   IMAGE_TAG - Image tag (default: Dockerfile hash)
 # Returns:
 #   Exit code 0 if image exists, 1 if not found
+# Note: This function is deprecated. Use image_exists_hash for hash-based checking.
 image_exists() {
+    echo "Warning: image_exists is deprecated. Use image_exists_hash instead." >&2
+    image_exists_hash "$@"
+}
+
+# Check if Docker image exists in registry for current Dockerfile hash
+# Args:
+#   $1 - Build target (optional, defaults to TARGET env var or 'devcontainer')
+# Environment variables:
+#   IMAGE_NAME - Image name (default: auto-detected from git)
+#   REGISTRY - Registry URL (default: ghcr.io/<username>)
+# Returns:
+#   Exit code 0 if image with current hash exists, 1 if not found
+image_exists_hash() {
     # Configuration
     local BASE_IMAGE_NAME="${IMAGE_NAME:-$(detect_repo_name)}"
     local GITHUB_USER=$(detect_github_username)
@@ -303,7 +313,6 @@ image_exists() {
 
     # Calculate Dockerfile hash for tagging
     local DOCKERFILE_HASH=$(calculate_dockerfile_hash ./Dockerfile)
-    local IMAGE_TAG="${IMAGE_TAG:-latest}"
 
     # Validate registry is configured
     if [[ -z "$REGISTRY" ]]; then
@@ -312,17 +321,17 @@ image_exists() {
         return 2
     fi
 
-    # Construct full image name with branch suffix
-    local FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
+    # Construct full image name with hash and branch suffix
+    local FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
-    echo "Checking if image exists: ${FULL_IMAGE_NAME}"
+    echo "Checking if image exists with current Dockerfile hash: ${FULL_IMAGE_NAME}"
 
     # Try to inspect the manifest (doesn't download layers)
     if docker manifest inspect "${FULL_IMAGE_NAME}" > /dev/null 2>&1; then
-        echo "✓ Image exists in registry"
+        echo "✓ Image exists in registry for current Dockerfile hash"
         return 0
     else
-        echo "✗ Image not found in registry"
+        echo "✗ Image not found in registry for current Dockerfile hash"
         return 1
     fi
 }
@@ -334,7 +343,6 @@ image_exists() {
 #   IMAGE_NAME - Image name (default: auto-detected from git)
 #   REGISTRY - Registry URL (default: ghcr.io/<username>)
 #   PLATFORMS - Platforms to build for (default: linux/amd64,linux/arm64)
-#   IMAGE_TAG - Image tag (default: Dockerfile hash)
 build_and_push() {
     set -e
 
@@ -361,7 +369,6 @@ build_and_push() {
 
     # Calculate Dockerfile hash for tagging
     local DOCKERFILE_HASH=$(calculate_dockerfile_hash ./Dockerfile)
-    local IMAGE_TAG="${IMAGE_TAG:-latest}"
 
     # Validate registry is configured
     if [[ -z "$REGISTRY" ]]; then
@@ -370,16 +377,14 @@ build_and_push() {
         return 1
     fi
 
-    # Construct image tags
-    local LATEST_TAG="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
+    # Construct image tag (hash-based only)
     local HASH_TAG="${REGISTRY}/${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
     echo "========================================="
     echo "Build and Push Multi-Architecture Image"
     echo "========================================="
     echo "Image Name: ${IMAGE_NAME}"
-    echo "Latest Tag: ${LATEST_TAG}"
-    echo "Hash Tag: ${HASH_TAG}"
+    echo "Image Tag: ${HASH_TAG}"
     echo "Target: ${TARGET}"
     echo "Platforms: ${PLATFORMS}"
     echo "Registry: ${REGISTRY}"
@@ -390,19 +395,17 @@ build_and_push() {
     echo "========================================="
     echo ""
 
-    # Build and push for multiple architectures
+    # Build and push for multiple architectures with hash-based tag only
     echo "Building and pushing multi-architecture image..."
     docker buildx build \
         --target "${TARGET}" \
         --platform "${PLATFORMS}" \
-        --tag "${LATEST_TAG}" \
         --tag "${HASH_TAG}" \
         --push \
         .
 
     echo ""
-    echo "✓ Successfully built and pushed ${LATEST_TAG}"
-    echo "✓ Also tagged as ${HASH_TAG}"
+    echo "✓ Successfully built and pushed ${HASH_TAG}"
     echo "✓ Available for platforms: ${PLATFORMS}"
 
     return 0
@@ -435,7 +438,16 @@ Commands:
                            - IMAGE_NAME: Image name (default: auto-detected)
                            - REGISTRY: Registry URL (default: ghcr.io/<username>)
 
-  image-exists [target]   Check if image exists in registry
+  image-exists [target]   Check if image exists for current Dockerfile hash
+                           (Deprecated: Use image-exists-hash instead)
+                           Arguments:
+                           - target: Build target (optional, default: devcontainer)
+                           Environment variables:
+                           - IMAGE_NAME: Image name (default: auto-detected)
+                           - REGISTRY: Registry URL (default: ghcr.io/<username>)
+                           Returns exit code 0 if exists, 1 if not found
+
+  image-exists-hash [target] Check if image exists for current Dockerfile hash
                            Arguments:
                            - target: Build target (optional, default: devcontainer)
                            Environment variables:
@@ -475,8 +487,11 @@ Examples:
   # Push CI image to registry
   docker-utils.sh push ci
 
-  # Check if CI image exists in registry
+  # Check if CI image exists for current Dockerfile hash
   docker-utils.sh image-exists ci && echo "exists" || echo "not found"
+
+  # Alternative: Use image-exists-hash explicitly
+  docker-utils.sh image-exists-hash ci && echo "exists" || echo "not found"
 
   # Build and push devcontainer image
   docker-utils.sh build-and-push
@@ -508,6 +523,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             ;;
         image-exists)
             image_exists "$2"
+            ;;
+        image-exists-hash)
+            image_exists_hash "$2"
             ;;
         build-and-push)
             build_and_push "$2"

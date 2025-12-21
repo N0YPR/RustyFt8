@@ -39,13 +39,15 @@ jobs:
           # Use docker-utils to get image naming components
           BASE_IMAGE_NAME=$(./scripts/docker-utils.sh repo-name)
           BRANCH_SUFFIX=$(./scripts/docker-utils.sh branch-suffix)
+          DOCKERFILE_HASH=$(./scripts/docker-utils.sh hash)
 
           # Use GitHub repository owner for username in CI (convert to lowercase for Docker)
           GITHUB_USER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
 
           # Calculate image names for both targets (target is now in the image name)
-          CI_IMAGE="ghcr.io/${GITHUB_USER}/${BASE_IMAGE_NAME}-ci:latest${BRANCH_SUFFIX}"
-          DEVCONTAINER_IMAGE="ghcr.io/${GITHUB_USER}/${BASE_IMAGE_NAME}-devcontainer:latest${BRANCH_SUFFIX}"
+          # Use hash-based tags only, no :latest
+          CI_IMAGE="ghcr.io/${GITHUB_USER}/${BASE_IMAGE_NAME}-ci:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
+          DEVCONTAINER_IMAGE="ghcr.io/${GITHUB_USER}/${BASE_IMAGE_NAME}-devcontainer:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
           echo "ci_image=${CI_IMAGE}" >> $GITHUB_OUTPUT
           echo "devcontainer_image=${DEVCONTAINER_IMAGE}" >> $GITHUB_OUTPUT
@@ -71,20 +73,25 @@ jobs:
           echo "========================================="
           echo "Processing CI Image"
           echo "========================================="
-          if ./scripts/docker-utils.sh image-exists ci; then
-            echo "✓ CI image already exists in registry, skipping build"
+          # Check if image with current Dockerfile hash exists
+          DOCKERFILE_HASH=$(./scripts/docker-utils.sh hash)
+          echo "Current Dockerfile hash: ${DOCKERFILE_HASH}"
+
+          # Use hash-based checking to detect Dockerfile changes
+          if ./scripts/docker-utils.sh image-exists-hash ci; then
+            echo "✓ CI image already exists for current Dockerfile hash, skipping build"
           else
-            echo "CI image not found, building and pushing..."
+            echo "CI image not found for current Dockerfile hash, building and pushing..."
             ./scripts/docker-utils.sh build-and-push ci
           fi
           echo ""
           echo "========================================="
           echo "Processing Devcontainer Image"
           echo "========================================="
-          if ./scripts/docker-utils.sh image-exists devcontainer; then
-            echo "✓ Devcontainer image already exists in registry, skipping build"
+          if ./scripts/docker-utils.sh image-exists-hash devcontainer; then
+            echo "✓ Devcontainer image already exists for current Dockerfile hash, skipping build"
           else
-            echo "Devcontainer image not found, building and pushing..."
+            echo "Devcontainer image not found for current Dockerfile hash, building and pushing..."
             echo "Note: This build will reuse layers from CI image if it was built"
             ./scripts/docker-utils.sh build-and-push devcontainer
           fi
