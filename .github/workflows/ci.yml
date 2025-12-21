@@ -37,15 +37,15 @@ jobs:
         id: image-names
         run: |
           # Use docker-utils to get image naming components
-          IMAGE_NAME=$(./scripts/docker-utils.sh repo-name)
+          BASE_IMAGE_NAME=$(./scripts/docker-utils.sh repo-name)
           BRANCH_SUFFIX=$(./scripts/docker-utils.sh branch-suffix)
 
           # Use GitHub repository owner for username in CI (convert to lowercase for Docker)
           GITHUB_USER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
 
-          # Calculate image names for both targets
-          CI_IMAGE="ghcr.io/${GITHUB_USER}/${IMAGE_NAME}:latest-ci${BRANCH_SUFFIX}"
-          DEVCONTAINER_IMAGE="ghcr.io/${GITHUB_USER}/${IMAGE_NAME}:latest-devcontainer${BRANCH_SUFFIX}"
+          # Calculate image names for both targets (target is now in the image name)
+          CI_IMAGE="ghcr.io/${GITHUB_USER}/${BASE_IMAGE_NAME}-ci:latest${BRANCH_SUFFIX}"
+          DEVCONTAINER_IMAGE="ghcr.io/${GITHUB_USER}/${BASE_IMAGE_NAME}-devcontainer:latest${BRANCH_SUFFIX}"
 
           echo "ci_image=${CI_IMAGE}" >> $GITHUB_OUTPUT
           echo "devcontainer_image=${DEVCONTAINER_IMAGE}" >> $GITHUB_OUTPUT

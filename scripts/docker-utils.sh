@@ -154,23 +154,26 @@ pull_or_build() {
 
     # Configuration
     local PULL_RETRIES="${PULL_RETRIES:-3}"
-    local IMAGE_NAME="${IMAGE_NAME:-$(detect_repo_name)}"
+    local BASE_IMAGE_NAME="${IMAGE_NAME:-$(detect_repo_name)}"
     local GITHUB_USER=$(detect_github_username)
     local REGISTRY="${REGISTRY:-${GITHUB_USER:+ghcr.io/$GITHUB_USER}}"
     local TARGET="${TARGET:-devcontainer}"
     local PLATFORM="${PLATFORM:-linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}"
     local BRANCH_SUFFIX=$(get_branch_suffix)
 
+    # Include target in image name
+    local IMAGE_NAME="${BASE_IMAGE_NAME}-${TARGET}"
+
     # Calculate Dockerfile hash for tagging
     local DOCKERFILE_HASH=$(calculate_dockerfile_hash ./Dockerfile)
-    local IMAGE_TAG="${IMAGE_TAG:-${DOCKERFILE_HASH}}"
+    local IMAGE_TAG="${IMAGE_TAG:-latest}"
 
     # Construct full image name with branch suffix
     local FULL_IMAGE_NAME
     if [[ -n "$REGISTRY" ]]; then
-        FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}-${TARGET}${BRANCH_SUFFIX}"
+        FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
     else
-        FULL_IMAGE_NAME="${IMAGE_NAME}:${IMAGE_TAG}-${TARGET}${BRANCH_SUFFIX}"
+        FULL_IMAGE_NAME="${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
     fi
 
     echo "========================================="
@@ -192,11 +195,9 @@ pull_or_build() {
         echo "✓ Successfully pulled ${FULL_IMAGE_NAME}"
 
         # Tag with additional aliases for convenience
-        docker tag "${FULL_IMAGE_NAME}" "${IMAGE_NAME}:${TARGET}${BRANCH_SUFFIX}"
-        docker tag "${FULL_IMAGE_NAME}" "${IMAGE_NAME}:latest-${TARGET}${BRANCH_SUFFIX}"
-        # Also create branch-agnostic alias for devcontainer.json compatibility
-        docker tag "${FULL_IMAGE_NAME}" "${IMAGE_NAME}:${TARGET}"
-        echo "✓ Tagged as ${IMAGE_NAME}:${TARGET}${BRANCH_SUFFIX}, ${IMAGE_NAME}:latest-${TARGET}${BRANCH_SUFFIX}, and ${IMAGE_NAME}:${TARGET}"
+        docker tag "${FULL_IMAGE_NAME}" "${IMAGE_NAME}:${IMAGE_TAG}"
+        docker tag "${FULL_IMAGE_NAME}" "${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
+        echo "✓ Tagged as ${IMAGE_NAME}:${IMAGE_TAG} and ${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
         return 0
     else
@@ -209,14 +210,13 @@ pull_or_build() {
             --target "${TARGET}" \
             --platform "${PLATFORM}" \
             -t "${FULL_IMAGE_NAME}" \
-            -t "${IMAGE_NAME}:${TARGET}${BRANCH_SUFFIX}" \
-            -t "${IMAGE_NAME}:latest-${TARGET}${BRANCH_SUFFIX}" \
-            -t "${IMAGE_NAME}:${TARGET}" \
+            -t "${IMAGE_NAME}:${IMAGE_TAG}" \
+            -t "${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}" \
             .
 
         echo ""
         echo "✓ Successfully built ${FULL_IMAGE_NAME}"
-        echo "✓ Tagged as ${IMAGE_NAME}:${TARGET}${BRANCH_SUFFIX}, ${IMAGE_NAME}:latest-${TARGET}${BRANCH_SUFFIX}, and ${IMAGE_NAME}:${TARGET}"
+        echo "✓ Tagged as ${IMAGE_NAME}:${IMAGE_TAG} and ${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
         return 0
     fi
@@ -236,15 +236,18 @@ push_image() {
     check_dependencies || return 1
 
     # Configuration
-    local IMAGE_NAME="${IMAGE_NAME:-$(detect_repo_name)}"
+    local BASE_IMAGE_NAME="${IMAGE_NAME:-$(detect_repo_name)}"
     local GITHUB_USER=$(detect_github_username)
     local REGISTRY="${REGISTRY:-${GITHUB_USER:+ghcr.io/$GITHUB_USER}}"
     local TARGET="${1:-${TARGET:-devcontainer}}"
     local BRANCH_SUFFIX=$(get_branch_suffix)
 
+    # Include target in image name
+    local IMAGE_NAME="${BASE_IMAGE_NAME}-${TARGET}"
+
     # Calculate Dockerfile hash for tagging
     local DOCKERFILE_HASH=$(calculate_dockerfile_hash ./Dockerfile)
-    local IMAGE_TAG="${IMAGE_TAG:-${DOCKERFILE_HASH}}"
+    local IMAGE_TAG="${IMAGE_TAG:-latest}"
 
     # Validate registry is configured
     if [[ -z "$REGISTRY" ]]; then
@@ -254,7 +257,7 @@ push_image() {
     fi
 
     # Construct full image name with branch suffix
-    local FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}-${TARGET}${BRANCH_SUFFIX}"
+    local FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
 
     echo "========================================="
     echo "Push Docker Image"
@@ -289,15 +292,18 @@ push_image() {
 #   Exit code 0 if image exists, 1 if not found
 image_exists() {
     # Configuration
-    local IMAGE_NAME="${IMAGE_NAME:-$(detect_repo_name)}"
+    local BASE_IMAGE_NAME="${IMAGE_NAME:-$(detect_repo_name)}"
     local GITHUB_USER=$(detect_github_username)
     local REGISTRY="${REGISTRY:-${GITHUB_USER:+ghcr.io/$GITHUB_USER}}"
     local TARGET="${1:-${TARGET:-devcontainer}}"
     local BRANCH_SUFFIX=$(get_branch_suffix)
 
+    # Include target in image name
+    local IMAGE_NAME="${BASE_IMAGE_NAME}-${TARGET}"
+
     # Calculate Dockerfile hash for tagging
     local DOCKERFILE_HASH=$(calculate_dockerfile_hash ./Dockerfile)
-    local IMAGE_TAG="${IMAGE_TAG:-${DOCKERFILE_HASH}}"
+    local IMAGE_TAG="${IMAGE_TAG:-latest}"
 
     # Validate registry is configured
     if [[ -z "$REGISTRY" ]]; then
@@ -307,7 +313,7 @@ image_exists() {
     fi
 
     # Construct full image name with branch suffix
-    local FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}-${TARGET}${BRANCH_SUFFIX}"
+    local FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
 
     echo "Checking if image exists: ${FULL_IMAGE_NAME}"
 
@@ -343,16 +349,19 @@ build_and_push() {
     fi
 
     # Configuration
-    local IMAGE_NAME="${IMAGE_NAME:-$(detect_repo_name)}"
+    local BASE_IMAGE_NAME="${IMAGE_NAME:-$(detect_repo_name)}"
     local GITHUB_USER=$(detect_github_username)
     local REGISTRY="${REGISTRY:-${GITHUB_USER:+ghcr.io/$GITHUB_USER}}"
     local TARGET="${1:-${TARGET:-devcontainer}}"
     local PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
     local BRANCH_SUFFIX=$(get_branch_suffix)
 
+    # Include target in image name
+    local IMAGE_NAME="${BASE_IMAGE_NAME}-${TARGET}"
+
     # Calculate Dockerfile hash for tagging
     local DOCKERFILE_HASH=$(calculate_dockerfile_hash ./Dockerfile)
-    local IMAGE_TAG="${IMAGE_TAG:-${DOCKERFILE_HASH}}"
+    local IMAGE_TAG="${IMAGE_TAG:-latest}"
 
     # Validate registry is configured
     if [[ -z "$REGISTRY" ]]; then
@@ -362,16 +371,15 @@ build_and_push() {
     fi
 
     # Construct image tags
-    local HASH_TAG="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}-${TARGET}${BRANCH_SUFFIX}"
-    local LATEST_TAG="${REGISTRY}/${IMAGE_NAME}:latest-${TARGET}${BRANCH_SUFFIX}"
-    local TARGET_TAG="${REGISTRY}/${IMAGE_NAME}:${TARGET}${BRANCH_SUFFIX}"
+    local LATEST_TAG="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}${BRANCH_SUFFIX}"
+    local HASH_TAG="${REGISTRY}/${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
     echo "========================================="
     echo "Build and Push Multi-Architecture Image"
     echo "========================================="
-    echo "Hash Tag: ${HASH_TAG}"
+    echo "Image Name: ${IMAGE_NAME}"
     echo "Latest Tag: ${LATEST_TAG}"
-    echo "Target Tag: ${TARGET_TAG}"
+    echo "Hash Tag: ${HASH_TAG}"
     echo "Target: ${TARGET}"
     echo "Platforms: ${PLATFORMS}"
     echo "Registry: ${REGISTRY}"
@@ -387,14 +395,14 @@ build_and_push() {
     docker buildx build \
         --target "${TARGET}" \
         --platform "${PLATFORMS}" \
-        --tag "${HASH_TAG}" \
         --tag "${LATEST_TAG}" \
-        --tag "${TARGET_TAG}" \
+        --tag "${HASH_TAG}" \
         --push \
         .
 
     echo ""
-    echo "✓ Successfully built and pushed ${HASH_TAG}"
+    echo "✓ Successfully built and pushed ${LATEST_TAG}"
+    echo "✓ Also tagged as ${HASH_TAG}"
     echo "✓ Available for platforms: ${PLATFORMS}"
 
     return 0

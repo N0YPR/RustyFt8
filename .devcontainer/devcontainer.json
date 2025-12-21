@@ -1,7 +1,7 @@
 {
   "name": "RustyFt8",
   "initializeCommand": "bash ${localWorkspaceFolder}/scripts/docker-utils.sh pull-or-build",
-  "image": "rustyft8:devcontainer",
+  "image": "rustyft8-devcontainer:latest",
   "remoteUser": "vscode",
   "customizations": {
     "vscode": {
