@@ -1,7 +1,8 @@
 # Build arguments
 ARG VARIANT=debian-13
 ARG NPM_VERSION=10.9.2
-ARG RUST_VERSION=1.83.0
+# Rust version (stable, nightly, or specific version like 1.92.0)
+ARG RUST_VERSION=1.92.0
 
 # Base: Microsoft Dev Containers base image for Debian 13 (Trixie)
 # https://mcr.microsoft.com/en-us/product/devcontainers/base/about
@@ -47,9 +48,11 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN set -eux \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
        -y \
-       --default-toolchain ${RUST_VERSION} \
        --profile minimal \
        --no-modify-path \
+    && rustup component add rustfmt clippy \
+    && rustup toolchain install ${RUST_VERSION} --profile minimal \
+    && rustup default ${RUST_VERSION} \
     && chmod -R a+w $RUSTUP_HOME $CARGO_HOME \
     && rustup --version \
     && cargo --version \
