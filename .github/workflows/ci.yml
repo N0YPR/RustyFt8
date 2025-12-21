@@ -96,4 +96,22 @@ jobs:
             ./scripts/docker-utils.sh build-and-push devcontainer
           fi
 
- 
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: docker-images
+    container:
+      image: ${{ needs.docker-images.outputs.ci_image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build project
+        run: cargo build --release --verbose
+
+      - name: Run tests
+        run: cargo test --release --verbose
+
