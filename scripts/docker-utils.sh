@@ -188,6 +188,9 @@ pull_or_build() {
     fi
     echo "========================================="
 
+    # Local tag for devcontainer.json to reference
+    local LOCAL_TAG="${IMAGE_NAME}:local"
+
     # Try to pull the hash-tagged image
     echo ""
     echo "Checking for image matching current Dockerfile hash..."
@@ -199,23 +202,29 @@ pull_or_build() {
         docker tag "${FULL_IMAGE_NAME}" "${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
         echo "✓ Tagged locally as ${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
 
+        # Tag with :local for devcontainer.json
+        docker tag "${FULL_IMAGE_NAME}" "${LOCAL_TAG}"
+        echo "✓ Tagged locally as ${LOCAL_TAG}"
+
         return 0
     else
         echo "✗ No image found matching current Dockerfile hash"
         echo ""
         echo "Building image locally with current Dockerfile..."
 
-        # Build the image with hash-based tag only
+        # Build the image with hash-based tag and :local tag
         docker build \
             --target "${TARGET}" \
             --platform "${PLATFORM}" \
             -t "${FULL_IMAGE_NAME}" \
             -t "${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}" \
+            -t "${LOCAL_TAG}" \
             .
 
         echo ""
         echo "✓ Successfully built ${FULL_IMAGE_NAME}"
         echo "✓ Local tag: ${IMAGE_NAME}:${DOCKERFILE_HASH}${BRANCH_SUFFIX}"
+        echo "✓ Devcontainer tag: ${LOCAL_TAG}"
 
         return 0
     fi
