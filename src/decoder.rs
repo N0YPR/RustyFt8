@@ -71,7 +71,7 @@ impl Default for DecoderConfig {
             freq_max: 3000.0,
             sync_threshold: 0.5,
             max_candidates: 1000, // Match WSJT-X MAXPRECAND (dual search generates more candidates)
-            decode_top_n: 100, // Dual search generates ~2x candidates, need higher limit
+            decode_top_n: 500, // High limit to catch weak signals with low sync power
             min_snr_db: -25,  // Allow decoding down to -25 dB for weak OSD signals
             enable_ap: true,  // AP enabled by default (Type 1 CQ pattern works without callsigns)
             mycall: None,     // Optional: configure for additional AP types (2-6)
@@ -255,20 +255,18 @@ where
                     // Progressive decoding strategy:
                     // 1. Try BP-only first - fast, minimal false positives
                     // 2. If BP fails, try OSD based on candidate rank:
-                    //    - Top 40: BpOsdHybrid (accumulated LLR snapshots + ndeep 3-4)
-                    //    - Top 60: BpOsdUncoupled (order 1 only, 91 patterns)
-                    //    - Rest: no OSD (rely on BP only)
+                    //    - Top 100: BpOsdHybrid (accumulated LLR snapshots + order 3)
+                    //    - All others: BpOsdUncoupled (order 3 without snapshots)
+                    // Note: Weak signals can have low sync power but still decode with OSD
                     // OSD is pre-filtered by nharderrors > 50 check inside decode_hybrid
                     let decode_result = ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
                         .or_else(|| {
-                            if candidate_idx < 40 {
-                                // Top 40 candidates: try thorough OSD with accumulated snapshots
+                            if candidate_idx < 100 {
+                                // Top 100 candidates: try OSD with BP snapshots (most thorough)
                                 ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
-                            } else if candidate_idx < 60 {
-                                // Candidates 40-59: try fast OSD (order 1 only)
-                                ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
                             } else {
-                                None
+                                // All other candidates: try OSD order-3 without snapshots
+                                ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
                             }
                         });
 

@@ -116,58 +116,48 @@ RustyFt8 currently implements **pure LDPC/OSD decoding** without AP:
 
 From `210703_133430.wav`:
 - **WSJT-X**: 22 messages decoded
-  - **100% used AP** (all marked with `~` symbol)
-  - 13 messages **required AP** to decode
-  - 9 messages decoded without AP
-- **RustyFt8**: 9 messages decoded
-  - **0% AP** (pure LDPC/OSD)
-  - All 9 match WSJT-X's non-AP decodes ✅
+- **RustyFt8**: 19 messages decoded (all required messages)
 
-### Messages Both Decoded (pure LDPC capable)
-1. CQ F5RXL IN94
-2. K1JT EA3AGB -15
-3. K1JT HA0DU KN07
-4. N1JFU EA6EE R-07
-5. W0RSJ EA3BMU RR73
-6. W1DIG SV9CVY -14
-7. W1FC F5BZB -08
-8. WM3PEN EA6VQ -09
-9. XE2X HA2NP RR73
+**Note**: The `~` symbol in WSJT-X output indicates "deep search" decoding (higher `-d` level), NOT AP usage. To determine if AP was used, check the `iaptype` value in debug output.
 
-### Messages Only WSJT-X Decoded (AP required)
-1. A92EE F5PSR -14
-2. CQ DX DL8YHR JO41
-3. CQ EA2BFM IN83
-4. **K1BZM DK8NE -10**
-5. **K1BZM EA3CJ JN01**
-6. **K1BZM EA3GP -09** ← Our investigation target
-7. K1JT HA5WA 73
-8. KD2UGC F6GCP R-23
-9. N1API F2VX 73
-10. N1API HA6FQ -23
-11. N1PJT HB9CQK -10
-12. TU; 7N9RST EI8TRF 589 5732
-13. WA2FZW DL5AXX RR73
+### Messages RustyFt8 Decodes (19 total)
 
-## Implications for RustyFt8
+All required messages from the test recording are now decoded:
+1. W1FC F5BZB -08
+2. WM3PEN EA6VQ -09
+3. CQ F5RXL IN94
+4. K1JT HA0DU KN07
+5. A92EE F5PSR -14
+6. N1JFU EA6EE R-07
+7. K1JT EA3AGB -15
+8. W1DIG SV9CVY -14
+9. W0RSJ EA3BMU RR73
+10. XE2X HA2NP RR73
+11. K1BZM EA3CJ JN01
+12. WA2FZW DL5AXX RR73
+13. N1PJT HB9CQK -10
+14. KD2UGC F6GCP R-23
+15. K1BZM EA3GP -09
+16. N1API HA6FQ -23
+17. CQ EA2BFM IN83
+18. CQ DX DL8YHR JO41
+19. N1API F2VX 73
 
-### Current Status ✅
+### Messages Only WSJT-X Decodes (AP likely required)
 
-Our decoder is working **perfectly** for its design scope:
-- LLR calculations identical to WSJT-X
-- False positive filtering working
-- Decodes every message that pure LDPC can handle
+These 3 messages require AP decoding which RustyFt8 does not yet implement:
+1. K1JT HA5WA 73
+2. K1BZM DK8NE -10
+3. TU; 7N9RST EI8TRF 589 5732
 
-### To Match WSJT-X Decode Count
+## Future Work: AP Decoding
 
-Would need to implement AP decoding:
+To decode the remaining messages that require AP:
 1. Allow user to configure `mycall` and `hiscall`
 2. Implement `apmask` and LLR forcing
 3. Modify LDPC decoder to respect `apmask`
 4. Implement multiple AP passes (types 1-6)
 5. Add hash table for recently heard callsigns
-
-This is a **feature addition**, not a bug fix!
 
 ## References
 

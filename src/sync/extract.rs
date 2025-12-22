@@ -863,6 +863,8 @@ pub fn extract_symbols_all_llr(
 ) -> Result<usize, String> {
     // Extract nsym=1 with both difference and ratio methods
     // Capture nsync from the first extraction (all extractions use same signal, so nsync is same)
+    // NOTE: extract_symbols_impl already normalizes and scales LLRs internally,
+    // so we DO NOT apply normalization or scaling here to avoid double-processing
     let nsync = extract_symbols_impl(signal, candidate, 1, llra, Some(llrd), Some(s8_out))?;
 
     // Extract nsym=2 (difference only, ratio not used by WSJT-X for nsym>1)
@@ -871,20 +873,8 @@ pub fn extract_symbols_all_llr(
     // Extract nsym=3 (difference only, ratio not used by WSJT-X for nsym>1)
     extract_symbols_impl(signal, candidate, 3, llrc, None, None)?;
 
-    // Normalize each LLR array independently (matching WSJT-X normalizebmet)
-    normalize_llr(llra);
-    normalize_llr(llrb);
-    normalize_llr(llrc);
-    normalize_llr(llrd);
-
-    // Apply WSJT-X scale factor
-    const SCALEFAC: f32 = 2.83;
-    for i in 0..174 {
-        llra[i] *= SCALEFAC;
-        llrb[i] *= SCALEFAC;
-        llrc[i] *= SCALEFAC;
-        llrd[i] *= SCALEFAC;
-    }
+    // LLRs are already normalized and scaled by extract_symbols_impl (lines 642-696)
+    // Do NOT apply additional normalization or scaling here!
 
     Ok(nsync)
 }

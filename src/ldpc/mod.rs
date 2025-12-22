@@ -133,13 +133,15 @@ pub fn decode_hybrid_with_ap(
 
             // BP failed - check if OSD is worth trying
             let nharderrors = compute_nharderrors(llr);
-            if nharderrors > 36 {
-                // Too many hard errors - OSD won't help, skip it
+            if nharderrors > 50 {
+                // Too many parity violations - OSD won't help, skip it
+                // Note: threshold matches BpOsdHybrid to allow weak signals through
                 return None;
             }
 
-            // Try OSD order-1 (91 patterns, very fast)
-            if let Some(decoded) = osd_decode(llr, 1) {
+            // Try OSD order-2 (C(91,2) = 4095 patterns, good balance of speed/power)
+            // More powerful than order-1 (91 patterns) but faster than order-3 (~10K)
+            if let Some(decoded) = osd_decode(llr, 2) {
                 return Some((decoded, 0, nharderrors));
             }
 

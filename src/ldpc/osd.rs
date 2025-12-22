@@ -51,10 +51,10 @@ fn gaussian_elimination(
 
     // Gaussian elimination to RREF
     for diag in 0..K {
-        // Find pivot (look ahead up to 20 columns)
-        // WSJT-X uses icol=id,k+20 which allows searching into parity columns
+        // Find pivot: WSJT-X uses do icol=id,k+20 which searches from diag to K+20
+        // This is crucial - it searches ALL the way up to column K+20 (111), not just 20 columns ahead
         let mut pivot_col = None;
-        for col in diag..(diag + 20).min(N) {
+        for col in diag..(K + 20).min(N) {
             if matrix[diag][col] {
                 pivot_col = Some(col);
                 break;
