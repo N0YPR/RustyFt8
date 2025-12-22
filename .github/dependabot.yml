@@ -1,0 +1,100 @@
+# Dependabot configuration for automatic dependency updates
+# See: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Maintain Rust/Cargo dependencies - main branch
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    # Group all dependencies into a single PR to reduce noise
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    # Keep PRs manageable
+    open-pull-requests-limit: 5
+    # Add reviewers if desired (uncomment and modify)
+    # reviewers:
+    #   - "your-github-username"
+    # Add labels to PRs
+    labels:
+      - "dependencies"
+      - "rust"
+    # Commit message prefix
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    # Allow both direct and indirect dependencies
+    allow:
+      - dependency-type: "all"
+
+  # Maintain Rust/Cargo dependencies - development branch
+  - package-ecosystem: "cargo"
+    directory: "/"
+    target-branch: "development"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    # Group all dependencies into a single PR to reduce noise
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    # Keep PRs manageable
+    open-pull-requests-limit: 5
+    # Add reviewers if desired (uncomment and modify)
+    # reviewers:
+    #   - "your-github-username"
+    # Add labels to PRs
+    labels:
+      - "dependencies"
+      - "rust"
+      - "development"
+    # Commit message prefix
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    # Allow both direct and indirect dependencies
+    allow:
+      - dependency-type: "all"
+
+  # Maintain GitHub Actions - main branch
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+
+  # Maintain GitHub Actions - development branch
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "development"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "github-actions"
+      - "development"
+    commit-message:
+      prefix: "ci"
