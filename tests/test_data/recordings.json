@@ -1,0 +1,36 @@
+{
+  "recordings": [
+    {
+      "name": "210703_133430",
+      "description": "Real FT8 recording with 22 WSJT-X decodes (SNR range: 16 to -24 dB)",
+      "wav_file": "tests/test_data/210703_133430.wav",
+      "sample_rate": 12000,
+      "duration_seconds": 15,
+      "max_decode_time_seconds": 90,
+      "messages": [
+        { "text": "W1FC F5BZB -08", "required": true },
+        { "text": "WM3PEN EA6VQ -09", "required": true },
+        { "text": "CQ F5RXL IN94", "required": true },
+        { "text": "K1JT HA0DU KN07", "required": true },
+        { "text": "A92EE F5PSR -14", "required": true },
+        { "text": "N1JFU EA6EE R-07", "required": true },
+        { "text": "K1JT EA3AGB -15", "required": true },
+        { "text": "W1DIG SV9CVY -14", "required": true },
+        { "text": "W0RSJ EA3BMU RR73", "required": true },
+        { "text": "XE2X HA2NP RR73", "required": true },
+        { "text": "K1BZM EA3CJ JN01", "required": true },
+        { "text": "WA2FZW DL5AXX RR73", "required": true },
+        { "text": "N1PJT HB9CQK -10", "required": true },
+        { "text": "KD2UGC F6GCP R-23", "required": true },
+        { "text": "K1BZM EA3GP -09", "required": true },
+        { "text": "N1API HA6FQ -23", "required": true },
+        { "text": "CQ EA2BFM IN83", "required": true },
+        { "text": "CQ DX DL8YHR JO41", "required": true },
+        { "text": "N1API F2VX 73", "required": false },
+        { "text": "K1JT HA5WA 73", "required": false },
+        { "text": "K1BZM DK8NE -10", "required": false },
+        { "text": "TU; 7N9RST EI8TRF 589 5732", "required": false }
+      ]
+    }
+  ]
+}
