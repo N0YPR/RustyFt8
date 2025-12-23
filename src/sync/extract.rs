@@ -92,6 +92,35 @@ fn apply_phase_correction(cd: &mut [(f32, f32)], freq_offset_hz: f32, sample_rat
     }
 }
 
+/// Build per-symbol frequency tweak vector (ctwk) matching WSJT-X ft8b.f90:122-127
+///
+/// WSJT-X applies frequency correction per-symbol (32 samples) during sync correlation
+/// rather than to the entire buffer. This is more accurate because:
+/// 1. Phase is reset at each symbol boundary during sync measurement
+/// 2. Avoids accumulating phase errors over 3200 samples
+///
+/// # Arguments
+/// * `freq_offset_hz` - Frequency offset to correct in Hz
+/// * `sample_rate` - Downsampled sample rate (typically ~200 Hz)
+///
+/// # Returns
+/// 32-element complex tweak vector
+fn build_ctwk(freq_offset_hz: f32, sample_rate: f32) -> [(f32, f32); 32] {
+    let twopi = 2.0 * core::f32::consts::PI;
+    let dt2 = 1.0 / sample_rate; // Sample period
+    let dphi = twopi * freq_offset_hz * dt2;
+
+    let mut ctwk = [(0.0f32, 0.0f32); 32];
+    let mut phi = 0.0f32;
+
+    for i in 0..32 {
+        ctwk[i] = (f32::cos(phi), f32::sin(phi));
+        phi = (phi + dphi) % twopi;
+    }
+
+    ctwk
+}
+
 /// Extract 174 LLR values using multi-symbol soft decoding.
 ///
 /// This function:
@@ -160,13 +189,14 @@ fn extract_symbols_impl(
 
     // Only do fine phase correction for nsym=2/3 (nsym=1 doesn't need phase coherence)
     if nsym >= 2 {
-        let mut cd_test = cd.clone();
-
         // Initial sync without correction
         let initial_sync = sync_downsampled(&cd, time_offset_samples, None, false, Some(actual_sample_rate));
         let mut best_sync = initial_sync;
 
-        // Search ±1.0 Hz in 0.05 Hz steps (original range that works for weak signals)
+        // Search ±1.0 Hz in 0.05 Hz steps using per-symbol ctwk (matching WSJT-X sync8d)
+        // WSJT-X ft8b.f90:119-133 uses ctwk to apply frequency correction during sync
+        // measurement rather than to the whole buffer. This is more accurate because
+        // phase is reset at each symbol boundary.
         for correction_idx in -20..=20 {
             let freq_correction = correction_idx as f32 * 0.05; // ±1.0 Hz in 0.05 Hz steps
 
@@ -174,12 +204,11 @@ fn extract_symbols_impl(
                 continue; // Already tested initial
             }
 
-            // Apply phase correction for search
-            cd_test.copy_from_slice(&cd);
-            apply_phase_correction(&mut cd_test, freq_correction, actual_sample_rate);
+            // Build per-symbol frequency tweak vector (like WSJT-X ft8b.f90:122-127)
+            let ctwk = build_ctwk(freq_correction, actual_sample_rate);
 
-            // Test sync quality
-            let sync = sync_downsampled(&cd_test, time_offset_samples, None, false, Some(actual_sample_rate));
+            // Test sync quality with per-symbol tweak applied during correlation
+            let sync = sync_downsampled(&cd, time_offset_samples, Some(&ctwk), true, Some(actual_sample_rate));
 
             if sync > best_sync {
                 best_sync = sync;
@@ -187,10 +216,9 @@ fn extract_symbols_impl(
             }
         }
 
-        // Apply best correction using phase rotation (fast and reliable)
-        // Note: Re-downsampling at corrected frequency was tested but caused false positives
-        // due to subtle changes in signal characteristics. Phase rotation is sufficient for
-        // corrections within ±1.0 Hz range.
+        // Apply best correction to the whole buffer for symbol extraction
+        // This is necessary because the FFT-based symbol extraction expects the
+        // signal to be centered at baseband
         if best_correction.abs() > 0.001 {
             apply_phase_correction(&mut cd, best_correction, actual_sample_rate);
         }

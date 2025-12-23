@@ -49,17 +49,17 @@ For small corrections (±1.0 Hz), phase rotation is mathematically equivalent bu
 
 **Phase rotation is sufficient** for corrections within ±1.0 Hz range. The original hypothesis that re-downsampling would improve weak signal decoding was incorrect. The hard error gap on weak signals is not caused by phase rotation error accumulation.
 
-**Next investigation**: Item 2 (per-symbol frequency tweak) may be the actual cause of the gap.
+**Next investigation**: Items 3-4 (timing/signal flow) or LLR calculation differences may be the actual cause of the gap.
 
 ---
 
-### 2. [ ] Use Per-Symbol Frequency Tweak Instead of Phase Rotation ⭐⭐⭐ CRITICAL
+### 2. [x] Use Per-Symbol Frequency Tweak Instead of Phase Rotation ⭐⭐⭐ TESTED
 
-**Priority:** HIGH
-**Files:** [extract.rs](../src/decode/extract.rs)
-**Impact:** Improves frequency search accuracy
+**Priority:** HIGH → **CLOSED** (tested, no improvement)
+**Files:** [extract.rs](../src/sync/extract.rs)
+**Status:** Implemented - mathematically equivalent to whole-buffer approach
 
-#### Problem
+#### Problem (Original Hypothesis)
 
 WSJT-X uses `sync8d` with a complex tweak vector (`ctwk`) that applies frequency correction per-symbol. RustyFt8 applies phase correction to the entire buffer, accumulating errors.
 
@@ -78,25 +78,40 @@ do ifr=-5,5                              !Search over +/- 2.5 Hz
 enddo
 ```
 
-#### Current RustyFt8 (`extract.rs:169-186`)
+#### Implementation (December 2024)
+
+Implemented `build_ctwk()` function in extract.rs to create per-symbol frequency tweak vectors matching WSJT-X. Updated frequency search to use ctwk during sync measurement:
 
 ```rust
-for correction_idx in -20..=20 {
-    let freq_correction = correction_idx as f32 * 0.05; // ±1.0 Hz
-    apply_phase_correction(&mut cd_test, freq_correction, actual_sample_rate);
-    let sync = sync_downsampled(&cd_test, time_offset_samples, None, false, ...);
-}
+// Build per-symbol frequency tweak vector (like WSJT-X ft8b.f90:122-127)
+let ctwk = build_ctwk(freq_correction, actual_sample_rate);
+
+// Test sync quality with per-symbol tweak applied during correlation
+let sync = sync_downsampled(&cd, time_offset_samples, Some(&ctwk), true, Some(actual_sample_rate));
 ```
 
-#### Why This Matters
+#### Characterization Results (December 2024)
 
-- Our phase correction accumulates errors over **3200 samples**
-- WSJT-X applies the tweak per-symbol (**32 samples**), resetting phase at each sync measurement
-- Per-symbol approach maintains proper phase relationships throughout
+| Approach | Hard Error Gap | Decodes | False Positives |
+|----------|---------------|---------|-----------------|
+| Whole-buffer phase correction | 12.4 | 21 | 0 |
+| **Per-symbol ctwk (WSJT-X style)** | **12.4** | **21** | **0** |
 
-#### Fix
+**No change in results** - both approaches produce identical sync measurements.
 
-Implement `ctwk` vector approach in `sync_downsampled` to match WSJT-X's per-symbol frequency tweak.
+#### Why No Improvement
+
+The per-symbol and whole-buffer approaches are **mathematically equivalent** for sync measurement:
+- Both apply the same frequency shift to the correlation
+- Per-symbol applies tweak to reference waveform: `wave' = wave × ctwk`
+- Whole-buffer applies conjugate to signal: `cd' = cd × exp(jφ)`
+- Correlation: `cd × conj(wave × ctwk) ≡ (cd × exp(jφ)) × conj(wave)`
+
+The per-symbol approach is cleaner code but doesn't change the underlying math.
+
+#### Conclusion
+
+**The hard error gap is not caused by phase accumulation during frequency search.** The gap must originate from a different stage in the pipeline (likely LLR calculation or symbol extraction).
 
 ---
 
@@ -160,8 +175,14 @@ Pass the downsampled signal and timing from `fine_sync` to `extract_symbols` rat
 | # | Task | Priority | Status |
 |---|------|----------|--------|
 | 1 | Re-downsample after frequency correction | ~~CRITICAL~~ | ✓ CLOSED - No improvement, phase rotation sufficient |
-| 2 | Per-symbol frequency tweak (ctwk) | CRITICAL | Pending - Most likely cause of gap |
+| 2 | Per-symbol frequency tweak (ctwk) | ~~CRITICAL~~ | ✓ CLOSED - Mathematically equivalent, no improvement |
 | 3 | Remove redundant timing search | IMPORTANT | Pending |
 | 4 | Pass downsampled signal between stages | IMPORTANT | Pending |
 
-Item 2 (per-symbol frequency tweak) is now the primary candidate for closing the hard error gap on weak signals. Items 3-4 are cleanup that will improve overall robustness.
+**Conclusion**: The hard error gap (12.4) is **not caused by frequency correction approach**. Both items 1 and 2 were tested and showed no impact. The gap likely originates from:
+- LLR calculation method differences
+- Symbol extraction/FFT precision
+- Noise estimation approach
+- Multi-symbol combining strategy
+
+Items 3-4 are cleanup that may improve robustness but likely won't close the hard error gap.
