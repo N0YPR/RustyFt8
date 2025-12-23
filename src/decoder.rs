@@ -227,31 +227,57 @@ where
                 refined.clone()
             };
 
-            // Extract ALL 4 LLR arrays in one pass (with independent normalization)
-            // WSJT-X uses 4 separate passes: llra (nsym=1 diff), llrb (nsym=2), llrc (nsym=3), llrd (nsym=1 ratio)
-            let mut llra = vec![0.0f32; 174];
-            let mut llrb = vec![0.0f32; 174];
-            let mut llrc = vec![0.0f32; 174];
-            let mut llrd = vec![0.0f32; 174];
-            let mut s8 = [[0.0f32; 79]; 8];
+            // === TIMING VARIATION RETRY ===
+            // For weak signals, timing alignment is critical - a 25ms shift can change
+            // which errors fall in the OSD systematic part. Try primary timing first,
+            // then variations if needed.
+            //
+            // WSJT-X COMPARISON: WSJT-X does timing search BEFORE LLR extraction in ft8b.f90:
+            //   - Line 110: `do idt=i0-10,i0+10` searches ±10 samples (±26.7ms at fs2=375Hz)
+            //   - Line 144: `do idt=-4,4` refines ±4 samples (±10.7ms) after freq adjustment
+            // Our approach: Try timing variations AFTER initial fine_sync, re-extracting LLRs
+            // for each offset. Less efficient but catches cases where fine_sync finds suboptimal timing.
+            let timing_offsets: &[f32] = &[0.0, 0.025, -0.025, 0.050, -0.050];
 
-            let nsync = match sync::extract_symbols_all_llr(
-                signal, &candidate_to_decode, &mut llra, &mut llrb, &mut llrc, &mut llrd, &mut s8
-            ) {
-                Ok(n) => n,
-                Err(_) => return None,
-            };
+            for &timing_delta in timing_offsets {
+                // Create candidate with adjusted timing
+                let mut timed_candidate = candidate_to_decode.clone();
+                timed_candidate.time_offset += timing_delta;
 
-            // WSJT-X rejection filter #1: nsync must be > 6 (at least 7/21 Costas tones correct)
-            if nsync <= 6 {
-                return None;
-            }
+                // Extract ALL 4 LLR arrays in one pass (with independent normalization)
+                // WSJT-X uses 4 separate passes: llra (nsym=1 diff), llrb (nsym=2), llrc (nsym=3), llrd (nsym=1 ratio)
+                let mut llra = vec![0.0f32; 174];
+                let mut llrb = vec![0.0f32; 174];
+                let mut llrc = vec![0.0f32; 174];
+                let mut llrd = vec![0.0f32; 174];
+                let mut s8 = [[0.0f32; 79]; 8];
+
+                let nsync = match sync::extract_symbols_all_llr(
+                    signal, &timed_candidate, &mut llra, &mut llrb, &mut llrc, &mut llrd, &mut s8
+                ) {
+                    Ok(n) => n,
+                    Err(_) => continue, // Try next timing offset
+                };
+
+                // WSJT-X rejection filter #1: nsync must be > 6 (at least 7/21 Costas tones correct)
+                if nsync <= 6 {
+                    continue; // Try next timing offset
+                }
 
             // Try LLR methods with multiple scales
-            // Only use nsym=1 methods for performance - nsym=2/3 rarely help
-            let llr_methods: [(&str, &[f32], usize); 2] = [
-                ("nsym1_ratio", &llrd[..], 1),  // Most reliable
+            // Include nsym=2 (llrb) as it helps with some weak signals like K1JT HA5WA 73
+            //
+            // WSJT-X COMPARISON: WSJT-X uses 4 LLR methods in ft8b.f90 (lines 230-280):
+            //   - llra: nsym=1, difference method (bmeta)
+            //   - llrb: nsym=2, difference method (bmetb) - averages 2 symbols
+            //   - llrc: nsym=3, difference method (bmetc) - averages 3 symbols
+            //   - llrd: nsym=1, ratio method (bmetd)
+            // WSJT-X tries all 4 in sequence. We prioritize llrd and llra for speed,
+            // adding llrb which helps weak signals where symbol averaging reduces noise.
+            let llr_methods: [(&str, &[f32], usize); 3] = [
+                ("nsym1_ratio", &llrd[..], 1),  // Most reliable for strong signals
                 ("nsym1_diff", &llra[..], 1),   // Second best
+                ("nsym2_diff", &llrb[..], 2),   // Helps with weak signals (averaging)
             ];
 
             for &(method_name, llr, nsym) in &llr_methods {
@@ -354,11 +380,11 @@ where
                                 // Calculate SNR using WSJT-X algorithm if we have s8 powers
                                 // Pass baseline noise for improved SNR estimation
                                 let snr_db = if s8[0][0] != 0.0 {
-                                    sync::calculate_snr(&s8, &tones, Some(candidate_to_decode.baseline_noise))
+                                    sync::calculate_snr(&s8, &tones, Some(timed_candidate.baseline_noise))
                                 } else {
                                     // Fallback for old extract_symbols path
-                                    if candidate_to_decode.sync_power > 0.001 {
-                                        let snr = (candidate_to_decode.sync_power.log10() * 10.0 - 27.0) as i32;
+                                    if timed_candidate.sync_power > 0.001 {
+                                        let snr = (timed_candidate.sync_power.log10() * 10.0 - 27.0) as i32;
                                         snr.max(-24).min(30)
                                     } else {
                                         -24
@@ -394,9 +420,9 @@ where
                                     candidate_idx,
                                     message: DecodedMessage {
                                         message,
-                                        frequency: candidate_to_decode.frequency,
-                                        time_offset: candidate_to_decode.time_offset,
-                                        sync_power: candidate_to_decode.sync_power,
+                                        frequency: timed_candidate.frequency,
+                                        time_offset: timed_candidate.time_offset,
+                                        sync_power: timed_candidate.sync_power,
                                         snr_db,
                                         ldpc_iterations: iters,
                                         llr_scale: scale,
@@ -504,10 +530,10 @@ where
                                     }
 
                                     let snr_db = if s8[0][0] != 0.0 {
-                                        sync::calculate_snr(&s8, &tones, Some(candidate_to_decode.baseline_noise))
+                                        sync::calculate_snr(&s8, &tones, Some(timed_candidate.baseline_noise))
                                     } else {
-                                        if candidate_to_decode.sync_power > 0.001 {
-                                            let snr = (candidate_to_decode.sync_power.log10() * 10.0 - 27.0) as i32;
+                                        if timed_candidate.sync_power > 0.001 {
+                                            let snr = (timed_candidate.sync_power.log10() * 10.0 - 27.0) as i32;
                                             snr.max(-24).min(30)
                                         } else {
                                             -24
@@ -527,9 +553,9 @@ where
                                         candidate_idx,
                                         message: DecodedMessage {
                                             message,
-                                            frequency: candidate_to_decode.frequency,
-                                            time_offset: candidate_to_decode.time_offset,
-                                            sync_power: candidate_to_decode.sync_power,
+                                            frequency: timed_candidate.frequency,
+                                            time_offset: timed_candidate.time_offset,
+                                            sync_power: timed_candidate.sync_power,
                                             snr_db,
                                             ldpc_iterations: iters,
                                             llr_scale: 1.0, // AP uses unscaled LLRs
@@ -544,6 +570,8 @@ where
                 }
             }
             // ===== End AP Passes =====
+
+            }  // End timing variation retry loop
 
             None
         })
