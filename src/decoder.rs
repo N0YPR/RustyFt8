@@ -2,6 +2,37 @@
 //!
 //! Implements the complete FT8 decode pipeline for processing recordings with multiple signals.
 //! Follows WSJT-X architecture: scans for candidates, decodes each, reports immediately via callback.
+//!
+//! # Timing Optimization Strategy
+//!
+//! This decoder uses a different timing optimization strategy than WSJT-X:
+//!
+//! **WSJT-X approach** (ft8b.f90):
+//! - Searches timing BEFORE LLR extraction
+//! - Line 110: Coarse search ±10 samples (~±26.7ms at fs2=375Hz)
+//! - Line 144: Fine search ±4 samples (~±10.7ms) after frequency adjustment
+//! - Extracts LLRs once with the best timing found
+//!
+//! **Our approach**:
+//! - Performs fine_sync() which optimizes BOTH frequency AND timing together
+//! - Then tries timing variations [0, ±25ms, ±50ms] AFTER fine_sync
+//! - Re-extracts LLRs for each timing offset until decode succeeds
+//!
+//! **Why our approach works better for weak signals**:
+//!
+//! For signals near the decode threshold (e.g., K1JT HA5WA 73 at -24dB), timing
+//! alignment is critical because it affects which bit errors fall in the OSD
+//! systematic region (first 91 bits after reliability reordering).
+//!
+//! Example from K1JT HA5WA 73 analysis:
+//! - fine_sync finds dt=0.125s with sys_err=3 → OSD-3 fails (borderline)
+//! - +25ms offset gives dt=0.150s with sys_err=1 → OSD-3 succeeds
+//!
+//! The timing shift doesn't reduce total errors, but moves errors from the
+//! systematic region to the parity region where they can be corrected.
+//!
+//! Our fine_sync also improves frequency (2040.62 → 2039.15 Hz), which reduces
+//! hard errors from 42 to 35, giving OSD a better starting point.
 
 use crate::{ldpc, symbol, sync};
 use bitvec::prelude::*;
@@ -265,19 +296,20 @@ where
                 }
 
             // Try LLR methods with multiple scales
-            // Include nsym=2 (llrb) as it helps with some weak signals like K1JT HA5WA 73
             //
-            // WSJT-X COMPARISON: WSJT-X uses 4 LLR methods in ft8b.f90 (lines 230-280):
-            //   - llra: nsym=1, difference method (bmeta)
-            //   - llrb: nsym=2, difference method (bmetb) - averages 2 symbols
-            //   - llrc: nsym=3, difference method (bmetc) - averages 3 symbols
-            //   - llrd: nsym=1, ratio method (bmetd)
-            // WSJT-X tries all 4 in sequence. We prioritize llrd and llra for speed,
-            // adding llrb which helps weak signals where symbol averaging reduces noise.
-            let llr_methods: [(&str, &[f32], usize); 3] = [
+            // WSJT-X COMPARISON: WSJT-X uses 4 LLR methods in ft8b.f90 (lines 265-269):
+            //   - Pass 1: llra (nsym=1, difference method)
+            //   - Pass 2: llrb (nsym=2, averages 2 symbols)
+            //   - Pass 3: llrc (nsym=3, averages 3 symbols)
+            //   - Pass 4: llrd (nsym=1, ratio method)
+            // We use all 4 methods. Order prioritizes llrd (most reliable for strong signals),
+            // then llra, llrb, llrc. Symbol averaging (nsym=2,3) helps weak signals by
+            // reducing noise at the cost of some time resolution.
+            let llr_methods: [(&str, &[f32], usize); 4] = [
                 ("nsym1_ratio", &llrd[..], 1),  // Most reliable for strong signals
                 ("nsym1_diff", &llra[..], 1),   // Second best
-                ("nsym2_diff", &llrb[..], 2),   // Helps with weak signals (averaging)
+                ("nsym2_diff", &llrb[..], 2),   // Averages 2 symbols - helps weak signals
+                ("nsym3_diff", &llrc[..], 3),   // Averages 3 symbols - maximum noise reduction
             ];
 
             for &(method_name, llr, nsym) in &llr_methods {
