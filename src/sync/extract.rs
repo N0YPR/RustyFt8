@@ -9,64 +9,6 @@ use super::fft::fft_real;
 use super::COSTAS_PATTERN;
 use tracing::trace;
 
-/// Compute symbol peak power to help with timing alignment
-///
-/// Returns the average peak power across the three Costas arrays
-fn compute_symbol_peak_power(cd: &[(f32, f32)], start_offset: i32, nsps: usize) -> f32 {
-    const COSTAS_PATTERN: [u8; 7] = [3, 1, 4, 0, 6, 5, 2];
-    const NFFT_SYM: usize = 32;
-
-    let mut sym_real = [0.0f32; NFFT_SYM];
-    let mut sym_imag = [0.0f32; NFFT_SYM];
-    let mut total_peak = 0.0f32;
-    let mut count = 0;
-
-    // Check Costas arrays at positions 0-6, 36-42, 72-78
-    for costas_start in [0, 36, 72] {
-        for k in 0..7 {
-            let symbol_idx = costas_start + k;
-            let i1 = start_offset + (symbol_idx as i32) * (nsps as i32);
-
-            if i1 < 0 || (i1 as usize + nsps) > cd.len() {
-                continue;
-            }
-
-            // Zero FFT buffer
-            for j in 0..NFFT_SYM {
-                sym_real[j] = 0.0;
-                sym_imag[j] = 0.0;
-            }
-
-            // Copy symbol
-            for j in 0..nsps.min(NFFT_SYM) {
-                let idx = i1 as usize + j;
-                sym_real[j] = cd[idx].0;
-                sym_imag[j] = cd[idx].1;
-            }
-
-            // Perform FFT
-            if fft_real(&mut sym_real, &mut sym_imag, NFFT_SYM).is_err() {
-                continue;
-            }
-
-            // Get power at expected Costas tone
-            let expected_tone = COSTAS_PATTERN[k] as usize;
-            let re = sym_real[expected_tone];
-            let im = sym_imag[expected_tone];
-            let power = (re * re + im * im).sqrt();
-
-            total_peak += power;
-            count += 1;
-        }
-    }
-
-    if count > 0 {
-        total_peak / count as f32
-    } else {
-        0.0
-    }
-}
-
 /// Apply phase correction to remove residual frequency offset (like WSJT-X twkfreq1)
 ///
 /// This maintains phase coherence between symbols for nsym=2/3 coherent combining
@@ -227,32 +169,28 @@ fn extract_symbols_impl(
     // Calculate samples per symbol based on actual sample rate
     let nsps_down = (actual_sample_rate * SYMBOL_DURATION).round() as usize;
 
-    // Convert time offset to sample index and refine it locally
+    // Convert time offset to sample index
     // candidate.time_offset is RELATIVE to 0.5s start (FT8 convention)
     // Add 0.5s to convert to absolute position in the downsampled buffer
     let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
 
-
-    // Do a comprehensive fine time search to find optimal symbol timing
-    // Search over a wider range to account for timing drift and downsampling artifacts
+    // Timing refinement ±10 samples
+    // This helps weak signals where fine_sync may have found a sub-optimal timing
+    // due to different sample rate or rounding. Use sync_downsampled for consistency.
+    // Note: WSJT-X does ±4 samples but we use ±10 to compensate for any accumulated
+    // timing errors from the downsampling/frequency correction process.
     let mut best_offset = initial_offset;
-    let mut best_metric = 0.0f32;
+    let mut best_sync = sync_downsampled(&cd, initial_offset, None, false, Some(actual_sample_rate));
 
-    // Search range: ±10 samples (±53ms at 187.5 Hz, ±1/3 symbol period)
     for dt in -10..=10 {
+        if dt == 0 {
+            continue; // Already computed
+        }
         let t_offset = initial_offset + dt;
-
-        // Compute sync metric based on Costas array strength
         let sync = sync_downsampled(&cd, t_offset, None, false, Some(actual_sample_rate));
 
-        // Also check symbol peak power at this offset
-        let peak_power = compute_symbol_peak_power(&cd, t_offset, nsps_down);
-
-        // Combined metric: sync strength + peak power
-        let metric = sync + 0.1 * peak_power;
-
-        if metric > best_metric {
-            best_metric = metric;
+        if sync > best_sync {
+            best_sync = sync;
             best_offset = t_offset;
         }
     }
