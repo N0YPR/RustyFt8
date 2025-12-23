@@ -179,7 +179,8 @@ pub fn fine_sync(
     // Convert time offset to downsampled sample index
     // candidate.time_offset is relative to 0.5s start, but downsampled buffer starts at 0.0
     // So add 0.5s to convert to absolute time, then multiply by actual sample rate
-    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate) as i32;
+    // Match WSJT-X nint() - round to nearest integer
+    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32;
     // eprintln!("  Initial offset: {} samples (from dt={:.2}s)", initial_offset, candidate.time_offset);
 
 

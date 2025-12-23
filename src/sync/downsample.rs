@@ -92,16 +92,24 @@ pub fn downsample_200hz(
     let bandwidth = (it - ib + 1) as f32 * df;
     let actual_sample_rate = bandwidth * (NFFT_OUT as f32) / (k as f32);
 
-    // Apply taper to edges
+    // Apply taper to edges (matching WSJT-X ft8_downsample.f90)
+    // Start: c1(0:100)=c1(0:100)*taper(100:0:-1) - ramps UP from 0 to 1
+    // End:   c1(k-1-100:k-1)=c1(k-1-100:k-1)*taper - ramps DOWN from 1 to 0
     let taper_len = 101;
     for i in 0..taper_len {
         let taper_val = 0.5 * (1.0 + f32::cos(core::f32::consts::PI * i as f32 / 100.0));
+        // taper[0] = 1.0, taper[100] = 0.0
+
+        // Start taper: REVERSED - use taper[100-i] so index 0 gets 0.0, index 100 gets 1.0
+        let start_taper = 0.5 * (1.0 + f32::cos(core::f32::consts::PI * (100 - i) as f32 / 100.0));
         if i < k {
-            out_real[i] *= taper_val;
-            out_imag[i] *= taper_val;
+            out_real[i] *= start_taper;
+            out_imag[i] *= start_taper;
         }
+
+        // End taper: normal - use taper[i] so index k-1-100 gets 1.0, index k-1 gets 0.0
         let j = k - 1 - i;
-        if j < k {
+        if j < k && j >= 0 {
             out_real[j] *= taper_val;
             out_imag[j] *= taper_val;
         }

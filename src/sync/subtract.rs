@@ -234,7 +234,8 @@ fn subtract_ft8_signal_internal(
     // Calculate start position in audio (can be negative)
     // time_offset is RELATIVE to 0.5s start (FT8 convention: dt=0 means signal starts at t=0.5s)
     // Add 0.5s to convert to absolute sample position
-    let nstart = ((time_offset + 0.5) * SAMPLE_RATE) as i32;
+    // Match WSJT-X nint() - round to nearest integer
+    let nstart = ((time_offset + 0.5) * SAMPLE_RATE).round() as i32;
 
     // Initialize filter
     let nfft = audio.len().next_power_of_two().max(NFRAME.next_power_of_two());
