@@ -156,16 +156,24 @@ All required messages from the test recording are now decoded:
 18. CQ DX DL8YHR JO41
 19. N1API F2VX 73
 
-### Messages Only WSJT-X Decodes (AP likely required)
+### Messages Only WSJT-X Decodes (OSD limitations)
 
-These 3 messages require AP decoding which RustyFt8 does not yet implement:
-1. K1JT HA5WA 73
-2. K1BZM DK8NE -10
-3. TU; 7N9RST EI8TRF 589 5732
+These 3 messages are decoded by WSJT-X using OSD (deep search), **NOT AP** (all have `iaptype=0`):
+
+| Message | Hard Errors | Pass | BER |
+|---------|-------------|------|-----|
+| K1JT HA5WA 73 | 32 | 1 | 18.4% |
+| K1BZM DK8NE -10 | 18 | 4 | 10.3% |
+| TU; 7N9RST EI8TRF 589 5732 | 25 | 1 | 14.4% |
+
+RustyFt8 misses these due to:
+1. **High error rates** - Our OSD may not handle 25-32 errors as effectively
+2. **Signal subtraction** - K1BZM DK8NE requires pass 4 (after subtracting stronger signals)
+3. **Sync/LLR differences** - We may have even more errors than WSJT-X sees
 
 ## Future Work: AP Decoding
 
-To decode the remaining messages that require AP:
+AP decoding would help decode *additional* weak signals (not these specific ones). To implement AP:
 1. Allow user to configure `mycall` and `hiscall`
 2. Implement `apmask` and LLR forcing
 3. Modify LDPC decoder to respect `apmask`
