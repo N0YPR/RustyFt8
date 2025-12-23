@@ -166,6 +166,7 @@ fn extract_symbols_impl(
         let initial_sync = sync_downsampled(&cd, time_offset_samples, None, false, Some(actual_sample_rate));
         let mut best_sync = initial_sync;
 
+        // Search ±1.0 Hz in 0.05 Hz steps (original range that works for weak signals)
         for correction_idx in -20..=20 {
             let freq_correction = correction_idx as f32 * 0.05; // ±1.0 Hz in 0.05 Hz steps
 
@@ -173,7 +174,7 @@ fn extract_symbols_impl(
                 continue; // Already tested initial
             }
 
-            // Apply phase correction
+            // Apply phase correction for search
             cd_test.copy_from_slice(&cd);
             apply_phase_correction(&mut cd_test, freq_correction, actual_sample_rate);
 
@@ -186,11 +187,11 @@ fn extract_symbols_impl(
             }
         }
 
-        // Apply best correction to working buffer
+        // Apply best correction using phase rotation (fast and reliable)
+        // Note: Re-downsampling at corrected frequency was tested but caused false positives
+        // due to subtle changes in signal characteristics. Phase rotation is sufficient for
+        // corrections within ±1.0 Hz range.
         if best_correction.abs() > 0.001 {
-            // Debug output disabled for performance
-            // eprintln!("    Phase correction: {:.3} Hz (sync: {:.3} -> {:.3})",
-            //          best_correction, initial_sync, best_sync);
             apply_phase_correction(&mut cd, best_correction, actual_sample_rate);
         }
     }

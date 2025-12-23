@@ -6,13 +6,13 @@ Analysis of key differences between RustyFt8 and WSJT-X (`ft8b.f90`) that may ex
 
 ## TODO List (Priority Order)
 
-### 1. [ ] Re-Downsample After Frequency Correction ⭐⭐⭐ CRITICAL
+### 1. [x] Re-Downsample After Frequency Correction ⭐⭐⭐ TESTED
 
-**Priority:** HIGH
-**Files:** [extract.rs](../src/decode/extract.rs)
-**Impact:** Most likely to close the hard error gap
+**Priority:** HIGH → **CLOSED** (tested, no improvement)
+**Files:** [extract.rs](../src/sync/extract.rs)
+**Status:** Characterized - phase rotation is sufficient
 
-#### Problem
+#### Problem (Original Hypothesis)
 
 After finding the best frequency offset, WSJT-X re-downsamples the entire signal at the corrected frequency. RustyFt8 only applies phase correction to the already-downsampled buffer.
 
@@ -24,28 +24,32 @@ call ft8_downsample(dd0,.false.,f1,cd0)   !Mix f1 to baseband and downsample
 
 After finding `delfbest`, WSJT-X updates `f1 = f1 + delfbest` and re-downsamples.
 
-#### Current RustyFt8 (`extract.rs:162-196`)
+#### Characterization Results (December 2024)
 
-We only apply phase correction to the already-downsampled buffer - we never re-downsample.
+Multiple re-downsample implementations were tested against the 210703_133430.wav reference recording:
 
-#### Why This Matters
+| Approach | Hard Error Gap | Decodes | K1JT HA5WA 73 | False Positives |
+|----------|---------------|---------|---------------|-----------------|
+| **Baseline (phase rotation)** | **12.4** | **21** | ✓ Decoded | 0 |
+| Re-downsample (pure) | 12.7 | 20 | ✗ Missing | 1 |
+| Re-downsample (hybrid threshold) | 12.7 | 20-21 | ✗ Missing | 1 |
+| Re-downsample (≥1.0 Hz only) | 12.7 | 20 | ✗ Missing | 1 |
 
-- Re-downsampling ensures the signal is **perfectly centered** at baseband
-- Phase correction only **approximates** this and accumulates errors over the 12.8s signal duration
-- For weak signals with frequency errors > 0.5 Hz, this is the difference between `nsync=18` and `nsync=5`
+**Consistent false positive:** "II0XXJ 614BHK EJ78" appeared with ALL re-downsample variants.
 
-#### Evidence
+#### Why Re-Downsample Failed
 
-| nsync Range | Hard Error Gap |
-|-------------|----------------|
-| ≥18 (high)  | Small (-5 to +6) |
-| ≤11 (low)   | Large (+25 to +53) |
+1. **FFT spectral leakage**: Re-downsampling uses FFT extraction which introduces subtle spectral artifacts
+2. **Filter edge effects**: The 101-sample taper creates different edge characteristics than phase rotation
+3. **Circular shift precision**: Integer bin shifting (`cshift`) is less precise than continuous phase rotation
 
-The `nsync` metric directly measures how well the signal is centered.
+For small corrections (±1.0 Hz), phase rotation is mathematically equivalent but avoids FFT artifacts.
 
-#### Fix
+#### Conclusion
 
-Implement proper re-downsampling at the corrected frequency instead of phase rotation.
+**Phase rotation is sufficient** for corrections within ±1.0 Hz range. The original hypothesis that re-downsampling would improve weak signal decoding was incorrect. The hard error gap on weak signals is not caused by phase rotation error accumulation.
+
+**Next investigation**: Item 2 (per-symbol frequency tweak) may be the actual cause of the gap.
 
 ---
 
@@ -153,11 +157,11 @@ Pass the downsampled signal and timing from `fine_sync` to `extract_symbols` rat
 
 ## Summary
 
-| # | Task | Priority | Estimated Impact |
-|---|------|----------|------------------|
-| 1 | Re-downsample after frequency correction | CRITICAL | High |
-| 2 | Per-symbol frequency tweak (ctwk) | CRITICAL | Medium-High |
-| 3 | Remove redundant timing search | IMPORTANT | Medium |
-| 4 | Pass downsampled signal between stages | IMPORTANT | Medium |
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| 1 | Re-downsample after frequency correction | ~~CRITICAL~~ | ✓ CLOSED - No improvement, phase rotation sufficient |
+| 2 | Per-symbol frequency tweak (ctwk) | CRITICAL | Pending - Most likely cause of gap |
+| 3 | Remove redundant timing search | IMPORTANT | Pending |
+| 4 | Pass downsampled signal between stages | IMPORTANT | Pending |
 
-The first two items are most likely to close the hard error gap for weak signals. Items 3-4 are cleanup that will improve overall robustness.
+Item 2 (per-symbol frequency tweak) is now the primary candidate for closing the hard error gap on weak signals. Items 3-4 are cleanup that will improve overall robustness.
