@@ -105,8 +105,8 @@ where
     F: FnMut(DecodedMessage) -> bool,
 {
     if config.max_passes <= 1 {
-        // Single pass - direct decode
-        return decode_ft8_single_pass(signal, config, callback);
+        // Single pass - direct decode (pass 0 uses full OSD)
+        return decode_ft8_single_pass(signal, config, 0, callback);
     }
 
     // Multi-pass decoding with signal subtraction
@@ -121,7 +121,8 @@ where
         let mut pass_decodes = Vec::new();
 
         // Decode signals in current audio
-        decode_ft8_single_pass(&working_signal, config, |msg| {
+        // Pass 0 uses full OSD, later passes use BP-only for speed
+        decode_ft8_single_pass(&working_signal, config, pass_num, |msg| {
             // Only report new messages (deduplication across passes)
             if !all_decoded_messages.contains(&msg.message) {
                 all_decoded_messages.push(msg.message.clone());
@@ -167,7 +168,8 @@ where
 }
 
 /// Single-pass decode (internal helper)
-fn decode_ft8_single_pass<F>(signal: &[f32], config: &DecoderConfig, mut callback: F) -> Result<usize, &'static str>
+/// pass_num affects OSD strategy: pass 0 uses full OSD, later passes use BP-only for speed
+fn decode_ft8_single_pass<F>(signal: &[f32], config: &DecoderConfig, pass_num: usize, mut callback: F) -> Result<usize, &'static str>
 where
     F: FnMut(DecodedMessage) -> bool,
 {
@@ -184,8 +186,15 @@ where
         return Ok(0);
     }
 
-    let num_candidates = candidates.len().min(config.decode_top_n);
-    debug!(processing = num_candidates, found = candidates.len(), "Processing candidates");
+    // For later passes, use fewer candidates since signals are cleaner after subtraction
+    let decode_limit = if pass_num == 0 {
+        config.decode_top_n
+    } else {
+        // After signal subtraction, remaining signals have better SNR and should rank higher
+        50
+    };
+    let num_candidates = candidates.len().min(decode_limit);
+    debug!(processing = num_candidates, found = candidates.len(), pass = pass_num, "Processing candidates");
 
     // LLR scaling factors to try (optimized order - most common values first)
     let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5];
@@ -195,7 +204,7 @@ where
 
     let decode_results: Vec<DecodeResult> = candidates
         .iter()
-        .take(config.decode_top_n)
+        .take(decode_limit)
         .enumerate()
         .par_bridge()
         .filter_map(|(candidate_idx, candidate)| {
@@ -252,23 +261,40 @@ where
                         *v *= scale;
                     }
 
-                    // Progressive decoding strategy:
-                    // 1. Try BP-only first - fast, minimal false positives
-                    // 2. If BP fails, try OSD based on candidate rank:
-                    //    - Top 100: BpOsdHybrid (accumulated LLR snapshots + order 3)
-                    //    - All others: BpOsdUncoupled (order 3 without snapshots)
-                    // Note: Weak signals can have low sync power but still decode with OSD
-                    // OSD is pre-filtered by nharderrors > 50 check inside decode_hybrid
-                    let decode_result = ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
-                        .or_else(|| {
-                            if candidate_idx < 100 {
-                                // Top 100 candidates: try OSD with BP snapshots (most thorough)
-                                ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
-                            } else {
-                                // All other candidates: try OSD order-3 without snapshots
-                                ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
-                            }
-                        });
+                    // Progressive decoding strategy varies by pass:
+                    // Pass 0: Full OSD fallback for difficult signals (slower but more powerful)
+                    // Pass 1: Light OSD (order-2 uncoupled) for remaining weak signals
+                    // Pass 2+: BP-only for speed (signals are clean after 2 subtractions)
+                    let decode_result = if pass_num == 0 {
+                        // First pass: Try BP-only first, then OSD based on candidate rank
+                        ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
+                            .or_else(|| {
+                                if candidate_idx < 50 {
+                                    // Top 50: OSD with BP snapshots (most thorough)
+                                    ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
+                                } else if candidate_idx < 460 {
+                                    // 50-459: OSD order-2 without snapshots
+                                    ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
+                                } else {
+                                    // 460+: BP-only for speed (weak candidates unlikely to need OSD)
+                                    None
+                                }
+                            })
+                    } else if pass_num == 1 {
+                        // Second pass: OSD for top 20 candidates only, BP-only for rest
+                        ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
+                            .or_else(|| {
+                                if candidate_idx < 20 {
+                                    // Top 20: Full OSD with BP snapshots for difficult signals
+                                    ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
+                                } else {
+                                    ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
+                                }
+                            })
+                    } else {
+                        // Pass 2+: BP-only for speed (signals clean after 2 subtractions)
+                        ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
+                    };
 
                     if let Some((decoded_bits, iters, nharderrors)) = decode_result {
                         // WSJT-X rejection filter #2: nharderrors threshold

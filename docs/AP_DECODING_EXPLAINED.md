@@ -115,8 +115,21 @@ RustyFt8 currently implements **pure LDPC/OSD decoding** without AP:
 ## Test Results Summary
 
 From `210703_133430.wav`:
-- **WSJT-X**: 22 messages decoded
-- **RustyFt8**: 19 messages decoded (all required messages)
+- **WSJT-X**: 22 messages decoded in **1.4 seconds**
+- **RustyFt8**: 19 messages decoded in **~5 seconds** (all required messages)
+
+### Performance Optimization Status
+
+The OSD decoder was optimized by replacing `BitVec` with `[u64; 3]` packed arrays:
+- **Before optimization**: ~10-13 seconds
+- **After optimization**: ~5 seconds (~2x speedup)
+
+**Remaining optimization opportunities** (to reach WSJT-X's 1.4s):
+1. **Reduce OSD calls** - Currently processing up to 460 candidates with OSD in pass 0
+2. **SIMD for row XOR** - Use AVX2 to XOR 256 bits at once instead of 3 u64s
+3. **Pattern iteration** - Replace BitVec pattern enumeration with direct index loops
+4. **Cache Gaussian elimination** - Cache RREF results for common reliability orderings
+5. **Early termination** - Skip higher OSD orders if order-0 distance is very good
 
 **Note**: The `~` symbol in WSJT-X output indicates "deep search" decoding (higher `-d` level), NOT AP usage. To determine if AP was used, check the `iaptype` value in debug output.
 
