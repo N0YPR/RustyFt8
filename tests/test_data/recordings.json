@@ -28,7 +28,7 @@
         { "text": "CQ DX DL8YHR JO41", "required": true },
         { "text": "N1API F2VX 73", "required": true },
         { "text": "K1JT HA5WA 73", "required": true },
-        { "text": "K1BZM DK8NE -10", "required": false },
+        { "text": "K1BZM DK8NE -10", "required": true },
         { "text": "TU; 7N9RST EI8TRF 589 5732", "required": false }
       ]
     }

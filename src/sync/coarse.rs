@@ -319,10 +319,10 @@ fn find_candidates(
             candidates.push(wide_cand);
         }
 
-        // Stop after we have enough candidates (WSJT-X uses MAXPRECAND=1000)
-        if candidates.len() >= 1000 {
-            break;
-        }
+        // NOTE: We used to break at 1000 candidates here, but this caused us to miss
+        // bins with weak NARROW sync but strong WIDE sync. Now we process all bins
+        // and let the final truncation handle the limit. This matches WSJT-X more
+        // closely where all candidates are generated first, then sorted and filtered.
     }
 
     // Remove duplicates (within 4 Hz and 40 ms)

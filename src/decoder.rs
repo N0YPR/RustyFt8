@@ -327,11 +327,12 @@ where
                         // First pass: Try BP-only first, then OSD based on candidate rank
                         ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
                             .or_else(|| {
-                                if candidate_idx < 50 {
-                                    // Top 50: OSD with BP snapshots (most thorough)
+                                if candidate_idx < 100 {
+                                    // Top 100: OSD with BP snapshots (most thorough)
+                                    // Extended from 50 to catch weak signals with good sync power
                                     ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
                                 } else if candidate_idx < 460 {
-                                    // 50-459: OSD order-2 without snapshots
+                                    // 100-459: OSD order-2 without snapshots
                                     ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
                                 } else {
                                     // 460+: BP-only for speed (weak candidates unlikely to need OSD)
