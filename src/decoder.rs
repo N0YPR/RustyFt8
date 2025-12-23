@@ -55,6 +55,8 @@ pub struct DecodedMessage {
     pub snr_db: i32,
     /// LDPC iterations required for decode
     pub ldpc_iterations: usize,
+    /// Initial hard errors (parity check violations) before LDPC decode
+    pub hard_errors: usize,
     /// LLR scaling factor that worked
     pub llr_scale: f32,
     /// Number of symbols used for demodulation (1, 2, or 3)
@@ -99,7 +101,7 @@ impl Default for DecoderConfig {
     fn default() -> Self {
         Self {
             freq_min: 100.0,
-            freq_max: 3000.0,
+            freq_max: 4000.0, // Extended to cover signals near upper edge (e.g., 3389 Hz)
             sync_threshold: 0.5,
             max_candidates: 1000, // Match WSJT-X MAXPRECAND (dual search generates more candidates)
             decode_top_n: 500, // High limit to catch weak signals with low sync power
@@ -458,6 +460,7 @@ where
                                         sync_power: timed_candidate.sync_power,
                                         snr_db,
                                         ldpc_iterations: iters,
+                                        hard_errors: nharderrors,
                                         llr_scale: scale,
                                         nsym,
                                         tones,
@@ -591,6 +594,7 @@ where
                                             sync_power: timed_candidate.sync_power,
                                             snr_db,
                                             ldpc_iterations: iters,
+                                            hard_errors: nharderrors,
                                             llr_scale: 1.0, // AP uses unscaled LLRs
                                             nsym,
                                             tones,
@@ -654,7 +658,7 @@ mod tests {
     fn test_decoder_config_default() {
         let config = DecoderConfig::default();
         assert_eq!(config.freq_min, 100.0);
-        assert_eq!(config.freq_max, 3000.0);
+        assert_eq!(config.freq_max, 4000.0);
         assert!(config.sync_threshold > 0.0);
     }
 }

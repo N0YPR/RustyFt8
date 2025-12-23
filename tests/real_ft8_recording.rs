@@ -17,6 +17,14 @@ use test_utils::{read_wav_file, normalize_signal_length};
 struct ExpectedMessage {
     text: String,
     required: bool,
+    #[serde(default)]
+    wsjtx_hard_errors: Option<usize>,
+    #[serde(default)]
+    wsjtx_frequency: Option<f32>,
+    #[serde(default)]
+    wsjtx_dt: Option<f32>,
+    #[serde(default)]
+    expected_codeword: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -106,6 +114,37 @@ fn test_recording(recording: &RecordingTest) {
     println!("  Required: {}/{}", required_messages.len() - missing_required.len(), required_messages.len());
     println!("  Optional: {}/{}", optional_decoded.len(), optional_messages.len());
     println!("  Decode time: {:.1}s", decode_duration.as_secs_f64());
+
+    // Build map of expected messages with their WSJT-X hard errors
+    let wsjtx_errors: std::collections::HashMap<&str, usize> = recording.messages.iter()
+        .filter_map(|m| m.wsjtx_hard_errors.map(|e| (m.text.as_str(), e)))
+        .collect();
+
+    // Compare hard errors for decoded messages
+    println!("\nHard Error Comparison (WSJT-X vs RustyFt8):");
+    let mut total_wsjtx = 0usize;
+    let mut total_ours = 0usize;
+    let mut count = 0usize;
+
+    for msg in &decoded_messages {
+        if let Some(&wsjtx_errs) = wsjtx_errors.get(msg.message.as_str()) {
+            let ours = msg.hard_errors;
+            let diff: i32 = ours as i32 - wsjtx_errs as i32;
+            let indicator = if diff <= 0 { "✓" } else if diff <= 5 { "~" } else { "✗" };
+            println!("  {} {:30} WSJT-X:{:2} Ours:{:2} (diff: {:+3})",
+                indicator, msg.message, wsjtx_errs, ours, diff);
+            total_wsjtx += wsjtx_errs;
+            total_ours += ours;
+            count += 1;
+        }
+    }
+
+    if count > 0 {
+        println!("\n  Summary: WSJT-X avg={:.1}, Ours avg={:.1}, Gap={:.1}",
+            total_wsjtx as f64 / count as f64,
+            total_ours as f64 / count as f64,
+            (total_ours as f64 - total_wsjtx as f64) / count as f64);
+    }
 
     // Fail if any required messages are missing
     assert!(missing_required.is_empty(),
