@@ -121,15 +121,20 @@ pub fn decode_damped(llr: &[f32], max_iterations: usize, damping: f32) -> Option
             }
         }
 
-        // Save initial hard error count (before BP starts, at iteration 0)
-        if iter == 0 {
-            nharderrors = ncheck;
-        }
-
         // If all parity checks satisfied, check CRC
         if ncheck == 0 {
             let decoded = &cw[..K];
             if crc14_check(decoded) {
+                // Compute nharderrors = bit flips from initial LLR (matching WSJT-X)
+                // WSJT-X: nharderror=count( (2*cw-1)*llr .lt. 0.0 )
+                // This counts how many bits in decoded codeword disagree with LLR sign
+                nharderrors = 0;
+                for i in 0..N {
+                    let cw_sign = if cw[i] { 1.0f32 } else { -1.0f32 };
+                    if cw_sign * llr[i] < 0.0 {
+                        nharderrors += 1;
+                    }
+                }
                 return Some((decoded.to_bitvec(), iter, nharderrors));
             }
         }
@@ -278,15 +283,18 @@ pub fn decode_with_ap(
             }
         }
 
-        // Save initial hard error count (before BP starts, at iteration 0)
-        if iter == 0 {
-            nharderrors = ncheck;
-        }
-
         // If all parity checks satisfied, check CRC
         if ncheck == 0 {
             let decoded = &cw[..K];
             if crc14_check(decoded) {
+                // Compute nharderrors = bit flips from initial LLR (matching WSJT-X)
+                nharderrors = 0;
+                for i in 0..N {
+                    let cw_sign = if cw[i] { 1.0f32 } else { -1.0f32 };
+                    if cw_sign * llr[i] < 0.0 {
+                        nharderrors += 1;
+                    }
+                }
                 return Some((decoded.to_bitvec(), iter, nharderrors));
             }
         }
@@ -437,15 +445,18 @@ pub fn decode_with_snapshots(
             }
         }
 
-        // Save initial hard error count (before BP starts, at iteration 0)
-        if iter == 0 {
-            nharderrors = ncheck;
-        }
-
         // If all parity checks satisfied, check CRC
         if ncheck == 0 {
             let decoded = &cw[..K];
             if crc14_check(decoded) {
+                // Compute nharderrors = bit flips from initial LLR (matching WSJT-X)
+                nharderrors = 0;
+                for i in 0..N {
+                    let cw_sign = if cw[i] { 1.0f32 } else { -1.0f32 };
+                    if cw_sign * llr[i] < 0.0 {
+                        nharderrors += 1;
+                    }
+                }
                 return Ok((decoded.to_bitvec(), iter, nharderrors, snapshots));
             }
         }
