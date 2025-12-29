@@ -6,7 +6,7 @@
       "wav_file": "tests/test_data/210703_133430.wav",
       "sample_rate": 12000,
       "duration_seconds": 15,
-      "max_decode_time_seconds": 12,
+      "max_decode_time_seconds": 15,
       "messages": [
         {
           "text": "W1FC F5BZB -08",

@@ -104,14 +104,14 @@ fn main() {
         signal_15s.truncate(NMAX);
     }
 
-    println!();
-    println!("Decoding FT8 signals...");
-    println!("  Frequency range: 100 - 3000 Hz");
-    println!();
-
     // Use multi-pass decoder with signal subtraction (like WSJT-X)
     // Default config has max_passes=3
     let config = DecoderConfig::default();
+
+    println!();
+    println!("Decoding FT8 signals...");
+    println!("  Frequency range: {} - {} Hz", config.freq_min as i32, config.freq_max as i32);
+    println!();
     let mut message_count = 0;
 
     match decode_ft8(&signal_15s, &config, |msg: DecodedMessage| {

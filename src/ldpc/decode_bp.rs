@@ -1,218 +1,32 @@
-//! LDPC decoder using belief propagation (sum-product algorithm)
+//! LDPC belief propagation (BP) decoder
+//!
+//! Pure BP decoder using the sum-product algorithm. For hybrid BP/OSD
+//! decoding with snapshots, see `decode_hybrid.rs`.
 
 use bitvec::prelude::*;
 use bitvec::vec::BitVec;
 use crate::crc::crc14_check;
 use super::constants::*;
+use super::platanh::platanh;
 
-/// Piecewise linear approximation of atanh used by WSJT-X
-///
-/// This is NOT the mathematical atanh function! WSJT-X uses a piecewise
-/// linear approximation that has been tuned for LDPC decoding performance.
-/// The approximation differs by 10-40% from mathematical atanh in typical
-/// operating ranges, and caps output at ±7.0 for numerical stability.
-///
-/// The function uses 5 linear segments:
-/// - |x| ≤ 0.664: y = x / 0.83
-/// - 0.664 < |x| ≤ 0.9217: y = sign(x) * (|x| - 0.4064) / 0.322
-/// - 0.9217 < |x| ≤ 0.9951: y = sign(x) * (|x| - 0.8378) / 0.0524
-/// - 0.9951 < |x| ≤ 0.9998: y = sign(x) * (|x| - 0.9914) / 0.0012
-/// - |x| > 0.9998: y = sign(x) * 7.0
-///
-/// Reference: wsjtx/lib/platanh.f90
-#[inline]
-fn platanh(x: f32) -> f32 {
-    let isign = if x < 0.0 { -1.0 } else { 1.0 };
-    let z = x.abs();
+/// Maximum BP iterations (matches WSJT-X's hardcoded value in decode174_91.f90)
+pub const MAX_BP_ITERATIONS: usize = 30;
 
-    if z <= 0.664 {
-        x / 0.83
-    } else if z <= 0.9217 {
-        isign * (z - 0.4064) / 0.322
-    } else if z <= 0.9951 {
-        isign * (z - 0.8378) / 0.0524
-    } else if z <= 0.9998 {
-        isign * (z - 0.9914) / 0.0012
-    } else {
-        isign * 7.0
-    }
-}
-
-/// Decode a 174-bit codeword using LDPC(174,91) belief propagation
+/// LDPC belief propagation decoder
 ///
-/// Takes soft information (Log-Likelihood Ratios) for a received 174-bit codeword
-/// and attempts to decode it to the original 91-bit message (77 info + 14 CRC bits).
+/// Runs the sum-product algorithm for up to MAX_BP_ITERATIONS iterations.
+/// Returns the decoded message if all parity checks pass and CRC is valid.
 ///
 /// # Arguments
-/// * `llr` - Log-Likelihood Ratios for each of 174 bits
-///   - Positive values indicate confidence the bit is 1
-///   - Negative values indicate confidence the bit is 0
-///   - Magnitude indicates confidence level
-/// * `max_iterations` - Maximum number of decoding iterations (typically 20-50)
+/// * `llr` - Log-Likelihood Ratios for 174 bits
+/// * `apmask` - Optional AP mask; bits marked `true` stay fixed at their LLR values
 ///
 /// # Returns
-/// * `Some((message, iterations, nharderrors))` - Decoded message, BP iteration count, and initial hard error count
-/// * `None` - If decoding failed (max iterations reached or no valid codeword found)
-///
-/// The decoder uses the sum-product algorithm (belief propagation) to iteratively
-/// refine bit estimates by passing messages between bit nodes and check nodes.
-/// Decoding succeeds when all parity checks are satisfied AND the CRC is valid.
-pub fn decode(llr: &[f32], max_iterations: usize) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
-    decode_with_ap(llr, None, max_iterations)
-}
-
-/// Decode using damped belief propagation for improved convergence
-///
-/// The damping factor (0.0-1.0) controls how much new messages are blended
-/// with old messages. A value of 0.0 means no damping (standard BP),
-/// while 0.5 means 50% old + 50% new. Typical values are 0.25-0.5.
-///
-/// Damping helps prevent oscillations and can improve convergence for
-/// difficult decoding scenarios with many errors.
-pub fn decode_damped(llr: &[f32], max_iterations: usize, damping: f32) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
-    if llr.len() != N {
-        return None;
-    }
-
-    // Message arrays
-    let mut toc = vec![vec![0.0f32; MAX_NRW]; M]; // Messages to checks
-    let mut tov = vec![vec![0.0f32; NCW]; N];     // Messages to variable nodes
-    let mut tov_old = vec![vec![0.0f32; NCW]; N]; // Previous iteration messages
-    let mut zn = vec![0.0f32; N];                  // Bit log-likelihood estimates
-
-    // Initialize messages to checks with LLRs
-    for j in 0..M {
-        for i in 0..NRW[j] {
-            let bit_idx = NM[j][i];
-            toc[j][i] = llr[bit_idx];
-        }
-    }
-
-    // Track initial hard errors and early stopping
-    let mut nharderrors = 0usize;
-    let mut nclast = 0usize;
-    let mut ncnt = 0usize;
-
-    // Iterative decoding
-    for iter in 0..=max_iterations {
-        // Update bit log-likelihood ratios
-        for i in 0..N {
-            zn[i] = llr[i] + tov[i].iter().sum::<f32>();
-        }
-
-        // Make hard decisions
-        let mut cw = BitVec::<u8, Msb0>::repeat(false, N);
-        for i in 0..N {
-            cw.set(i, zn[i] > 0.0);
-        }
-
-        // Check parity constraints
-        let mut ncheck = 0;
-        for i in 0..M {
-            let mut parity = 0u8;
-            for j in 0..NRW[i] {
-                let bit_idx = NM[i][j];
-                if cw[bit_idx] {
-                    parity ^= 1;
-                }
-            }
-            if parity != 0 {
-                ncheck += 1;
-            }
-        }
-
-        // If all parity checks satisfied, check CRC
-        if ncheck == 0 {
-            let decoded = &cw[..K];
-            if crc14_check(decoded) {
-                // Compute nharderrors = bit flips from initial LLR (matching WSJT-X)
-                // WSJT-X: nharderror=count( (2*cw-1)*llr .lt. 0.0 )
-                // This counts how many bits in decoded codeword disagree with LLR sign
-                nharderrors = 0;
-                for i in 0..N {
-                    let cw_sign = if cw[i] { 1.0f32 } else { -1.0f32 };
-                    if cw_sign * llr[i] < 0.0 {
-                        nharderrors += 1;
-                    }
-                }
-                return Some((decoded.to_bitvec(), iter, nharderrors));
-            }
-        }
-
-        // Early stopping criterion (matching WSJT-X)
-        if iter > 0 {
-            if ncheck >= nclast {
-                ncnt += 1;
-            } else {
-                ncnt = 0;
-            }
-            // If stuck for 5 iterations after iter 10, and >15 unsatisfied checks, give up
-            if ncnt >= 5 && iter >= 10 && ncheck > 15 {
-                break;
-            }
-        }
-        nclast = ncheck;
-
-        // If we've reached max iterations, give up
-        if iter == max_iterations {
-            break;
-        }
-
-        // Save old messages for damping
-        for j in 0..N {
-            for i in 0..NCW {
-                tov_old[j][i] = tov[j][i];
-            }
-        }
-
-        // Send messages from bits to check nodes
-        for j in 0..M {
-            for i in 0..NRW[j] {
-                let bit_idx = NM[j][i];
-                toc[j][i] = zn[bit_idx];
-
-                // Subtract off what the bit had received from this check
-                for kk in 0..NCW {
-                    if MN[bit_idx][kk] == j {
-                        toc[j][i] -= tov[bit_idx][kk];
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Send messages from check nodes to variable nodes
-        for j in 0..N {
-            for i in 0..NCW {
-                let check_idx = MN[j][i];
-
-                // Compute product of tanh(-toc/2) for all bits in check except j
-                let mut product = 1.0f32;
-                for k in 0..NRW[check_idx] {
-                    let bit_k = NM[check_idx][k];
-                    if bit_k != j {
-                        product *= f32::tanh(-toc[check_idx][k] / 2.0);
-                    }
-                }
-
-                // Apply platanh and damping
-                let new_msg = 2.0 * platanh(-product);
-                tov[j][i] = damping * tov_old[j][i] + (1.0 - damping) * new_msg;
-            }
-        }
-    }
-
-    None
-}
-
-/// LDPC BP decoder with optional AP (a priori) mask
-///
-/// If `apmask` is provided, bits marked as `true` in the mask will not participate
-/// in BP message passing - they remain fixed at their LLR hint values.
-pub fn decode_with_ap(
+/// * `Some((message91, iterations, nharderrors))` on success
+/// * `None` if BP failed to converge
+pub(super) fn decode(
     llr: &[f32],
     apmask: Option<&[bool]>,
-    max_iterations: usize
 ) -> Option<(BitVec<u8, Msb0>, usize, usize)> {
     if llr.len() != N {
         return None;
@@ -244,7 +58,7 @@ pub fn decode_with_ap(
     let mut ncnt = 0usize;
 
     // Iterative decoding
-    for iter in 0..=max_iterations {
+    for iter in 0..=MAX_BP_ITERATIONS {
         // Update bit log-likelihood ratios
         // CRITICAL: AP-masked bits don't get updated - they stay fixed!
         for i in 0..N {
@@ -314,7 +128,7 @@ pub fn decode_with_ap(
         nclast = ncheck;
 
         // If we've reached max iterations, give up
-        if iter == max_iterations {
+        if iter == MAX_BP_ITERATIONS {
             break;
         }
 
@@ -358,165 +172,37 @@ pub fn decode_with_ap(
     None
 }
 
-/// Decode with LLR snapshots saved at specified iterations
+/// Compute initial hard errors from channel LLRs (before any decoding)
 ///
-/// This is the hybrid BP/OSD decoder strategy used by WSJT-X.
-/// During BP iterations, we save ACCUMULATED LLR states at specific iterations (1, 2, 3).
-/// If BP fails to converge, these snapshots can be used with OSD for multiple attempts.
-///
-/// IMPORTANT: WSJT-X accumulates LLRs across iterations (zsum = zsum + zn) and saves
-/// the accumulated sum. This is different from just saving per-iteration values.
-/// The accumulated sum has a smoothing effect that improves OSD performance.
-///
-/// # Arguments
-/// * `llr` - Log-Likelihood Ratios for each of 174 bits
-/// * `max_iterations` - Maximum number of BP iterations (typically 30)
-/// * `save_at_iters` - Which iterations to save accumulated LLR snapshots (e.g., [1, 2, 3])
-///
-/// # Returns
-/// * `Ok((message, iterations, nharderrors, snapshots))` - Decoded message, BP iteration count, initial hard errors, and saved LLR snapshots
-/// * `Err(snapshots)` - If BP failed, returns the saved accumulated LLR snapshots for OSD fallback
-pub fn decode_with_snapshots(
-    llr: &[f32],
-    max_iterations: usize,
-    save_at_iters: &[usize],
-) -> Result<(BitVec<u8, Msb0>, usize, usize, Vec<Vec<f32>>), Vec<Vec<f32>>> {
+/// Makes hard decisions directly from LLRs and counts parity check violations.
+/// Used for WSJT-X's nharderrors metric which filters false positives.
+pub(super) fn compute_nharderrors(llr: &[f32]) -> usize {
     if llr.len() != N {
-        return Err(Vec::new());
+        return M; // Return maximum if invalid
     }
 
-    // Message arrays
-    let mut toc = vec![vec![0.0f32; MAX_NRW]; M]; // Messages to checks
-    let mut tov = vec![vec![0.0f32; NCW]; N];     // Messages to variable nodes
-    let mut zn = vec![0.0f32; N];                  // Bit log-likelihood estimates
-    let mut zsum = vec![0.0f32; N];               // Accumulated LLRs (WSJT-X style)
-
-    // Storage for LLR snapshots
-    let mut snapshots: Vec<Vec<f32>> = Vec::new();
-
-    // Track initial hard errors and early stopping
-    let mut nharderrors = 0usize;
-    let mut nclast = 0usize;
-    let mut ncnt = 0usize;
-
-    // Initialize messages to checks with LLRs
-    for j in 0..M {
-        for i in 0..NRW[j] {
-            let bit_idx = NM[j][i];
-            toc[j][i] = llr[bit_idx];
-        }
+    // Make hard decisions from LLRs
+    let mut cw = BitVec::<u8, Msb0>::repeat(false, N);
+    for i in 0..N {
+        cw.set(i, llr[i] > 0.0);
     }
 
-    // Iterative decoding
-    for iter in 0..=max_iterations {
-        // Update bit log-likelihood ratios
-        for i in 0..N {
-            zn[i] = llr[i] + tov[i].iter().sum::<f32>();
-        }
-
-        // Accumulate LLRs (WSJT-X: zsum = zsum + zn)
-        for i in 0..N {
-            zsum[i] += zn[i];
-        }
-
-        // Save ACCUMULATED snapshot at requested iterations (WSJT-X saves zsum, not zn!)
-        if iter > 0 && save_at_iters.contains(&iter) {
-            snapshots.push(zsum.clone());
-        }
-
-        // Make hard decisions
-        let mut cw = BitVec::<u8, Msb0>::repeat(false, N);
-        for i in 0..N {
-            cw.set(i, zn[i] > 0.0);
-        }
-
-        // Check parity constraints
-        let mut ncheck = 0;
-        for i in 0..M {
-            let mut parity = 0u8;
-            for j in 0..NRW[i] {
-                let bit_idx = NM[i][j];
-                if cw[bit_idx] {
-                    parity ^= 1;
-                }
-            }
-            if parity != 0 {
-                ncheck += 1;
+    // Count parity check violations
+    let mut ncheck = 0;
+    for i in 0..M {
+        let mut parity = 0u8;
+        for j in 0..NRW[i] {
+            let bit_idx = NM[i][j];
+            if cw[bit_idx] {
+                parity ^= 1;
             }
         }
-
-        // If all parity checks satisfied, check CRC
-        if ncheck == 0 {
-            let decoded = &cw[..K];
-            if crc14_check(decoded) {
-                // Compute nharderrors = bit flips from initial LLR (matching WSJT-X)
-                nharderrors = 0;
-                for i in 0..N {
-                    let cw_sign = if cw[i] { 1.0f32 } else { -1.0f32 };
-                    if cw_sign * llr[i] < 0.0 {
-                        nharderrors += 1;
-                    }
-                }
-                return Ok((decoded.to_bitvec(), iter, nharderrors, snapshots));
-            }
-        }
-
-        // Early stopping criterion (matching WSJT-X)
-        if iter > 0 {
-            if ncheck >= nclast {
-                ncnt += 1;
-            } else {
-                ncnt = 0;
-            }
-            if ncnt >= 5 && iter >= 10 && ncheck > 15 {
-                return Err(snapshots);
-            }
-        }
-        nclast = ncheck;
-
-        // If we've reached max iterations, return snapshots for OSD fallback
-        if iter == max_iterations {
-            return Err(snapshots);
-        }
-
-        // Send messages from bits to check nodes
-        for j in 0..M {
-            for i in 0..NRW[j] {
-                let bit_idx = NM[j][i];
-                toc[j][i] = zn[bit_idx];
-
-                // Subtract off what the bit had received from this check
-                for kk in 0..NCW {
-                    if MN[bit_idx][kk] == j {
-                        toc[j][i] -= tov[bit_idx][kk];
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Send messages from check nodes to variable nodes
-        // This is the core of the sum-product algorithm
-        for j in 0..N {
-            for i in 0..NCW {
-                let check_idx = MN[j][i];
-
-                // Compute product of tanh(-toc/2) for all bits in check except j
-                let mut product = 1.0f32;
-                for k in 0..NRW[check_idx] {
-                    let bit_k = NM[check_idx][k];
-                    if bit_k != j {
-                        product *= f32::tanh(-toc[check_idx][k] / 2.0);
-                    }
-                }
-
-                // Apply platanh (WSJT-X's piecewise linear approximation) to get the message
-                tov[j][i] = 2.0 * platanh(-product);
-            }
+        if parity != 0 {
+            ncheck += 1;
         }
     }
 
-    Err(snapshots)
+    ncheck
 }
 
 #[cfg(test)]
@@ -554,7 +240,7 @@ mod tests {
         }
 
         // Decode
-        let result = decode(&llr, 50);
+        let result = decode(&llr, None);
 
         // Should succeed on first iteration (iter=0) since it's perfect
         assert!(result.is_some());
@@ -599,7 +285,7 @@ mod tests {
         }
 
         // Decode
-        let result = decode(&llr, 50);
+        let result = decode(&llr, None);
 
         // Should successfully correct the errors
         assert!(result.is_some());
@@ -671,11 +357,11 @@ mod tests {
             llr.iter().map(|x| x.abs()).fold(0.0f32, f32::max));
 
         // Decode using hybrid BP+OSD strategy like WSJT-X (BP first, then OSD fallback)
-        // This uses DecodeDepth::BpOsdHybrid which matches WSJT-X's maxosd=2
-        use crate::ldpc::{decode_hybrid, DecodeDepth};
-        println!("Calling decode_hybrid with BpOsdHybrid...");
-        let result = decode_hybrid(&llr, DecodeDepth::BpOsdHybrid);
-        println!("decode_hybrid returned: {}", if result.is_some() { "Some" } else { "None" });
+        // This uses DecodeDepth::Deep which matches WSJT-X's ndepth=3/maxosd=2
+        use crate::ldpc::{decode, DecodeDepth};
+        println!("Calling decode with Deep...");
+        let result = decode(&llr, None, DecodeDepth::Deep);
+        println!("decode returned: {}", if result.is_some() { "Some" } else { "None" });
 
         match result {
             Some((decoded_bits, iterations, errors_corrected)) => {
@@ -866,5 +552,54 @@ mod tests {
                         WSJT-X succeeds with these exact LLRs. Implementation needs debugging.");
             }
         }
+    }
+
+    /// WSJT-X LLR values for "TU; 7N9RST EI8TRF 589 5732"
+    /// Signal parameters: freq=3389.62 Hz, DT=0.17s
+    /// WSJT-X decoded with 25 hard errors using llra on pass 1
+    const WSJTX_LLRA_7N9RST: [f32; 174] = [
+        1.969, -3.601, 1.969, -7.606, -7.746, -4.774, -2.092, -3.180, -2.092, -1.399,
+        -0.028, -0.028, -4.425, -2.493, 2.493, 1.715, 2.655, -1.715, -2.187, 2.187,
+        2.187, -1.595, 1.595, 1.905, -0.770, -0.495, 0.495, -4.187, -0.656, -1.560,
+        -0.799, 0.521, -1.237, -0.241, 0.647, 0.241, -1.523, -0.398, 1.523, -0.534,
+        -1.107, -2.146, -2.447, -2.447, 1.218, -2.704, -2.139, 1.295, -2.894, 0.847,
+        1.980, -3.845, -4.390, -4.435, -1.644, -0.481, -1.644, -4.062, 0.092, 2.852,
+        -3.328, 1.808, -3.328, 0.749, 3.443, -3.591, -5.414, 3.340, 3.340, -1.023,
+        -1.023, 1.023, -4.516, -0.579, -0.579, 0.970, -1.238, -0.343, -0.566, 0.566,
+        2.074, -1.248, 1.248, 1.248, -3.358, -3.316, 3.775, -1.034, 0.911, 0.283,
+        -4.278, 0.176, -0.737, -1.442, -0.172, 0.172, 2.597, -1.540, 1.173, -2.631,
+        2.631, -2.631, 0.220, -0.220, -0.220, -2.371, -4.186, -2.511, 1.448, 1.448,
+        -1.448, -0.756, -0.756, -0.649, -3.541, 1.080, -2.123, -1.996, 2.729, 1.996,
+        0.753, 0.808, -1.687, -1.568, 1.896, -1.185, 0.284, -0.284, -1.633, 1.844,
+        0.603, -0.933, -6.681, -7.380, -4.731, -1.788, 2.589, 1.788, -6.370, 2.366,
+        2.877, -4.975, 6.002, -5.580, -7.034, -0.788, -7.666, -9.986, -10.911, -9.986,
+        -4.720, 4.720, -4.720, -0.871, -0.620, -0.620, -2.889, -2.990, -1.849, -3.307,
+        -3.307, 3.307, -2.601, -1.471, -1.471, -2.434, -0.148, -0.148, -1.013, 1.436,
+        1.013, -2.631, -3.896, -3.219,
+    ];
+
+    /// Test LDPC decoder with WSJT-X extracted LLRs for "TU; 7N9RST EI8TRF 589 5732"
+    #[test]
+    fn test_decode_wsjtx_llr_7n9rst() {
+        // Expected 77-bit message + 14-bit CRC from ft8code
+        let expected_msg = "10100000010000111001111101100011011101110000000101100010001101011001100100011";
+        let expected_crc = "01110010010110";
+        let expected_91_bits = format!("{}{}", expected_msg, expected_crc);
+
+        // Use Deep decode (BP + OSD) - this signal has 25 hard errors
+        use crate::ldpc::{decode, DecodeDepth};
+        let (decoded_bits, _iterations, _hard_errors) =
+            decode(&WSJTX_LLRA_7N9RST, None, DecodeDepth::Deep)
+                .expect("Decode failed with WSJT-X LLRs for 7N9RST");
+
+        let decoded_str: String = decoded_bits
+            .iter()
+            .map(|b| if *b { '1' } else { '0' })
+            .collect();
+
+        assert_eq!(
+            decoded_str, expected_91_bits,
+            "Decoded message should match expected 91 bits (77 message + 14 CRC)"
+        );
     }
 }

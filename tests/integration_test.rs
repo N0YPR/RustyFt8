@@ -221,12 +221,12 @@ fn test_ldpc_constants() {
 
     // Try to decode the all-zeros codeword
     let llr = vec![5.0f32; 174]; // Strong confidence all bits are 1 (wrong)
-    let result = ldpc::decode(&llr, 100);
+    let result = ldpc::decode(&llr, None, ldpc::DecodeDepth::Fast);
     eprintln!("LDPC decode result: {}", if result.is_some() { "Some" } else { "None" });
 
     // Try with correct LLRs (negative = bit is 0)
     let llr_correct = vec![-5.0f32; 174];
-    let result2 = ldpc::decode(&llr_correct, 100);
+    let result2 = ldpc::decode(&llr_correct, None, ldpc::DecodeDepth::Fast);
     eprintln!("LDPC decode with correct LLRs: {}", if result2.is_some() { "Some" } else { "None" });
 }
 

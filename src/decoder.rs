@@ -323,19 +323,19 @@ where
 
                     // Progressive decoding strategy varies by pass:
                     // Pass 0: Full OSD fallback for difficult signals (slower but more powerful)
-                    // Pass 1: Light OSD (order-2 uncoupled) for remaining weak signals
+                    // Pass 1: Light OSD (order-2) for remaining weak signals
                     // Pass 2+: BP-only for speed (signals are clean after 2 subtractions)
                     let decode_result = if pass_num == 0 {
                         // First pass: Try BP-only first, then OSD based on candidate rank
-                        ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
+                        ldpc::decode(&scaled_llr, None, ldpc::DecodeDepth::Fast)
                             .or_else(|| {
                                 if candidate_idx < 100 {
-                                    // Top 100: OSD with BP snapshots (most thorough)
+                                    // Top 100: Deep decode (OSD with BP snapshots)
                                     // Extended from 50 to catch weak signals with good sync power
-                                    ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
+                                    ldpc::decode(&scaled_llr, None, ldpc::DecodeDepth::Deep)
                                 } else if candidate_idx < 460 {
-                                    // 100-459: OSD order-2 without snapshots
-                                    ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
+                                    // 100-459: Normal decode (OSD order-2)
+                                    ldpc::decode(&scaled_llr, None, ldpc::DecodeDepth::Normal)
                                 } else {
                                     // 460+: BP-only for speed (weak candidates unlikely to need OSD)
                                     None
@@ -343,18 +343,18 @@ where
                             })
                     } else if pass_num == 1 {
                         // Second pass: OSD for top 20 candidates only, BP-only for rest
-                        ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
+                        ldpc::decode(&scaled_llr, None, ldpc::DecodeDepth::Fast)
                             .or_else(|| {
                                 if candidate_idx < 20 {
-                                    // Top 20: Full OSD with BP snapshots for difficult signals
-                                    ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdHybrid)
+                                    // Top 20: Deep decode for difficult signals
+                                    ldpc::decode(&scaled_llr, None, ldpc::DecodeDepth::Deep)
                                 } else {
-                                    ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOsdUncoupled)
+                                    ldpc::decode(&scaled_llr, None, ldpc::DecodeDepth::Normal)
                                 }
                             })
                     } else {
                         // Pass 2+: BP-only for speed (signals clean after 2 subtractions)
-                        ldpc::decode_hybrid(&scaled_llr, ldpc::DecodeDepth::BpOnly)
+                        ldpc::decode(&scaled_llr, None, ldpc::DecodeDepth::Fast)
                     };
 
                     if let Some((decoded_bits, iters, nharderrors)) = decode_result {
@@ -520,10 +520,10 @@ where
                         }
 
                         // Try decoding with AP mask - BP only (fast)
-                        let decode_result = ldpc::decode_hybrid_with_ap(
+                        let decode_result = ldpc::decode(
                             &llr_with_ap,
                             Some(&apmask),
-                            ldpc::DecodeDepth::BpOnly
+                            ldpc::DecodeDepth::Fast,
                         );
 
                         if let Some((decoded_bits, iters, nharderrors)) = decode_result {
