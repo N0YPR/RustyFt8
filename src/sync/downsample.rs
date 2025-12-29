@@ -117,7 +117,6 @@ pub fn downsample_200hz(
 
     // Circular shift to center at DC (matching WSJT-X cshift operation)
     let shift = (i0 as i32 - ib as i32).max(0) as usize;
-    // eprintln!("  Circular shift: shift={} (i0={}, ib={})", shift, i0, ib);
 
     if shift > 0 && shift < k {
         // Rotate array left by 'shift' positions

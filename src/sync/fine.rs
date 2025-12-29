@@ -180,7 +180,8 @@ pub fn fine_sync(
     // candidate.time_offset is relative to 0.5s start, but downsampled buffer starts at 0.0
     // So add 0.5s to convert to absolute time, then multiply by actual sample rate
     // Match WSJT-X nint() - round to nearest integer
-    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32;
+    // CRITICAL: Add 1 to match WSJT-X ft8b.f90 formula: xdt = (ibest-1)*dt2
+    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32 + 1;
     // eprintln!("  Initial offset: {} samples (from dt={:.2}s)", initial_offset, candidate.time_offset);
 
 
@@ -290,7 +291,8 @@ pub fn fine_sync(
     // Input time_offset is relative to 0.5s start, so subtract 0.5s to convert
     // from absolute sample position back to relative time offset
     // Use final_sample_rate since we re-downsampled at best_freq
-    let refined_time = best_time as f32 / final_sample_rate - 0.5;
+    // CRITICAL: Subtract 1 from best_time to match WSJT-X formula
+    let refined_time = (best_time - 1) as f32 / final_sample_rate - 0.5;
 
     // Debug output disabled for performance
     // eprintln!("  REFINED: freq_in={:.1} -> freq_out={:.1} Hz, dt_out={:.2}s, sync_coarse={:.3} (preserved)",

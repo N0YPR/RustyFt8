@@ -266,11 +266,19 @@ where
             // then variations if needed.
             //
             // WSJT-X COMPARISON: WSJT-X does timing search BEFORE LLR extraction in ft8b.f90:
-            //   - Line 110: `do idt=i0-10,i0+10` searches ±10 samples (±26.7ms at fs2=375Hz)
-            //   - Line 144: `do idt=-4,4` refines ±4 samples (±10.7ms) after freq adjustment
+            //   - Line 110: `do idt=i0-10,i0+10` searches ±10 samples (±50ms at fs2=200Hz)
+            //   - Line 144: `do idt=-4,4` refines ±4 samples (±20ms) after freq adjustment
             // Our approach: Try timing variations AFTER initial fine_sync, re-extracting LLRs
             // for each offset. Less efficient but catches cases where fine_sync finds suboptimal timing.
-            let timing_offsets: &[f32] = &[0.0, 0.025, -0.025, 0.050, -0.050];
+            //
+            // Expanded to ±75ms to handle cases where our sync_downsampled finds different
+            // optimal timing than WSJT-X's sync8d (observed ~53ms offset for weak signals).
+            let timing_offsets: &[f32] = &[
+                0.0,
+                0.025, -0.025,
+                0.050, -0.050,
+                0.075, -0.075,
+            ];
 
             for &timing_delta in timing_offsets {
                 // Create candidate with adjusted timing

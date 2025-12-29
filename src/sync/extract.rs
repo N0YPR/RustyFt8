@@ -126,7 +126,9 @@ fn extract_symbols_impl(
     // candidate.time_offset is RELATIVE to 0.5s start (FT8 convention: dt=0 means signal starts at t=0.5s)
     // Add 0.5s to convert to absolute position in the downsampled buffer
     // Match WSJT-X nint() - round to nearest integer, not truncate
-    let time_offset_samples = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32;
+    // CRITICAL: Add 1 to match WSJT-X ft8b.f90 formula: xdt = (ibest-1)*dt2
+    // So ibest = xdt/dt2 + 1 = xdt * fs2 + 1
+    let time_offset_samples = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32 + 1;
 
     let mut best_correction = 0.0f32;
 
@@ -174,7 +176,8 @@ fn extract_symbols_impl(
     // candidate.time_offset is RELATIVE to 0.5s start (FT8 convention)
     // Add 0.5s to convert to absolute position in the downsampled buffer
     // Match WSJT-X nint() - round to nearest integer
-    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32;
+    // CRITICAL: Add 1 to match WSJT-X ft8b.f90 formula: xdt = (ibest-1)*dt2
+    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32 + 1;
 
     // Timing refinement ±10 samples
     // This helps weak signals where fine_sync may have found a sub-optimal timing
