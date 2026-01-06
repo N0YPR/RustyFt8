@@ -14,10 +14,10 @@ pub use rtty_field_day::*;
 pub use nonstandard::*;
 
 /// Decode 77-bit message back to text
-pub fn decode_message_bits(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
+pub fn decode_message_bits(bits: &BitSlice<u8, Msb0>, cache: Option<&mut CallsignHashCache>) -> Result<String, String> {
     // Extract i3 (message type) from bits 74-76
     let i3: u8 = bits[74..77].load_be();
-    
+
     match i3 {
         0 => decode_type0(bits, cache),
         1 => decode_type1(bits, cache),

@@ -3,7 +3,7 @@
 //! Implements WSJT-X's AP decoding mechanism for weak signal decoding.
 //! AP works by forcing certain bits to expected values during LDPC decoding.
 
-use crate::message::{encode, CallsignHashCache};
+use crate::message::encode;
 use bitvec::prelude::*;
 
 /// Standard message patterns for AP decoding (converted to ±1 for LLR use)
@@ -123,9 +123,8 @@ impl ApDecoder {
 
         // Encode using pack77
         let mut bits77 = bitvec![u8, Msb0; 0; 77];
-        let mut cache = CallsignHashCache::new();
 
-        if encode(&msg, &mut bits77, &mut cache).is_ok() {
+        if encode(&msg, &mut bits77).is_ok() {
             // Extract first 58 bits (callsigns only)
             let mut apsym = [0i8; 58];
             for i in 0..58 {

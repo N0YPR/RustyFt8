@@ -7,9 +7,40 @@
 /// Implementation follows WSJT-X behavior with bounded caches and FIFO eviction.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 /// Maximum capacity for 22-bit hash cache (from WSJT-X MAXHASH constant)
 pub const MAX_22BIT_CAPACITY: usize = 1000;
+
+/// Global callsign hash cache shared across all encoding/decoding operations
+///
+/// This cache is thread-safe and automatically handles non-standard callsigns
+/// in DXpedition mode. You don't need to manage it explicitly - it's used
+/// internally by the encoder and decoder.
+///
+/// The cache persists for the lifetime of the program, allowing subsequent
+/// messages to reference previously seen callsigns by hash.
+static GLOBAL_CACHE: Lazy<Mutex<CallsignHashCache>> = Lazy::new(|| {
+    Mutex::new(CallsignHashCache::new())
+});
+
+/// Get a reference to the global callsign cache for manual access
+///
+/// This is rarely needed - the encoder and decoder use the global cache
+/// automatically. Use this only if you need direct cache access for
+/// debugging or advanced use cases.
+///
+/// # Example
+/// ```
+/// use rustyft8::message::callsign_cache::global_cache;
+///
+/// // Clear the cache (useful for testing)
+/// global_cache().lock().unwrap().clear();
+/// ```
+pub fn global_cache() -> &'static Mutex<CallsignHashCache> {
+    &GLOBAL_CACHE
+}
 
 /// Callsign hash cache for resolving non-standard callsigns
 ///

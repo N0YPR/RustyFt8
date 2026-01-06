@@ -3,7 +3,7 @@ use crate::message::CallsignHashCache;
 use crate::message::constants::CHARSET_BASE38;
 
 /// Decode Type 4 NonStandardCall message (i3=4)
-pub fn decode_type4(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
+pub fn decode_type4(bits: &BitSlice<u8, Msb0>, cache: Option<&mut CallsignHashCache>) -> Result<String, String> {
     let mut bit_index = 0;
 
     // n12: 12-bit hash (bits 0-11)

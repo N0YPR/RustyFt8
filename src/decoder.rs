@@ -391,7 +391,7 @@ where
 
                         let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
 
-                        if let Ok(message) = crate::decode(&info_bits, None) {
+                        if let Ok(message) = crate::decode(&info_bits) {
                             if !message.is_empty() {
                                 // Validate that the message contains valid callsigns
                                 // This filters out OSD false positives (garbage decoded from noise)
@@ -553,7 +553,7 @@ where
 
                             let info_bits: BitVec<u8, Msb0> = decoded_bits.iter().take(77).collect();
 
-                            if let Ok(message) = crate::decode(&info_bits, None) {
+                            if let Ok(message) = crate::decode(&info_bits) {
                                 if !message.is_empty() {
                                     let tokens: Vec<&str> = message.split_whitespace().collect();
                                     // Handle directed CQ specially: "CQ DX CALL GRID" has modifier in position 1

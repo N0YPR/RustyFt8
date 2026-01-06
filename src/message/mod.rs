@@ -29,26 +29,26 @@ use bitvec::prelude::*;
 /// This parses the text and encodes it into 77 bits.
 /// The encoder determines the appropriate message type (i3.n3) based on what fits.
 ///
+/// Uses the global callsign hash cache automatically for non-standard callsigns.
+///
 /// # Arguments
 /// * `text` - The message text (e.g., "CQ N0YPR DM42")
 /// * `output` - Mutable bit slice to write the 77 bits into (must be exactly 77 bits)
-/// * `cache` - Mutable reference to a CallsignHashCache for non-standard callsigns
 ///
 /// # Examples
 ///
 /// ```no_run
 /// use bitvec::prelude::*;
-/// use rustyft8::message::{encode, CallsignHashCache};
+/// use rustyft8::message::encode;
 ///
-/// let mut cache = CallsignHashCache::new();
 /// let mut storage = bitarr![u8, Msb0; 0; 80];  // 10 bytes
-/// encode("CQ N0YPR DM42", &mut storage[0..77], &mut cache)?;
+/// encode("CQ N0YPR DM42", &mut storage[0..77])?;
 ///
 /// // Non-standard callsigns are automatically cached
-/// encode("K1ABC RR73; W9XYZ <KH1/KH7Z> -08", &mut storage[0..77], &mut cache)?;
+/// encode("K1ABC RR73; W9XYZ <KH1/KH7Z> -08", &mut storage[0..77])?;
 /// # Ok::<(), String>(())
 /// ```
-pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>, cache: &mut CallsignHashCache) -> Result<(), String> {
+pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>) -> Result<(), String> {
     if output.len() != 77 {
         return Err(format!("Output buffer must be exactly 77 bits, got {}", output.len()));
     }
@@ -56,8 +56,9 @@ pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>, cache: &mut CallsignH
     // 1. Parse text into MessageVariant (internal detail)
     let variant = parse_message_variant(text)?;
 
-    // 2. Encode variant into 77 bits
-    encode_variant(&variant, output, Some(cache))?;
+    // 2. Encode variant into 77 bits using global cache
+    let mut cache = callsign_cache::global_cache().lock().unwrap();
+    encode_variant(&variant, output, Some(&mut *cache))?;
 
     Ok(())
 }
@@ -67,6 +68,8 @@ pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>, cache: &mut CallsignH
 /// This reverses the encoding process, extracting the message type and fields
 /// from the bit array and reconstructing the original text.
 ///
+/// Uses the global callsign hash cache automatically for resolving DXpedition mode hashes.
+///
 /// Note: The decoded text may differ from the original input due to encoding
 /// limitations. For example:
 /// - "CQ PJ4/K1ABC FN42" → decodes as "CQ K1ABC FN42" (prefix stripped)
@@ -74,27 +77,26 @@ pub fn encode(text: &str, output: &mut BitSlice<u8, Msb0>, cache: &mut CallsignH
 ///
 /// # Arguments
 /// * `bits` - The 77-bit message (must be exactly 77 bits)
-/// * `cache` - Optional reference to a CallsignHashCache for resolving DXpedition mode hashes
 ///
 /// # Examples
 ///
 /// ```no_run
 /// use bitvec::prelude::*;
-/// use rustyft8::message::{encode, decode, CallsignHashCache};
+/// use rustyft8::message::{encode, decode};
 ///
-/// let mut cache = CallsignHashCache::new();
 /// let mut storage = bitarr![u8, Msb0; 0; 80];
-/// encode("CQ N0YPR DM42", &mut storage[0..77], &mut cache)?;
-/// let text = decode(&storage[0..77], None)?;
+/// encode("CQ N0YPR DM42", &mut storage[0..77])?;
+/// let text = decode(&storage[0..77])?;
 /// assert_eq!(text, "CQ N0YPR DM42");
 /// # Ok::<(), String>(())
 /// ```
-pub fn decode(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
+pub fn decode(bits: &BitSlice<u8, Msb0>) -> Result<String, String> {
     if bits.len() != 77 {
         return Err(format!("Input must be exactly 77 bits, got {}", bits.len()));
     }
 
-    decode_message_bits(bits, cache)
+    let mut cache = callsign_cache::global_cache().lock().unwrap();
+    decode_message_bits(bits, Some(&mut *cache))
 }
 
 #[cfg(test)]
@@ -146,8 +148,10 @@ mod tests {
 
     #[test]
     fn test_encode_decode_roundtrip() {
+        // Clear global cache before test to ensure clean state
+        callsign_cache::global_cache().lock().unwrap().clear();
+
         let cases = test_cases();
-        let mut cache = CallsignHashCache::new();
 
         for (idx, test) in cases.iter().enumerate() {
             // Print test case for better debugging
@@ -157,7 +161,7 @@ mod tests {
             let mut storage = bitarr![u8, Msb0; 0; 80];  // 10 bytes
 
             // Encode the message
-            encode(&test.message, &mut storage[0..77], &mut cache)
+            encode(&test.message, &mut storage[0..77])
                 .unwrap_or_else(|e| panic!(
                     "\n❌ ENCODE FAILED [Case {}]\n   Message: \"{}\"\n   Error: {}\n",
                     idx, test.message, e
@@ -174,7 +178,7 @@ mod tests {
             );
 
             // Decode and verify the decoded text matches expected
-            let decoded_text = decode(&storage[0..77], Some(&cache))
+            let decoded_text = decode(&storage[0..77])
                 .unwrap_or_else(|e| panic!(
                     "\n❌ DECODE FAILED [Case {}]\n   Message: \"{}\"\n   Error: {}\n",
                     idx, test.message, e

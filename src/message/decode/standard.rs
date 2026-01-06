@@ -7,14 +7,14 @@ use crate::message::constants::{NTOKENS, MAX22};
 
 /// Decode Type 1 messages (i3=1)
 /// Standard message format: n28a(28) + ipa(1) + n28b(28) + ipb(1) + ir(1) + igrid4(15) + i3(3) = 77 bits
-pub fn decode_type1(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
+pub fn decode_type1(bits: &BitSlice<u8, Msb0>, cache: Option<&mut CallsignHashCache>) -> Result<String, String> {
     // Type 1 is always a standard message - no n3 subtype check needed
     // NonStandardCall is i3=4, not (i3=1, n3=4)
     decode_type1_standard(bits, cache)
 }
 
 /// Decode Type 1 Standard message
-fn decode_type1_standard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
+fn decode_type1_standard(bits: &BitSlice<u8, Msb0>, mut cache: Option<&mut CallsignHashCache>) -> Result<String, String> {
     let mut bit_index = 0;
     
     // n28a: Decode first callsign (bits 0-27)
@@ -22,7 +22,7 @@ fn decode_type1_standard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashC
     let call1 = if n28a >= NTOKENS && n28a < NTOKENS + MAX22 {
         // Hash callsign - look up in cache
         let ihash = n28a - NTOKENS;
-        if let Some(cache_ref) = cache {
+        if let Some(cache_ref) = &cache {
             if let Some(callsign) = cache_ref.lookup_22bit(ihash) {
                 format!("<{}>", callsign)
             } else {
@@ -32,7 +32,12 @@ fn decode_type1_standard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashC
             format!("<...{:06X}>", ihash)
         }
     } else {
-        unpack_callsign(n28a)?
+        let callsign = unpack_callsign(n28a)?;
+        // Save standard callsigns to cache (WSJT-X behavior)
+        if let Some(cache_ref) = &mut cache.as_mut() {
+            cache_ref.insert(&callsign);
+        }
+        callsign
     };
     bit_index += 28;
     
@@ -45,7 +50,7 @@ fn decode_type1_standard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashC
     let mut call2 = if n28b >= NTOKENS && n28b < NTOKENS + MAX22 {
         // Hash callsign - look up in cache
         let ihash = n28b - NTOKENS;
-        if let Some(cache_ref) = cache {
+        if let Some(cache_ref) = &cache {
             if let Some(callsign) = cache_ref.lookup_22bit(ihash) {
                 format!("<{}>", callsign)
             } else {
@@ -55,7 +60,12 @@ fn decode_type1_standard(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashC
             format!("<...{:06X}>", ihash)
         }
     } else {
-        unpack_callsign(n28b)?
+        let callsign = unpack_callsign(n28b)?;
+        // Save standard callsigns to cache (WSJT-X behavior)
+        if let Some(cache_ref) = &mut cache.as_mut() {
+            cache_ref.insert(&callsign);
+        }
+        callsign
     };
     bit_index += 28;
     

@@ -5,7 +5,7 @@ use crate::message::text_encoding::decode_free_text;
 use crate::message::lookup_tables::arrl_section_from_index;
 
 /// Decode Type 0 messages (i3=0)
-pub fn decode_type0(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
+pub fn decode_type0(bits: &BitSlice<u8, Msb0>, cache: Option<&mut CallsignHashCache>) -> Result<String, String> {
     // Check n3 subtype
     let n3: u8 = bits[71..74].load_be();
     
@@ -32,7 +32,7 @@ fn decode_free_text_msg(bits: &BitSlice<u8, Msb0>) -> Result<String, String> {
 }
 
 /// Decode Type 0.1 DXpedition message
-fn decode_dxpedition(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
+fn decode_dxpedition(bits: &BitSlice<u8, Msb0>, cache: Option<&mut CallsignHashCache>) -> Result<String, String> {
     let mut bit_index = 0;
     
     // n28a: Decode first callsign (bits 0-27)

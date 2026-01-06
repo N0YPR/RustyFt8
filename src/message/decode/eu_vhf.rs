@@ -5,7 +5,7 @@ use crate::message::grid::decode_grid;
 use crate::message::constants::{NTOKENS, MAX22};
 
 /// Decode Type 2 EU VHF Contest message (i3=2)
-pub fn decode_type2(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>) -> Result<String, String> {
+pub fn decode_type2(bits: &BitSlice<u8, Msb0>, mut cache: Option<&mut CallsignHashCache>) -> Result<String, String> {
     let mut bit_index = 0;
     
     // n28a: Decode first callsign (bits 0-27)
@@ -13,7 +13,7 @@ pub fn decode_type2(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>
     let call1 = if n28a >= NTOKENS && n28a < NTOKENS + MAX22 {
         // Hash callsign - look up in cache
         let ihash = n28a - NTOKENS;
-        if let Some(cache_ref) = cache {
+        if let Some(cache_ref) = &cache {
             if let Some(callsign) = cache_ref.lookup_22bit(ihash) {
                 format!("<{}>", callsign)
             } else {
@@ -23,20 +23,25 @@ pub fn decode_type2(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>
             format!("<...{:06X}>", ihash)
         }
     } else {
-        unpack_callsign(n28a)?
+        let callsign = unpack_callsign(n28a)?;
+        // Save standard callsigns to cache (WSJT-X behavior)
+        if let Some(cache_ref) = &mut cache.as_mut() {
+            cache_ref.insert(&callsign);
+        }
+        callsign
     };
     bit_index += 28;
-    
+
     // ipa: /P suffix for first callsign (bit 28) - always /P in Type 2, never /R
     let call1_suffix = bits[bit_index];
     bit_index += 1;
-    
+
     // n28b: Decode second callsign (bits 29-56)
     let n28b: u32 = bits[bit_index..bit_index + 28].load_be();
     let mut call2 = if n28b >= NTOKENS && n28b < NTOKENS + MAX22 {
         // Hash callsign - look up in cache
         let ihash = n28b - NTOKENS;
-        if let Some(cache_ref) = cache {
+        if let Some(cache_ref) = &cache {
             if let Some(callsign) = cache_ref.lookup_22bit(ihash) {
                 format!("<{}>", callsign)
             } else {
@@ -46,7 +51,12 @@ pub fn decode_type2(bits: &BitSlice<u8, Msb0>, cache: Option<&CallsignHashCache>
             format!("<...{:06X}>", ihash)
         }
     } else {
-        unpack_callsign(n28b)?
+        let callsign = unpack_callsign(n28b)?;
+        // Save standard callsigns to cache (WSJT-X behavior)
+        if let Some(cache_ref) = &mut cache.as_mut() {
+            cache_ref.insert(&callsign);
+        }
+        callsign
     };
     bit_index += 28;
     
