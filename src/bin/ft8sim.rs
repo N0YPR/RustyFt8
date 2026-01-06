@@ -28,7 +28,6 @@
 //!   ft8sim -f 1000 -d 0.5 "CQ SOTA N0YPR DM42" output.wav
 
 use rustyft8::{crc, encode, ldpc, sync::pulse, symbol};
-use rustyft8::message::CallsignHashCache;
 use hound;
 use bitvec::prelude::*;
 
@@ -256,8 +255,7 @@ fn main() -> Result<(), String> {
     let mut message_storage = [0u8; 10];
     let message_bits = &mut message_storage.view_bits_mut::<Msb0>()[..77];
 
-    let mut hash_cache = CallsignHashCache::new();
-    encode(&config.message, message_bits, &mut hash_cache)?;
+    encode(&config.message, message_bits)?;
 
     // Step 2: Add CRC-14
     let mut msg_with_crc_storage = [0u8; 12];
