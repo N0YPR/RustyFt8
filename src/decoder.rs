@@ -229,10 +229,14 @@ where
     let num_candidates = candidates.len().min(decode_limit);
     debug!(processing = num_candidates, found = candidates.len(), pass = pass_num, "Processing candidates");
 
-    // LLR scaling factors to try (optimized order - most common values first)
-    let scaling_factors = [1.0, 1.5, 0.75, 2.0, 0.5];
+    // LLR scaling factors to try (reduced from 5 to 3 for performance)
+    // Most signals decode with scale=1.0; weak signals may need 1.5 or 0.75
+    // Further optimization: WSJT-X uses fixed scale=2.83 after normalization
+    let scaling_factors = [1.0, 1.5, 0.75];
 
-    // Process all candidates in parallel, collecting successful decodes
+    // Process candidates with controlled parallelism using Rayon's thread pool
+    // Full parallelism (25+ threads) had excessive overhead, but sequential is too slow
+    // Rayon will automatically use available cores efficiently
     let min_snr_threshold = config.min_snr_db;
 
     let decode_results: Vec<DecodeResult> = candidates
@@ -269,13 +273,13 @@ where
             // additional timing variations can move bit errors between systematic and parity regions
             // in OSD's reordered codeword. We try primary timing first, then limited fallback variations
             // only for first-pass candidates that don't decode.
-            let timing_offsets: &[f32] = if pass_num == 0 {
-                // First pass: try timing variations for all candidates (weak signals need this)
-                // Reduced from original 7 offsets to 5 for better performance while still
-                // catching edge cases like K1JT HA5WA 73 at -24 dB
-                &[0.0, 0.025, -0.025, 0.050, -0.050]
+            let timing_offsets: &[f32] = if pass_num == 0 && candidate_idx < 200 {
+                // First pass, top 200 candidates: try limited timing variations
+                // Most signals decode with primary timing; weak signals may need ±25ms
+                // Reduced from 5 to 3 offsets for performance
+                &[0.0, 0.025, -0.025]
             } else {
-                // Later passes: primary timing only (signals are cleaner after subtraction)
+                // Later passes or lower-ranked candidates: primary timing only
                 &[0.0]
             };
 
@@ -338,13 +342,12 @@ where
                             .or_else(|| {
                                 if candidate_idx < 100 {
                                     // Top 100: Deep decode (OSD with BP snapshots)
-                                    // Extended from 50 to catch weak signals with good sync power
                                     ldpc::decode(&scaled_llr, None, ldpc::DecodeDepth::Deep)
                                 } else if candidate_idx < 460 {
                                     // 100-459: Normal decode (OSD order-2)
                                     ldpc::decode(&scaled_llr, None, ldpc::DecodeDepth::Normal)
                                 } else {
-                                    // 460+: BP-only for speed (weak candidates unlikely to need OSD)
+                                    // 460+: BP-only for speed
                                     None
                                 }
                             })
