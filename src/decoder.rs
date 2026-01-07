@@ -282,10 +282,11 @@ where
             // in OSD's reordered codeword. We try primary timing first, then one positive offset
             // only for first-pass candidates that don't decode.
             //
-            // PERFORMANCE: Reduced from 3 to 2 offsets (removed -0.025ms) for 33% fewer attempts
-            let timing_offsets: &[f32] = if pass_num == 0 && candidate_idx < 200 {
-                // First pass, top 200 candidates: try limited timing variations
-                // Most signals decode with primary timing; weak signals may need +25ms
+            // PERFORMANCE: Only top ~40 candidates benefit from timing variations (weakest signals)
+            // Most strong signals decode immediately with primary timing
+            let timing_offsets: &[f32] = if pass_num == 0 && candidate_idx < 40 {
+                // First pass, top 40 candidates: try limited timing variations
+                // Weak signals near decode threshold may need +25ms timing adjustment
                 &[0.0, 0.025]
             } else {
                 // Later passes or lower-ranked candidates: primary timing only
