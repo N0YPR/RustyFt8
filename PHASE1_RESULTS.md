@@ -45,25 +45,57 @@ Created criterion-based benchmarks in `benches/decode_pipeline.rs`:
 - WSJT-X target: ~1-2 seconds  
 - **Gap: 2.3-4.6x slower** than target
 
-## Next Steps
+## Bottleneck Analysis ✅
 
-### 1. Complete Profiling ✓ (in progress)
-- [x] Set up criterion benchmarks
-- [x] Establish baseline measurements
-- [ ] Profile with flamegraph to identify hot functions
-- [ ] Measure allocations with memory profiler
+### Top 3 Performance Bottlenecks Identified:
 
-### 2. Identify Top 3 Bottlenecks
-Based on preliminary results, likely candidates:
-1. LDPC decoding (BP + OSD iterations)
-2. Symbol extraction and downsampling
-3. Multiple decode passes (multipass strategy)
+**1. Decode Loop Combinatorics** (CRITICAL)
+- Processes 200 candidates by default
+- Each candidate tries: 3 timing offsets × 4 LLR methods × 3 scales = **36 decode attempts**
+- Only 20/200 candidates succeed → 180 candidates waste time
+- **Impact**: 7,200 potential LDPC decode attempts (though early exits reduce this)
 
-### 3. Quick Wins to Target
-- Reduce unnecessary allocations in hot loops
-- Pre-allocate buffers for reuse
-- Cache FFT plans instead of recreating
-- Optimize candidate filtering
+**2. Memory Allocations in Hot Path** (HIGH)
+- `extract_symbols_all_llr`: Allocates 3200-element complex buffer per candidate
+- `extract_symbols_all_llr`: Allocates 8×79 arrays for s8
+- Each LDPC decode: Multiple bitvec allocations in OSD
+- **Impact**: Thousands of allocations per decode
+
+**3. LDPC OSD Complexity** (MEDIUM)
+- OSD-6 (Deep mode) used for top 100 candidates
+- Gaussian elimination + pattern generation for each candidate
+- **Impact**: Computational overhead on weak signal candidates
+
+### Code Hotspots Located:
+
+| Location | Issue | Frequency |
+|----------|-------|-----------|
+| `decoder.rs:291` | `extract_symbols_all_llr` allocates 4 LLR vectors | 200-600× per pass |
+| `decoder.rs:326` | `scaled_llr.to_vec()` clones LLR | Up to 7,200× per pass |
+| `extract.rs:122` | `vec![(0.0, 0.0); 3200]` complex buffer | 200-600× per pass |
+| `extract.rs:227-228` | `cs` and `s8` allocations | 200-600× per pass |
+| `decode_osd.rs:543+` | Multiple bitvec allocations in OSD | Variable |
+
+## Phase 2 Quick Wins Identified
+
+### Priority 1: Reduce Decode Attempts
+- ✅ Early exit on success (already implemented)
+- [ ] Reduce timing offsets from 3 to 2 (0.0, +0.025 only)
+- [ ] Try fastest LLR method first (llrd), skip others if it works
+- [ ] Reduce scale factors from 3 to 2 (1.0, 1.5 only)
+- **Expected gain**: 30-40% fewer decode attempts
+
+### Priority 2: Buffer Reuse
+- [ ] Pre-allocate LLR buffers, reuse across candidates
+- [ ] Pool complex buffers for downsampling
+- [ ] Reuse bitvec allocations in LDPC
+- **Expected gain**: 10-20% from reduced allocation overhead
+
+### Priority 3: LDPC Optimization
+- [ ] Use BP-only for candidates ranked 100-200
+- [ ] Cache Gaussian elimination results
+- [ ] Early termination in OSD when patterns found
+- **Expected gain**: 10-15% on OSD-heavy workloads
 
 ## Benchmark Commands
 

@@ -229,10 +229,11 @@ where
     let num_candidates = candidates.len().min(decode_limit);
     debug!(processing = num_candidates, found = candidates.len(), pass = pass_num, "Processing candidates");
 
-    // LLR scaling factors to try (reduced from 5 to 3 for performance)
-    // Most signals decode with scale=1.0; weak signals may need 1.5 or 0.75
-    // Further optimization: WSJT-X uses fixed scale=2.83 after normalization
-    let scaling_factors = [1.0, 1.5, 0.75];
+    // LLR scaling factors to try (reduced for performance)
+    // Most signals decode with scale=1.0; weak signals may need 1.5
+    // WSJT-X uses fixed scale=2.83 after normalization
+    // PERFORMANCE: Reduced from 3 to 2 factors (removed 0.75) for 33% fewer attempts
+    let scaling_factors = [1.0, 1.5];
 
     // Process candidates with controlled parallelism using Rayon's thread pool
     // Full parallelism (25+ threads) had excessive overhead, but sequential is too slow
@@ -271,13 +272,14 @@ where
             //
             // However, for very weak signals near the decode threshold (e.g., K1JT HA5WA 73 at -24dB),
             // additional timing variations can move bit errors between systematic and parity regions
-            // in OSD's reordered codeword. We try primary timing first, then limited fallback variations
+            // in OSD's reordered codeword. We try primary timing first, then one positive offset
             // only for first-pass candidates that don't decode.
+            //
+            // PERFORMANCE: Reduced from 3 to 2 offsets (removed -0.025ms) for 33% fewer attempts
             let timing_offsets: &[f32] = if pass_num == 0 && candidate_idx < 200 {
                 // First pass, top 200 candidates: try limited timing variations
-                // Most signals decode with primary timing; weak signals may need ±25ms
-                // Reduced from 5 to 3 offsets for performance
-                &[0.0, 0.025, -0.025]
+                // Most signals decode with primary timing; weak signals may need +25ms
+                &[0.0, 0.025]
             } else {
                 // Later passes or lower-ranked candidates: primary timing only
                 &[0.0]
