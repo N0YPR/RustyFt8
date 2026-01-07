@@ -104,7 +104,7 @@ impl Default for DecoderConfig {
             freq_max: 4000.0, // Extended to cover signals near upper edge (e.g., 3389 Hz)
             sync_threshold: 0.5,
             max_candidates: 1000, // Match WSJT-X MAXPRECAND (dual search generates more candidates)
-            decode_top_n: 150, // Reduced from 200 for better performance while maintaining quality
+            decode_top_n: 120, // Optimized for speed/quality balance
             min_snr_db: -25,  // Allow decoding down to -25 dB for weak OSD signals
             enable_ap: true,  // AP enabled by default (Type 1 CQ pattern works without callsigns)
             mycall: None,     // Optional: configure for additional AP types (2-6)
