@@ -265,6 +265,13 @@ where
                 refined.clone()
             };
 
+            // Pre-allocate LLR buffers once, reuse across timing attempts
+            let mut llra = vec![0.0f32; 174];
+            let mut llrb = vec![0.0f32; 174];
+            let mut llrc = vec![0.0f32; 174];
+            let mut llrd = vec![0.0f32; 174];
+            let mut s8 = [[0.0f32; 79]; 8];
+
             // === TIMING OPTIMIZATION WITH FALLBACK ===
             // extract_symbols_impl performs WSJT-X-style timing search internally (±10 samples
             // before frequency correction, ±4 samples after re-downsampling). This handles most
@@ -292,12 +299,7 @@ where
 
                 // Extract ALL 4 LLR arrays in one pass (with independent normalization)
                 // WSJT-X uses 4 separate passes: llra (nsym=1 diff), llrb (nsym=2), llrc (nsym=3), llrd (nsym=1 ratio)
-                let mut llra = vec![0.0f32; 174];
-                let mut llrb = vec![0.0f32; 174];
-                let mut llrc = vec![0.0f32; 174];
-                let mut llrd = vec![0.0f32; 174];
-                let mut s8 = [[0.0f32; 79]; 8];
-
+                // Reuse pre-allocated buffers for performance
                 let nsync = match sync::extract_symbols_all_llr(
                     signal, &timed_candidate, &mut llra, &mut llrb, &mut llrc, &mut llrd, &mut s8
                 ) {
@@ -327,11 +329,14 @@ where
                 ("nsym3_diff", &llrc[..], 3),   // Averages 3 symbols - maximum noise reduction
             ];
 
+            // Pre-allocate scaled LLR buffer once, reuse across all attempts
+            let mut scaled_llr = vec![0.0f32; 174];
+            
             for &(_method_name, llr, nsym) in &llr_methods {
                 for &scale in &scaling_factors {
-                    let mut scaled_llr: Vec<f32> = llr.to_vec();
-                    for v in scaled_llr.iter_mut() {
-                        *v *= scale;
+                    // Scale in-place to avoid allocation
+                    for i in 0..174 {
+                        scaled_llr[i] = llr[i] * scale;
                     }
 
                     // Progressive decoding strategy varies by pass:
