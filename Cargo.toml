@@ -27,3 +27,6 @@ harness = false
 [[bench]]
 name = "decode_pipeline"
 harness = false
+
+[profile.release]
+debug = true  # Enable debug info for profiling
