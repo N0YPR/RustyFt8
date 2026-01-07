@@ -238,9 +238,9 @@ pub fn fine_sync(
         if let Some(best_idx) = sync_scores.iter().position(|(f, _)| (*f - best_freq).abs() < 0.01) {
             // Need neighbors for interpolation
             if best_idx > 0 && best_idx < sync_scores.len() - 1 {
-                let (f0, s0) = sync_scores[best_idx - 1];
+                let (_f0, s0) = sync_scores[best_idx - 1];
                 let (f1, s1) = sync_scores[best_idx];
-                let (f2, s2) = sync_scores[best_idx + 1];
+                let (_f2, s2) = sync_scores[best_idx + 1];
 
                 // Fit parabola: y = ax² + bx + c through (f0,s0), (f1,s1), (f2,s2)
                 // Peak is at x = -b/(2a)

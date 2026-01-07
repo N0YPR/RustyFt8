@@ -2,7 +2,7 @@
 ///!
 ///! Identifies potential FT8 signals from sync correlation data.
 
-use super::{SAMPLE_RATE, NFFT1, NSTEP, MAX_LAG, COARSE_LAG, Candidate};
+use super::{SAMPLE_RATE, NFFT1, NSTEP, MAX_LAG, Candidate};
 use super::spectra::{compute_spectra, compute_sync2d};
 use tracing::{debug, info, trace, instrument};
 

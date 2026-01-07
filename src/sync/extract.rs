@@ -751,7 +751,7 @@ pub fn calculate_snr(s8: &[[f32; 79]; 8], tones: &[u8; 79], baseline_noise: Opti
     };
 
     // Method 2: Signal/baseline ratio (xsnr2) if baseline is available
-    let xsnr2 = if let Some(xbase) = baseline_noise {
+    let _xsnr2 = if let Some(xbase) = baseline_noise {
         // WSJT-X formula: xsnr2 = 10*log10(xsig/xbase/scale - 1) - 27.0
         // Our xbase comes from 12 kHz spectrogram (sum of NHSYM=372 FFTs)
         // Our xsig comes from 200 Hz downsampled FFT with NFFT=32
@@ -1047,8 +1047,8 @@ pub fn estimate_frequency_from_phase(
     }
 
     let (idx1, idx2) = best_pair.ok_or("No valid Costas pair found")?;
-    let (start1, phase1, count1) = costas_data[idx1];
-    let (start2, phase2, count2) = costas_data[idx2];
+    let (start1, phase1, _count1) = costas_data[idx1];
+    let (start2, phase2, _count2) = costas_data[idx2];
 
     // Calculate phase differences (handle wrapping)
     let unwrap_phase = |p1: f32, p2: f32| -> f32 {

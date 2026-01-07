@@ -325,7 +325,7 @@ where
                 ("nsym3_diff", &llrc[..], 3),   // Averages 3 symbols - maximum noise reduction
             ];
 
-            for &(method_name, llr, nsym) in &llr_methods {
+            for &(_method_name, llr, nsym) in &llr_methods {
                 for &scale in &scaling_factors {
                     let mut scaled_llr: Vec<f32> = llr.to_vec();
                     for v in scaled_llr.iter_mut() {
@@ -520,7 +520,7 @@ where
                     let (apmask, llr_hints) = ap_hints;
 
                     // Try AP decoding with each of the 4 LLR methods
-                    for &(method_name, base_llr, nsym) in &llr_methods {
+                    for &(_method_name, base_llr, nsym) in &llr_methods {
                         // Apply AP hints to the LLRs
                         let mut llr_with_ap = base_llr.to_vec();
                         for i in 0..174 {

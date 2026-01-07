@@ -150,7 +150,7 @@ pub fn compute_baseline(avg_spectrum: &[f32], freq_min: f32, freq_max: f32) -> V
     // Evaluate polynomial to get baseline
     let mut sbase = vec![0.0f32; NH1];
     for i in ia..=ib {
-        let t = (i as f64 - i0 as f64);
+        let t = i as f64 - i0 as f64;
         let mut val = 0.0f64;
         for (k, &coeff) in coeffs.iter().enumerate() {
             val += coeff * t.powi(k as i32);
