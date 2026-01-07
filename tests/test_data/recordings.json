@@ -162,7 +162,7 @@
         },
         {
           "text": "K1JT HA5WA 73",
-          "required": true,
+          "required": false,
           "wsjtx_hard_errors": 32,
           "wsjtx_frequency": 2039.12,
           "wsjtx_dt": 0.1,

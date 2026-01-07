@@ -260,25 +260,24 @@ where
                 refined.clone()
             };
 
-            // === TIMING VARIATION RETRY ===
-            // For weak signals, timing alignment is critical - a 25ms shift can change
-            // which errors fall in the OSD systematic part. Try primary timing first,
-            // then variations if needed.
+            // === TIMING OPTIMIZATION WITH FALLBACK ===
+            // extract_symbols_impl performs WSJT-X-style timing search internally (±10 samples
+            // before frequency correction, ±4 samples after re-downsampling). This handles most
+            // signals efficiently.
             //
-            // WSJT-X COMPARISON: WSJT-X does timing search BEFORE LLR extraction in ft8b.f90:
-            //   - Line 110: `do idt=i0-10,i0+10` searches ±10 samples (±50ms at fs2=200Hz)
-            //   - Line 144: `do idt=-4,4` refines ±4 samples (±20ms) after freq adjustment
-            // Our approach: Try timing variations AFTER initial fine_sync, re-extracting LLRs
-            // for each offset. Less efficient but catches cases where fine_sync finds suboptimal timing.
-            //
-            // Expanded to ±75ms to handle cases where our sync_downsampled finds different
-            // optimal timing than WSJT-X's sync8d (observed ~53ms offset for weak signals).
-            let timing_offsets: &[f32] = &[
-                0.0,
-                0.025, -0.025,
-                0.050, -0.050,
-                0.075, -0.075,
-            ];
+            // However, for very weak signals near the decode threshold (e.g., K1JT HA5WA 73 at -24dB),
+            // additional timing variations can move bit errors between systematic and parity regions
+            // in OSD's reordered codeword. We try primary timing first, then limited fallback variations
+            // only for first-pass candidates that don't decode.
+            let timing_offsets: &[f32] = if pass_num == 0 {
+                // First pass: try timing variations for all candidates (weak signals need this)
+                // Reduced from original 7 offsets to 5 for better performance while still
+                // catching edge cases like K1JT HA5WA 73 at -24 dB
+                &[0.0, 0.025, -0.025, 0.050, -0.050]
+            } else {
+                // Later passes: primary timing only (signals are cleaner after subtraction)
+                &[0.0]
+            };
 
             for &timing_delta in timing_offsets {
                 // Create candidate with adjusted timing
@@ -616,7 +615,7 @@ where
             }
             // ===== End AP Passes =====
 
-            }  // End timing variation retry loop
+            }  // End timing variation loop
 
             None
         })

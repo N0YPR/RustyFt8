@@ -56,10 +56,9 @@ fn generate_gaussian_noise(num_samples: usize, seed: u32) -> Vec<f32> {
 /// SNR is defined in 2500 Hz bandwidth as per FT8 standard
 fn generate_test_signal(message: &str, snr_db: f32, freq_hz: f32, time_delay: f32) -> Vec<f32> {
     // Encode message to 77 bits
-    let mut cache = CallsignHashCache::new();
     let mut message_storage = [0u8; 10];
     let message_bits = &mut message_storage.view_bits_mut::<Msb0>()[..77];
-    encode(message, message_bits, &mut cache).expect("Failed to encode");
+    encode(message, message_bits).expect("Failed to encode");
 
     // Add CRC-14
     let mut msg_with_crc_storage = [0u8; 12];

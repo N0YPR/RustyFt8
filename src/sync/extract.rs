@@ -128,16 +128,30 @@ fn extract_symbols_impl(
     // Match WSJT-X nint() - round to nearest integer, not truncate
     // CRITICAL: Add 1 to match WSJT-X ft8b.f90 formula: xdt = (ibest-1)*dt2
     // So ibest = xdt/dt2 + 1 = xdt * fs2 + 1
-    let time_offset_samples = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32 + 1;
+    let initial_time_offset = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32 + 1;
+
+    // FIRST TIMING REFINEMENT: ±10 samples (matching WSJT-X ft8b.f90:108-116)
+    // Search for best timing BEFORE frequency correction
+    let mut time_offset_samples = initial_time_offset;
+    let mut best_sync = sync_downsampled(&cd, initial_time_offset, None, false, Some(actual_sample_rate));
+
+    for dt in -10..=10 {
+        if dt == 0 {
+            continue; // Already computed
+        }
+        let t_offset = initial_time_offset + dt;
+        let sync = sync_downsampled(&cd, t_offset, None, false, Some(actual_sample_rate));
+
+        if sync > best_sync {
+            best_sync = sync;
+            time_offset_samples = t_offset;
+        }
+    }
 
     let mut best_correction = 0.0f32;
 
-    // Only do fine phase correction for nsym=2/3 (nsym=1 doesn't need phase coherence)
+    // FREQUENCY REFINEMENT for nsym=2/3 (nsym=1 doesn't need phase coherence)
     if nsym >= 2 {
-        // Initial sync without correction
-        let initial_sync = sync_downsampled(&cd, time_offset_samples, None, false, Some(actual_sample_rate));
-        let mut best_sync = initial_sync;
-
         // Search ±1.0 Hz in 0.05 Hz steps using per-symbol ctwk (matching WSJT-X sync8d)
         // WSJT-X ft8b.f90:119-133 uses ctwk to apply frequency correction during sync
         // measurement rather than to the whole buffer. This is more accurate because
@@ -161,10 +175,36 @@ fn extract_symbols_impl(
             }
         }
 
-        // Apply best correction to the whole buffer for symbol extraction
-        // This is necessary because the FFT-based symbol extraction expects the
-        // signal to be centered at baseband
-        if best_correction.abs() > 0.001 {
+        // CRITICAL FIX: Re-downsample at the corrected frequency (matching WSJT-X ft8b.f90:90)
+        // This ensures the signal is perfectly centered at DC after the low-pass filter
+        // Even after phase correction, there may be spectral leakage from the original
+        // downsample filter if the signal wasn't centered. Re-downsampling eliminates this.
+        if best_correction.abs() > 0.01 {
+            trace!("Re-downsampling at corrected frequency: {} Hz + {:.2} Hz correction",
+                   candidate.frequency, best_correction);
+            let corrected_frequency = candidate.frequency + best_correction;
+            downsample_200hz(signal, corrected_frequency, &mut cd)?;
+
+            // SECOND TIMING REFINEMENT: ±4 samples after re-downsampling (WSJT-X ft8b.f90:143-152)
+            // Frequency correction can shift the optimal timing slightly
+            best_sync = sync_downsampled(&cd, time_offset_samples, None, false, Some(actual_sample_rate));
+
+            for dt in -4..=4 {
+                if dt == 0 {
+                    continue; // Already computed
+                }
+                let t_offset = time_offset_samples + dt;
+                let sync = sync_downsampled(&cd, t_offset, None, false, Some(actual_sample_rate));
+
+                if sync > best_sync {
+                    best_sync = sync;
+                    time_offset_samples = t_offset;
+                }
+            }
+
+            trace!("Second timing refinement complete, final offset: {}", time_offset_samples);
+        } else if best_correction.abs() > 0.001 {
+            // Small correction - just apply phase correction without re-downsampling
             apply_phase_correction(&mut cd, best_correction, actual_sample_rate);
         }
     }
@@ -172,35 +212,8 @@ fn extract_symbols_impl(
     // Calculate samples per symbol based on actual sample rate
     let nsps_down = (actual_sample_rate * SYMBOL_DURATION).round() as usize;
 
-    // Convert time offset to sample index
-    // candidate.time_offset is RELATIVE to 0.5s start (FT8 convention)
-    // Add 0.5s to convert to absolute position in the downsampled buffer
-    // Match WSJT-X nint() - round to nearest integer
-    // CRITICAL: Add 1 to match WSJT-X ft8b.f90 formula: xdt = (ibest-1)*dt2
-    let initial_offset = ((candidate.time_offset + 0.5) * actual_sample_rate).round() as i32 + 1;
-
-    // Timing refinement ±10 samples
-    // This helps weak signals where fine_sync may have found a sub-optimal timing
-    // due to different sample rate or rounding. Use sync_downsampled for consistency.
-    // Note: WSJT-X does ±4 samples but we use ±10 to compensate for any accumulated
-    // timing errors from the downsampling/frequency correction process.
-    let mut best_offset = initial_offset;
-    let mut best_sync = sync_downsampled(&cd, initial_offset, None, false, Some(actual_sample_rate));
-
-    for dt in -10..=10 {
-        if dt == 0 {
-            continue; // Already computed
-        }
-        let t_offset = initial_offset + dt;
-        let sync = sync_downsampled(&cd, t_offset, None, false, Some(actual_sample_rate));
-
-        if sync > best_sync {
-            best_sync = sync;
-            best_offset = t_offset;
-        }
-    }
-
-    let start_offset = best_offset;
+    // Use the timing offset refined by the two-stage search above
+    let start_offset = time_offset_samples;
 
     // MATCH WSJT-X: Allow negative start_offset (sync8d.f90 lines 43-46)
     // WSJT-X checks bounds per-symbol and sets out-of-bounds symbols to zero
