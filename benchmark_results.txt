@@ -1,0 +1,239 @@
+[1m[33mwarning[0m[1m: unnecessary parentheses around assigned value[0m
+   [1m[94m--> [0msrc/sync/spectra.rs:153:17
+    [1m[94m|[0m
+[1m[94m153[0m [1m[94m|[0m         let t = (i as f64 - i0 as f64);
+    [1m[94m|[0m                 [1m[33m^[0m                    [1m[33m^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(unused_parens)]` (part of `#[warn(unused)]`) on by default
+[1m[96mhelp[0m: remove these parentheses
+    [1m[94m|[0m
+[1m[94m153[0m [91m- [0m        let t = [91m([0mi as f64 - i0 as f64[91m)[0m;
+[1m[94m153[0m [92m+ [0m        let t = i as f64 - i0 as f64;
+    [1m[94m|[0m
+
+[1m[33mwarning[0m[1m: unused import: `COARSE_LAG`[0m
+ [1m[94m--> [0msrc/sync/coarse.rs:5:49
+  [1m[94m|[0m
+[1m[94m5[0m [1m[94m|[0m use super::{SAMPLE_RATE, NFFT1, NSTEP, MAX_LAG, COARSE_LAG, Candidate};
+  [1m[94m|[0m                                                 [1m[33m^^^^^^^^^^[0m
+  [1m[94m|[0m
+  [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: value assigned to `nharderrors` is never read[0m
+  [1m[94m--> [0msrc/ldpc/decode_bp.rs:56:27
+   [1m[94m|[0m
+[1m[94m56[0m [1m[94m|[0m     let mut nharderrors = 0usize;
+   [1m[94m|[0m                           [1m[33m^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+   [1m[94m= [0m[1mnote[0m: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: value assigned to `nharderrors` is never read[0m
+  [1m[94m--> [0msrc/ldpc/decode_hybrid.rs:47:27
+   [1m[94m|[0m
+[1m[94m47[0m [1m[94m|[0m     let mut nharderrors = 0usize;
+   [1m[94m|[0m                           [1m[33m^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+
+[1m[33mwarning[0m[1m: value assigned to `best_codeword` is never read[0m
+   [1m[94m--> [0msrc/ldpc/decode_osd.rs:669:25
+    [1m[94m|[0m
+[1m[94m669[0m [1m[94m|[0m                         best_codeword = candidate;
+    [1m[94m|[0m                         [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+
+[1m[33mwarning[0m[1m: value assigned to `best_codeword` is never read[0m
+   [1m[94m--> [0msrc/ldpc/decode_osd.rs:631:21
+    [1m[94m|[0m
+[1m[94m631[0m [1m[94m|[0m                     best_codeword = candidate;
+    [1m[94m|[0m                     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+
+[1m[33mwarning[0m[1m: value assigned to `best_codeword` is never read[0m
+   [1m[94m--> [0msrc/ldpc/decode_osd.rs:595:17
+    [1m[94m|[0m
+[1m[94m595[0m [1m[94m|[0m                 best_codeword = candidate;
+    [1m[94m|[0m                 [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+
+[1m[33mwarning[0m[1m: value assigned to `best_codeword` is never read[0m
+   [1m[94m--> [0msrc/ldpc/decode_osd.rs:804:17
+    [1m[94m|[0m
+[1m[94m804[0m [1m[94m|[0m                 best_codeword = candidate.clone();
+    [1m[94m|[0m                 [1m[33m^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+
+[1m[33mwarning[0m[1m: variable `total_rejected` is assigned to, but never used[0m
+   [1m[94m--> [0msrc/ldpc/decode_osd.rs:915:9
+    [1m[94m|[0m
+[1m[94m915[0m [1m[94m|[0m     let mut total_rejected = 0;
+    [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: consider using `_total_rejected` instead
+    [1m[94m= [0m[1mnote[0m: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: value assigned to `best_codeword` is never read[0m
+    [1m[94m--> [0msrc/ldpc/decode_osd.rs:1085:29
+     [1m[94m|[0m
+[1m[94m1085[0m [1m[94m|[0m [1m[94m...[0m                   best_codeword = candidate;
+     [1m[94m|[0m                       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+     [1m[94m|[0m
+     [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+
+[1m[33mwarning[0m[1m: value assigned to `best_codeword` is never read[0m
+   [1m[94m--> [0msrc/ldpc/decode_osd.rs:989:21
+    [1m[94m|[0m
+[1m[94m989[0m [1m[94m|[0m                     best_codeword = candidate;
+    [1m[94m|[0m                     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+
+[1m[33mwarning[0m[1m: value assigned to `total_rejected` is never read[0m
+   [1m[94m--> [0msrc/ldpc/decode_osd.rs:978:25
+    [1m[94m|[0m
+[1m[94m978[0m [1m[94m|[0m                         total_rejected += 1;
+    [1m[94m|[0m                         [1m[33m^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+
+[1m[33mwarning[0m[1m: unused variable: `f0`[0m
+   [1m[94m--> [0msrc/sync/fine.rs:241:22
+    [1m[94m|[0m
+[1m[94m241[0m [1m[94m|[0m                 let (f0, s0) = sync_scores[best_idx - 1];
+    [1m[94m|[0m                      [1m[33m^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_f0`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `f2`[0m
+   [1m[94m--> [0msrc/sync/fine.rs:243:22
+    [1m[94m|[0m
+[1m[94m243[0m [1m[94m|[0m                 let (f2, s2) = sync_scores[best_idx + 1];
+    [1m[94m|[0m                      [1m[33m^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_f2`[0m
+
+[1m[33mwarning[0m[1m: value assigned to `best_sync` is never read[0m
+   [1m[94m--> [0msrc/sync/fine.rs:285:5
+    [1m[94m|[0m
+[1m[94m285[0m [1m[94m|[0m     best_sync = final_best_sync;
+    [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+
+[1m[33mwarning[0m[1m: unused variable: `xsnr2`[0m
+   [1m[94m--> [0msrc/sync/extract.rs:754:9
+    [1m[94m|[0m
+[1m[94m754[0m [1m[94m|[0m     let xsnr2 = if let Some(xbase) = baseline_noise {
+    [1m[94m|[0m         [1m[33m^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_xsnr2`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `count1`[0m
+    [1m[94m--> [0msrc/sync/extract.rs:1050:26
+     [1m[94m|[0m
+[1m[94m1050[0m [1m[94m|[0m     let (start1, phase1, count1) = costas_data[idx1];
+     [1m[94m|[0m                          [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_count1`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `count2`[0m
+    [1m[94m--> [0msrc/sync/extract.rs:1051:26
+     [1m[94m|[0m
+[1m[94m1051[0m [1m[94m|[0m     let (start2, phase2, count2) = costas_data[idx2];
+     [1m[94m|[0m                          [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_count2`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `method_name`[0m
+   [1m[94m--> [0msrc/decoder.rs:328:19
+    [1m[94m|[0m
+[1m[94m328[0m [1m[94m|[0m             for &(method_name, llr, nsym) in &llr_methods {
+    [1m[94m|[0m                   [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_method_name`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `method_name`[0m
+   [1m[94m--> [0msrc/decoder.rs:523:27
+    [1m[94m|[0m
+[1m[94m523[0m [1m[94m|[0m                     for &(method_name, base_llr, nsym) in &llr_methods {
+    [1m[94m|[0m                           [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_method_name`[0m
+
+[1m[33mwarning[0m[1m: function `row_count_ones` is never used[0m
+  [1m[94m--> [0msrc/ldpc/decode_osd.rs:74:4
+   [1m[94m|[0m
+[1m[94m74[0m [1m[94m|[0m fn row_count_ones(row: &Row) -> usize {
+   [1m[94m|[0m    [1m[33m^^^^^^^^^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: function `decode_callsign_base38` is never used[0m
+  [1m[94m--> [0msrc/message/text_encoding.rs:37:8
+   [1m[94m|[0m
+[1m[94m37[0m [1m[94m|[0m pub fn decode_callsign_base38(value: u64) -> Result<String, String> {
+   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: function `calculate_noise_baseline` is never used[0m
+   [1m[94m--> [0msrc/sync/extract.rs:695:4
+    [1m[94m|[0m
+[1m[94m695[0m [1m[94m|[0m fn calculate_noise_baseline(s8: &[[f32; 79]; 8]) -> f64 {
+    [1m[94m|[0m    [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: function `normalize_llr` is never used[0m
+   [1m[94m--> [0msrc/sync/extract.rs:871:4
+    [1m[94m|[0m
+[1m[94m871[0m [1m[94m|[0m fn normalize_llr(llr: &mut [f32]) {
+    [1m[94m|[0m    [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `TONE_SPACING` is never used[0m
+ [1m[94m--> [0msrc/sync/synthesize.rs:9:7
+  [1m[94m|[0m
+[1m[94m9[0m [1m[94m|[0m const TONE_SPACING: f32 = 6.25; // Hz
+  [1m[94m|[0m       [1m[33m^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: comparison is useless due to type limits[0m
+   [1m[94m--> [0msrc/sync/downsample.rs:112:21
+    [1m[94m|[0m
+[1m[94m112[0m [1m[94m|[0m         if j < k && j >= 0 {
+    [1m[94m|[0m                     [1m[33m^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(unused_comparisons)]` on by default
+
+[1m[33mwarning[0m: `rustyft8` (lib) generated 26 warnings (run `cargo fix --lib -p rustyft8` to apply 9 suggestions)
+[1m[92m    Finished[0m ]8;;https://doc.rust-lang.org/cargo/reference/profiles.html#default-profiles\`bench` profile [optimized]]8;;\ target(s) in 0.18s
+[1m[92m     Running[0m benches/decode_pipeline.rs (target/release/deps/decode_pipeline-a59d1d6ff2169077)
+Gnuplot not found, using plotters backend
+Benchmarking full_decode/default_config
+Benchmarking full_decode/default_config: Analyzing
+full_decode/default_config
+                        time:   [4.3185 s 4.5889 s 4.6565 s]
+Benchmarking full_decode/top_10_candidates
+Benchmarking full_decode/top_10_candidates: Analyzing
+full_decode/top_10_candidates
+                        time:   [1.7715 s 1.8354 s 2.0909 s]
+Benchmarking full_decode/narrow_freq_range
+Benchmarking full_decode/narrow_freq_range: Analyzing
+full_decode/narrow_freq_range
+                        time:   [4.6201 s 4.8238 s 4.8747 s]
+
+Benchmarking coarse_sync/full_bandwidth
+Benchmarking coarse_sync/full_bandwidth: Analyzing
+coarse_sync/full_bandwidth
+                        time:   [5.8981 ms 6.1608 ms 6.2264 ms]
+Benchmarking coarse_sync/narrow_bandwidth
+Benchmarking coarse_sync/narrow_bandwidth: Analyzing
+coarse_sync/narrow_bandwidth
+                        time:   [4.2515 ms 4.3396 ms 4.3616 ms]
+
+Benchmarking fft/forward/512
+Benchmarking fft/forward/512: Analyzing
+fft/forward/512         time:   [1.2045 µs 1.2138 µs 1.2509 µs]
+Benchmarking fft/forward/1024
+Benchmarking fft/forward/1024: Analyzing
+fft/forward/1024        time:   [2.4772 µs 2.4878 µs 2.5303 µs]
+Benchmarking fft/forward/2048
+Benchmarking fft/forward/2048: Analyzing
+fft/forward/2048        time:   [7.8282 µs 7.8472 µs 7.9233 µs]
+Benchmarking fft/forward/4096
+Benchmarking fft/forward/4096: Analyzing
+fft/forward/4096        time:   [12.677 µs 13.092 µs 14.752 µs]
+Benchmarking fft/forward/8192
+Benchmarking fft/forward/8192: Analyzing
+fft/forward/8192        time:   [36.786 µs 37.407 µs 37.562 µs]
+
+Benchmarking spectra/full_signal
+Benchmarking spectra/full_signal: Analyzing
+spectra/full_signal     time:   [88.932 ns 90.461 ns 90.843 ns]
+

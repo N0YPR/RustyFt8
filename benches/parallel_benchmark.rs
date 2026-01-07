@@ -2,7 +2,8 @@
 //!
 //! Compares decode performance with full parallelism enabled
 
-use rustyft8::{crc, encode, ldpc, pulse, symbol, decode_ft8, DecoderConfig};
+use rustyft8::{crc, message, ldpc, symbol, decode_ft8, DecoderConfig};
+use rustyft8::sync::pulse;
 use rustyft8::message::CallsignHashCache;
 use bitvec::prelude::*;
 use std::time::Instant;
@@ -12,12 +13,11 @@ const NMAX: usize = 15 * 12000; // 15 seconds
 const NSPS: usize = 1920; // Samples per symbol
 
 /// Generate a complete FT8 waveform at specified frequency (no noise)
-fn generate_ft8_signal_clean(message: &str, frequency: f32) -> Vec<f32> {
+fn generate_ft8_signal_clean(message_text: &str, frequency: f32) -> Vec<f32> {
     // Encode message to 77 bits
-    let mut cache = CallsignHashCache::new();
     let mut message_storage = [0u8; 10];
     let message_bits = &mut message_storage.view_bits_mut::<Msb0>()[..77];
-    encode(message, message_bits, &mut cache).expect("Failed to encode");
+    message::encode(message_text, message_bits).expect("Failed to encode");
 
     // Add CRC-14
     let mut msg_with_crc_storage = [0u8; 12];
