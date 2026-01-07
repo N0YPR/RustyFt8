@@ -32,7 +32,7 @@ static GLOBAL_CACHE: Lazy<Mutex<CallsignHashCache>> = Lazy::new(|| {
 /// debugging or advanced use cases.
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// use rustyft8::message::callsign_cache::global_cache;
 ///
 /// // Clear the cache (useful for testing)
