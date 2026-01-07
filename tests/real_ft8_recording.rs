@@ -61,8 +61,11 @@ fn test_recording(recording: &RecordingTest) {
     let config = DecoderConfig::default();
 
     let mut decoded_messages: Vec<DecodedMessage> = Vec::new();
+    let mut decode_times: Vec<(String, u128)> = Vec::new();  // (message, time_ms)
     let start_time = Instant::now();
     let _count = decode_ft8(&signal_15s, &config, |msg| {
+        let elapsed_ms = start_time.elapsed().as_millis();
+        decode_times.push((msg.message.clone(), elapsed_ms));
         decoded_messages.push(msg);
         true
     }).expect("Decode failed");
@@ -144,6 +147,47 @@ fn test_recording(recording: &RecordingTest) {
             total_wsjtx as f64 / count as f64,
             total_ours as f64 / count as f64,
             (total_ours as f64 - total_wsjtx as f64) / count as f64);
+    }
+
+    // Decode timing analysis
+    if !decode_times.is_empty() {
+        let total_required = required_messages.len();
+        let required_found = total_required - missing_required.len();
+        
+        // Find when we decoded required messages
+        let mut required_times: Vec<u128> = decode_times.iter()
+            .filter(|(msg, _)| required_messages.contains(&msg.as_str()))
+            .map(|(_, time)| *time)
+            .collect();
+        required_times.sort();
+        
+        if !required_times.is_empty() {
+            let first_msg = required_times[0];
+            let last_required = required_times[required_times.len() - 1];
+            let halfway_idx = required_times.len() / 2;
+            let halfway_time = if required_times.len() > 0 { 
+                required_times[halfway_idx] 
+            } else { 
+                0 
+            };
+            let ninety_pct_idx = (required_times.len() as f32 * 0.9) as usize;
+            let ninety_pct_time = if ninety_pct_idx < required_times.len() {
+                required_times[ninety_pct_idx]
+            } else {
+                last_required
+            };
+            
+            println!("\nDecode Timing Milestones:");
+            println!("  First message:  {}ms", first_msg);
+            println!("  50% complete:   {}ms ({}/{})", halfway_time, halfway_idx + 1, required_found);
+            println!("  90% complete:   {}ms ({}/{})", ninety_pct_time, ninety_pct_idx + 1, required_found);
+            println!("  Last required:  {}ms ({}/{})", last_required, required_found, total_required);
+            println!("  Total runtime:  {}ms", decode_duration.as_millis());
+            println!("  Wasted search:  {}ms ({}%)", 
+                decode_duration.as_millis() - last_required,
+                ((decode_duration.as_millis() - last_required) as f64 / decode_duration.as_millis() as f64 * 100.0) as u32
+            );
+        }
     }
 
     // Fail if any required messages are missing

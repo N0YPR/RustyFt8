@@ -206,7 +206,10 @@ fn decode_ft8_single_pass<F>(signal: &[f32], config: &DecoderConfig, pass_num: u
 where
     F: FnMut(DecodedMessage) -> bool,
 {
+    let pass_start = Instant::now();
+    
     // Coarse sync to find candidates
+    let coarse_start = Instant::now();
     let candidates = sync::coarse_sync(
         signal,
         config.freq_min,
@@ -214,6 +217,7 @@ where
         config.sync_threshold,
         config.max_candidates,
     ).map_err(|_| "Coarse sync failed")?;
+    let coarse_time = coarse_start.elapsed();
 
     if candidates.is_empty() {
         return Ok(0);
@@ -227,7 +231,13 @@ where
         50
     };
     let num_candidates = candidates.len().min(decode_limit);
-    debug!(processing = num_candidates, found = candidates.len(), pass = pass_num, "Processing candidates");
+    debug!(
+        pass = pass_num,
+        found = candidates.len(), 
+        processing = num_candidates,
+        coarse_ms = coarse_time.as_millis(),
+        "Coarse sync complete"
+    );
 
     // LLR scaling factors to try (reduced for performance)
     // Most signals decode with scale=1.0; weak signals may need 1.5
@@ -664,6 +674,15 @@ where
             }
         }
     }
+
+    let pass_time = pass_start.elapsed();
+    info!(
+        pass = pass_num,
+        decoded = decode_count,
+        candidates = num_candidates,
+        time_ms = pass_time.as_millis(),
+        "Pass complete"
+    );
 
     Ok(decode_count)
 }

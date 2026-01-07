@@ -39,3 +39,4 @@ tests/sync/test_sync8
 tests/sync/test_sync2d
 tests/sync/test_fine_sync
 tests/sync/test_fine_sync.o
+perf.data*

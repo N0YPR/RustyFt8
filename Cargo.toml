@@ -28,5 +28,13 @@ harness = false
 name = "decode_pipeline"
 harness = false
 
+[[bench]]
+name = "simd_benchmark"
+harness = false
+
+[[bench]]
+name = "profile_decoder"
+harness = false
+
 [profile.release]
 debug = true  # Enable debug info for profiling
